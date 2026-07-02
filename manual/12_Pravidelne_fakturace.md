@@ -181,13 +181,16 @@ Přepínač **„Kdy vytvořit koncept"** má dvě hodnoty:
 - **Na začátku období** — cron vytvoří **koncept** faktury (s fixními
   položkami ze šablony) **1. den fakturovaného měsíce**. Koncept pak celý
   měsíc zůstává ve stavu *draft* a ty do něj průběžně píšeš **vícepráce přes
-  výkaz práce** (výkaz je editovatelný jen u konceptu). V den `next_run_date`
-  (typicky konec měsíce) cron koncept automaticky **uzavře, přepočítá včetně
-  víceprací, vystaví a odešle**.
+  výkaz práce** (výkaz je editovatelný jen u konceptu). **Den po**
+  `next_run_date` (typicky 1. den dalšího měsíce) cron koncept automaticky
+  **uzavře, přepočítá včetně víceprací, vystaví a odešle**. Uzávěrka se posune
+  o den za konec období schválně — aby se do faktury stihla započítat i práce
+  z **posledního dne** období.
 
-  Datum vystavení i DUZP konceptu jsou od začátku nastavené na **plánovaný
-  konec období** (`next_run_date` + zvolený režim DUZP) a při vystavení se
-  nemění — i kdyby cron běžel o den později.
+  Datum vystavení i DUZP konceptu jsou přitom od začátku nastavené na
+  **plánovaný konec období** (`next_run_date` + zvolený režim DUZP) a při
+  vystavení se nemění — faktura nese datum konce období, i když fyzicky vznikla
+  o den později.
 
 **Podmínky režimu „Na začátku období":**
 
@@ -202,8 +205,12 @@ Přepínač **„Kdy vytvořit koncept"** má dvě hodnoty:
 2. **1.6.** cron otevře koncept s fixním SLA řádkem (datum vystavení i DUZP
    = 30.6.).
 3. **Během června** doplňuješ vícepráce do výkazu práce na tom konceptu.
-4. **29.6.** (1 den předem) ti přijde e-mailová připomínka.
-5. **30.6.** cron koncept uzavře, vystaví (SLA + vícepráce) a odešle klientovi.
+4. **29.6.** (1 den předem) ti přijde e-mailová připomínka; **30.6.** zůstává
+   koncept otevřený, takže do něj stihneš zapsat i práci z posledního dne.
+5. **1.7.** cron v jednom běhu nejdřív **uzavře červnový koncept** — vystaví
+   (SLA + vícepráce) a odešle klientovi, faktura nese datum vystavení i DUZP
+   **30.6.** (konec období) — a hned poté **otevře nový koncept na červenec**
+   (datum vystavení i DUZP 31.7.), takže do něj můžeš zase celý měsíc psát.
 
 > Pokud koncept během měsíce vystavíš ručně, cron to pozná a v den vystavení
 > už nic nevytvoří — jen posune rozvrh na další měsíc.
@@ -254,9 +261,12 @@ Cron v jednom běhu zvládá tři fáze:
 
 1. **Otevření konceptu** — u šablon v režimu *Na začátku období*, kde už začalo
    fakturované období, vytvoří koncept (idempotentně — jednou za období).
-2. **Vystavení** — u šablon, kterým nastal `next_run_date`, vystaví (u režimu
-   *Na začátku období* uzavře otevřený koncept, jinak vygeneruje a vystaví
-   jako dřív).
+2. **Vystavení** — u šablon po `next_run_date` vystaví (režim *Na začátku
+   období* uzavře otevřený koncept **den po** konci období; ostatní režimy
+   vygenerují a vystaví přímo v `next_run_date` jako dřív). U režimu *Na začátku
+   období* cron hned po uzávěrce **rovnou otevře koncept dalšího období**, pokud
+   už začalo — takže 1. den měsíce proběhne „uzavři minulé → otevři nové"
+   v jednom běhu.
 3. **Připomínka** — pošle e-mailové připomínky k otevřeným konceptům, kterým
    se blíží vystavení (viz „Připomenout dní před vystavením").
 

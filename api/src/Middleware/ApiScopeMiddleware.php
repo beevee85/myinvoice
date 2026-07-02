@@ -49,6 +49,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/openapi\.yaml$#',
         '#^/api/docs$#',
         '#^/api/reference$#',
+        '#^/api/scalar$#',
         '#^/api/auth/api-me$#',
         // Byznys zdroje
         '#^/api/clients(/|$)#',
@@ -58,6 +59,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/recurring(/|$)#',
         '#^/api/bank-statements(/|$)#',
         '#^/api/bank-transactions(/|$)#',
+        '#^/api/logbook(/|$)#',
         '#^/api/documents(/|$)#',
         '#^/api/document-folders(/|$)#',
         '#^/api/suppliers(/|$)#',

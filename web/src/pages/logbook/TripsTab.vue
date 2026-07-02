@@ -156,7 +156,7 @@ function newTrip() {
   Object.assign(draft, {
     id: 0, car_id: defCar?.id ?? 0, trip_date: new Date().toISOString().slice(0, 10),
     time_start: '', time_end: '', odometer_start: defCar?.last_odometer ?? null, odometer_end: null, distance_km: null,
-    category_id: categories.value[0]?.id ?? null, purpose: '', origin: '', destination: '', note: '',
+    category_id: (categories.value.find(c => c.is_default) ?? categories.value[0])?.id ?? null, purpose: '', origin: '', destination: '', note: '',
   })
   open.value = true
 }

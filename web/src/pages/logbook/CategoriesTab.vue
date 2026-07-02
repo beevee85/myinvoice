@@ -16,7 +16,7 @@ const showArchived = ref(false)
 
 const open = ref(false)
 const saving = ref(false)
-const draft = reactive<TripCategoryPayload & { id: number }>({ id: 0, code: '', label: '', is_private: false, display_order: 0, is_archived: false })
+const draft = reactive<TripCategoryPayload & { id: number }>({ id: 0, code: '', label: '', is_private: false, is_default: false, display_order: 0, is_archived: false })
 
 async function load() {
   loading.value = true
@@ -28,11 +28,12 @@ onMounted(load)
 watch(() => props.resetToken, () => { showArchived.value = false; load() })
 
 function newCategory() {
-  Object.assign(draft, { id: 0, code: '', label: '', is_private: false, display_order: (categories.value.length + 1) * 10, is_archived: false })
+  // První kategorie tenantu se rovnou nabídne jako výchozí (jako u aut).
+  Object.assign(draft, { id: 0, code: '', label: '', is_private: false, is_default: categories.value.length === 0, display_order: (categories.value.length + 1) * 10, is_archived: false })
   open.value = true
 }
 function editCategory(c: TripCategory) {
-  Object.assign(draft, { id: c.id, code: c.code, label: c.label, is_private: c.is_private, display_order: c.display_order, is_archived: c.is_archived })
+  Object.assign(draft, { id: c.id, code: c.code, label: c.label, is_private: c.is_private, is_default: c.is_default, display_order: c.display_order, is_archived: c.is_archived })
   open.value = true
 }
 
@@ -40,7 +41,7 @@ async function save() {
   if (!draft.code.trim() || !draft.label.trim()) { toast.error(t('logbook.cat_required')); return }
   saving.value = true
   try {
-    const payload: TripCategoryPayload = { code: draft.code.trim(), label: draft.label.trim(), is_private: draft.is_private, display_order: Number(draft.display_order), is_archived: draft.is_archived }
+    const payload: TripCategoryPayload = { code: draft.code.trim(), label: draft.label.trim(), is_private: draft.is_private, is_default: draft.is_default, display_order: Number(draft.display_order), is_archived: draft.is_archived }
     if (draft.id) await logbookApi.updateCategory(draft.id, payload)
     else await logbookApi.createCategory(payload)
     open.value = false
@@ -96,7 +97,10 @@ async function removeCategory(c: TripCategory) {
           </thead>
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="c in categories" :key="c.id" class="hover:bg-neutral-50" :class="c.is_archived ? 'opacity-50' : ''">
-              <td class="px-3 py-2 font-medium">{{ c.label }}</td>
+              <td class="px-3 py-2 font-medium">
+                {{ c.label }}
+                <span v-if="c.is_default" class="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary-700">{{ t('logbook.default_short') }}</span>
+              </td>
               <td class="px-3 py-2 font-mono text-xs text-neutral-500">{{ c.code }}</td>
               <td class="px-3 py-2">
                 <span class="text-xs px-1.5 py-0.5 rounded" :class="c.is_private ? 'bg-warning-50 text-warning-600' : 'bg-success-50 text-success-600'">
@@ -119,7 +123,10 @@ async function removeCategory(c: TripCategory) {
       <div class="md:hidden bg-surface border border-neutral-200 rounded-lg shadow-sm divide-y divide-neutral-100 overflow-hidden">
         <div v-for="c in categories" :key="`m-${c.id}`" class="px-4 py-3" :class="c.is_archived ? 'opacity-50' : ''">
           <div class="flex items-baseline justify-between gap-2">
-            <span class="font-medium text-neutral-900">{{ c.label }}</span>
+            <span class="font-medium text-neutral-900">
+              {{ c.label }}
+              <span v-if="c.is_default" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary-700">{{ t('logbook.default_short') }}</span>
+            </span>
             <span class="text-xs px-1.5 py-0.5 rounded shrink-0" :class="c.is_private ? 'bg-warning-50 text-warning-600' : 'bg-success-50 text-success-600'">
               {{ c.is_private ? t('logbook.private') : t('logbook.business') }}
             </span>
@@ -154,6 +161,10 @@ async function removeCategory(c: TripCategory) {
           <label class="flex items-center gap-2 text-sm">
             <input v-model="draft.is_private" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
             {{ t('logbook.cat_is_private') }}
+          </label>
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="draft.is_default" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+            {{ t('logbook.cat_is_default') }}
           </label>
           <label v-if="draft.id" class="flex items-center gap-2 text-sm">
             <input v-model="draft.is_archived" type="checkbox" class="rounded border-neutral-300 text-primary-600" />

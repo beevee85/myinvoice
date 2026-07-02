@@ -123,6 +123,9 @@ final class Bootstrap
                 // + auto DRAFT daňového dokladu k přijaté platbě u částečně uhrazené proformy.
                 $c->get(\MyInvoice\Service\Invoice\InvoicePaymentService::class),
                 $c->get(\MyInvoice\Service\Invoice\PaymentTaxDocumentCreator::class),
+                // Aktivita dokladu — „payment_matched" záznam u auto-spárování platby
+                // (vidět v aktivitě vystavené i přijaté faktury).
+                $c->get(\MyInvoice\Service\ActivityLogger::class),
             ),
 
             // IpMatcher má v konstruktoru volitelný `?Config $config = null`. Autowiring

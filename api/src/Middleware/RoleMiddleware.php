@@ -35,6 +35,7 @@ final class RoleMiddleware implements MiddlewareInterface
         '/api/openapi.yaml',
         '/api/docs',
         '/api/reference',
+        '/api/scalar',
         '/api/auth/setup-status',
         '/api/auth/setup',
         '/api/auth/setup-ares-lookup',

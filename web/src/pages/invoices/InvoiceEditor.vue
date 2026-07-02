@@ -46,6 +46,12 @@ const queryDocType = computed<'proforma' | 'credit_note' | null>(() => {
 })
 const editedStatus = ref<string>('draft')
 const editedVarsymbol = ref<string | null>(null)
+// Původní typ načtené faktury — pro detekci změny typu u vystavené (force-edit),
+// která backend přečísluje (uvolní staré číslo z řady, přidělí nové v řadě cílového typu).
+const editedType = ref<string>('invoice')
+// True, když u VYSTAVENÉ faktury (force-edit) uživatel přepnul typ → backend přečísluje.
+const typeWillRenumber = computed(() =>
+  isForce.value && editedStatus.value !== 'draft' && form.value.invoice_type !== editedType.value)
 // Náhled čísla, které dostane faktura při Vystavení (pokud user nezadá ruční override).
 // Naplní se z API na změnu invoice_type / issue_date — per-supplier per-period live preview.
 const varsymbolAutoPreview = ref<string>('')
@@ -387,6 +393,7 @@ onMounted(async () => {
     const inv = await invoicesApi.get(invoiceId.value)
     editedStatus.value = inv.status
     editedVarsymbol.value = inv.varsymbol
+    editedType.value = inv.invoice_type
     Object.assign(form.value, {
       invoice_type: (inv.invoice_type === 'proforma' || inv.invoice_type === 'credit_note')
         ? inv.invoice_type
@@ -1341,6 +1348,9 @@ async function deleteDraft() {
               </select>
               <p v-if="form.invoice_type === 'credit_note'" class="text-xs text-warning-600 mt-1">
                 {{ t('invoice.credit_note_warning') }}
+              </p>
+              <p v-if="typeWillRenumber" class="text-xs text-warning-600 mt-1">
+                {{ t('invoice.type_change_renumber', { varsymbol: editedVarsymbol ?? '' }) }}
               </p>
             </div>
             <div>

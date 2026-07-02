@@ -666,6 +666,44 @@ final class KhDphTaxScenariosTest extends TestCase
     }
 
     /**
+     * Issue #164 — přijatá služba z JČS (EU) v reverse charge (kód 24e, § 9 odst. 1)
+     * patří v KH do oddílu A.2, NE do B.1. VetaA2.vatid_dod musí zachovat alfanumerické
+     * EU VAT ID bez kódu země (IE3668997OH → 3668997OH), ne jen číslice.
+     */
+    public function testEuReverseChargeServiceGoesToA2WithAlphanumericVatId(): void
+    {
+        $ieId = $this->countryId('IE');
+        if ($ieId === 0) {
+            $this->markTestSkipped('Země IE není v číselníku countries.');
+        }
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        // Reálný případ z issue: Google Cloud EMEA Ltd, IE, VAT ID s písmeny.
+        $vend = $this->client('Google Cloud EMEA', $ieId, 'IE3668997OH', vendor: true);
+
+        // Kód 24e (služba z EU, ř.5), RC flag = false → spoléháme na klasifikační kód.
+        $this->purchase('P-2099-700', $vend, '24e', false, 'invoice', $d(10), $d(10), [[1000, 0, 21]]);
+
+        // ── KH: A.2 (ne B.1), alfanumerické VAT ID, k_stat = IE ──
+        $kh = new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']);
+        $this->assertCount(1, $kh->DPHKH1->VetaA2, 'EU služba (24e) musí být v A.2');
+        $this->assertCount(0, $kh->DPHKH1->VetaB1, 'EU služba (24e) NESMÍ být v B.1');
+        $a2 = $kh->DPHKH1->VetaA2[0];
+        $this->assertSame('IE', (string) $a2['k_stat'], 'A.2 k_stat = země dodavatele');
+        $this->assertSame('3668997OH', (string) $a2['vatid_dod'], 'A.2 vatid_dod zachová písmena, ořeže prefix IE');
+        $this->assertSame('1000.00', (string) $a2['zakl_dane1'], 'A.2 základ 21 %');
+        $this->assertSame('210.00', (string) $a2['dan1'], 'A.2 samovyměřená daň 1000 × 21 %');
+        // Kontrolní věta C — základ A.2 se sčítá do celk_zd_a2.
+        $this->assertSame('1000.00', (string) $kh->DPHKH1->VetaC['celk_zd_a2'], 'VetaC celk_zd_a2 zahrnuje 24e');
+
+        // ── DPHDP3: ř.5 (přijetí služby z EU) + zrcadlo ř.43 ──
+        $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
+        $this->assertSame('1000', (string) $dp->Veta1['p_sl23_e'], 'ř.5 základ EU služba');
+        $this->assertSame('210',  (string) $dp->Veta1['dan_psl23_e'], 'ř.5 samovyměřená daň');
+        $this->assertSame('1000', (string) $dp->Veta4['nar_zdp23'], 'ř.43 mirror základ');
+        $this->assertSame('210',  (string) $dp->Veta4['od_zdp23'], 'ř.43 mirror odpočet');
+    }
+
+    /**
      * Regrese (daňový audit 2026-05-28): přijaté plnění bez nároku na odpočet
      * (kód 42, dphdp3_line=NULL) NESMÍ spadnout do KH B.2/B.3, přestože má
      * nenulový základ v sazbě 21 %. DPHDP3 ho rovněž vynechává.

@@ -6,6 +6,8 @@ export interface BankStatement {
   source?: 'gpc' | 'email_notice'
   file_name: string
   account_number: string
+  /** Kód banky (4místný), pokud je u výpisu evidovaný — pro zobrazení „účet / kód". */
+  bank_code?: string | null
   /** Vlastní pojmenování účtu z currencies.label (např. "CZK — Fio Bank"), pokud match. */
   account_label: string | null
   currency: string | null
@@ -119,22 +121,58 @@ export interface ImportResult {
   duplicate: boolean
 }
 
+/** Kandidát měnového účtu při nejednoznačném sdíleném čísle účtu (#167). */
+export interface AmbiguousAccount {
+  account_id: number
+  code: string
+  label: string
+}
+
+/** Účet pro filtr v přehledu výpisů (distinct account_number + jeho label z currencies). */
+export interface BankAccountOption {
+  account_number: string
+  bank_code?: string | null
+  label: string | null
+}
+
 export interface BankStatementPage {
   items: BankStatement[]
   total: number
   page: number
   limit: number
+  /** Roky přítomné ve výpisech (pro filtr rok), descending. */
+  years: number[]
+  /** Účty přítomné ve výpisech (pro filtr na číslo účtu). */
+  accounts: BankAccountOption[]
   /** Je v cfg.php nastavené adresářové skenování (bank_import.scan_root)? Řídí tlačítko „Skenovat adresář". */
   scan_configured: boolean
 }
 
+export interface BankListParams {
+  page?: number
+  year?: number | ''
+  month?: number | ''
+  account?: string
+}
+
 export const bankApi = {
-  list: (page = 1) =>
-    api.get<BankStatementPage>('/bank-statements', { params: { page } }).then(r => r.data),
+  list: (params: BankListParams = {}) =>
+    api.get<BankStatementPage>('/bank-statements', { params: {
+      page: params.page ?? 1,
+      ...(params.year !== undefined && params.year !== '' ? { 'filter[year]': params.year } : {}),
+      ...(params.month !== undefined && params.month !== '' ? { 'filter[month]': params.month } : {}),
+      ...(params.account ? { 'filter[account]': params.account } : {}),
+    } }).then(r => r.data),
   get: (id: number) => api.get<BankStatementDetail>(`/bank-statements/${id}`).then(r => r.data),
-  upload: (file: File) => {
+  /**
+   * Nahraje GPC/ABO výpis. `accountId` (currencies.id) je volitelný — povinný jen
+   * u víceměnového účtu se sdíleným číslem účtu, kdy server vrátí 409
+   * `ambiguous_account_currency` se seznamem kandidátů (#167).
+   */
+  upload: (file: File, accountId?: number) => {
     const fd = new FormData()
     fd.append('file', file)
+    if (accountId !== undefined) fd.append('account_id', String(accountId))
     return api.post<ImportResult>('/bank-statements/upload', fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)

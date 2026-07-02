@@ -286,7 +286,11 @@ final class PaymentQrAction
     private function payableAmount(array $invoice): float
     {
         $toPay = (float) ($invoice['amount_to_pay'] ?? 0);
-        return $toPay > 0 ? $toPay : (float) ($invoice['total_with_vat'] ?? 0);
+        $base  = $toPay > 0 ? $toPay : (float) ($invoice['total_with_vat'] ?? 0);
+        // Zaokrouhlení dokladu (haléřový offset „K úhradě") je vedeno mimo
+        // total_with_vat/amount_to_pay → přičti ho, ať QR žádá částku PO
+        // zaokrouhlení (issue #166).
+        return round($base + (float) ($invoice['rounding'] ?? 0), 2);
     }
 
     private function variableSymbol(array $invoice): string

@@ -91,36 +91,74 @@ final class TripCategoryRepository
     public function create(int $supplierId, array $data): int
     {
         $pdo = $this->db->pdo();
-        $pdo->prepare(
-            'INSERT INTO trip_categories (supplier_id, code, label, is_private, display_order)
-             VALUES (?, ?, ?, ?, ?)'
-        )->execute([
-            $supplierId,
-            (string) $data['code'],
-            (string) $data['label'],
-            !empty($data['is_private']) ? 1 : 0,
-            (int) ($data['display_order'] ?? 0),
-        ]);
-        return (int) $pdo->lastInsertId();
+        $pdo->beginTransaction();
+        try {
+            // Per tenant smí být max jedna výchozí kategorie (jako cars.is_default).
+            if (!empty($data['is_default'])) {
+                $this->clearDefault($supplierId);
+            }
+            $pdo->prepare(
+                'INSERT INTO trip_categories (supplier_id, code, label, is_private, is_default, display_order)
+                 VALUES (?, ?, ?, ?, ?, ?)'
+            )->execute([
+                $supplierId,
+                (string) $data['code'],
+                (string) $data['label'],
+                !empty($data['is_private']) ? 1 : 0,
+                !empty($data['is_default']) ? 1 : 0,
+                (int) ($data['display_order'] ?? 0),
+            ]);
+            $id = (int) $pdo->lastInsertId();
+            $pdo->commit();
+            return $id;
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
     }
 
     public function update(int $id, int $supplierId, array $data): bool
     {
-        $stmt = $this->db->pdo()->prepare(
-            'UPDATE trip_categories
-                SET code = ?, label = ?, is_private = ?, display_order = ?, is_archived = ?
-              WHERE id = ? AND supplier_id = ?'
-        );
-        $stmt->execute([
-            (string) $data['code'],
-            (string) $data['label'],
-            !empty($data['is_private']) ? 1 : 0,
-            (int) ($data['display_order'] ?? 0),
-            !empty($data['is_archived']) ? 1 : 0,
-            $id,
-            $supplierId,
-        ]);
-        return $stmt->rowCount() >= 0;
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            if (!empty($data['is_default'])) {
+                $this->clearDefault($supplierId, $id);
+            }
+            $stmt = $pdo->prepare(
+                'UPDATE trip_categories
+                    SET code = ?, label = ?, is_private = ?, is_default = ?, display_order = ?, is_archived = ?
+                  WHERE id = ? AND supplier_id = ?'
+            );
+            $stmt->execute([
+                (string) $data['code'],
+                (string) $data['label'],
+                !empty($data['is_private']) ? 1 : 0,
+                !empty($data['is_default']) ? 1 : 0,
+                (int) ($data['display_order'] ?? 0),
+                !empty($data['is_archived']) ? 1 : 0,
+                $id,
+                $supplierId,
+            ]);
+            $ok = $stmt->rowCount() >= 0;
+            $pdo->commit();
+            return $ok;
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    /** Zruší příznak výchozí kategorie u všech (kromě volitelně $exceptId) — drží unikátnost is_default per tenant. */
+    private function clearDefault(int $supplierId, ?int $exceptId = null): void
+    {
+        $sql = 'UPDATE trip_categories SET is_default = 0 WHERE supplier_id = ? AND is_default = 1';
+        $params = [$supplierId];
+        if ($exceptId !== null) {
+            $sql .= ' AND id <> ?';
+            $params[] = $exceptId;
+        }
+        $this->db->pdo()->prepare($sql)->execute($params);
     }
 
     public function delete(int $id, int $supplierId): array
@@ -146,6 +184,7 @@ final class TripCategoryRepository
             'code'          => (string) $r['code'],
             'label'         => (string) $r['label'],
             'is_private'    => (bool) $r['is_private'],
+            'is_default'    => (bool) ($r['is_default'] ?? false),
             'display_order' => (int) $r['display_order'],
             'is_archived'   => (bool) $r['is_archived'],
             'trips_count'   => isset($r['trips_count']) ? (int) $r['trips_count'] : null,

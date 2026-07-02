@@ -139,7 +139,8 @@ final class RecurringInvoiceGenerator
      * issue_date i tax_date se nastaví na PLÁNOVANÝ konec období (next_run_date),
      * takže koncept od začátku nese správné datum vystavení i DUZP. Uživatel pak
      * celý měsíc edituje výkaz práce na tomto konceptu; cron ho v issuePeriod()
-     * v den next_run_date uzavře.
+     * uzavře až DEN PO next_run_date (aby se stihla zapsat i práce z posledního dne
+     * období) — datum vystavení i DUZP přitom zůstávají na next_run_date (konec období).
      *
      * Idempotentní: pokud už pro období existuje faktura (draft i vystavená),
      * vrátí ji bez vytvoření nové.

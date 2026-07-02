@@ -14,6 +14,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET /api/openapi.yaml  → ručně psaný spec v api/openapi.yaml
  *   GET /api/docs          → Swagger UI 5 (Try it out + Authorize)
  *   GET /api/reference     → Redoc (pretty static)
+ *   GET /api/scalar        → Scalar (moderní reference + Try it out)
  *
  * Design je sladěn s landing pageem myinvoice.web (stejné CSS, branding,
  * navigační hlavička). Liší se jen:
@@ -171,6 +172,10 @@ final class OpenApiAction
         <a class="nav-link is-current" href="/api/reference" title="Redoc reference">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
           <span class="lbl">Reference</span>
+        </a>
+        <a class="nav-link" href="/api/scalar" title="Scalar reference">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+          <span class="lbl">Scalar</span>
         </a>
         <a class="nav-link" href="/api/openapi.yaml" target="_blank" title="Stáhnout openapi.yaml">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -500,6 +505,10 @@ HTML;
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
           <span class="lbl">Reference</span>
         </a>
+        <a class="nav-link" href="/api/scalar" title="Scalar reference">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+          <span class="lbl">Scalar</span>
+        </a>
         <a class="nav-link" href="/api/openapi.yaml" target="_blank" title="Stáhnout openapi.yaml">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           <span class="lbl">openapi.yaml</span>
@@ -549,6 +558,213 @@ HTML;
       plugins: [SwaggerUIBundle.plugins.DownloadUrl],
       layout: 'BaseLayout'
     });
+  </script>
+</body>
+</html>
+HTML;
+        $response->getBody()->write($html);
+        return $response
+            ->withHeader('Content-Type', 'text/html; charset=utf-8')
+            ->withHeader('Cache-Control', 'public, max-age=300');
+    }
+
+    public function scalar(Request $request, Response $response): Response
+    {
+        // Scalar API Reference z jsDelivr CDN. Moderní reference + vestavěný
+        // API klient (Try it out) — token přes "Authentication" panel.
+        $html = <<<'HTML'
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <title>MyInvoice.cz API — Reference (Scalar)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="REST API MyInvoice.cz — moderní referenční dokumentace endpointů (Scalar) s vestavěným API klientem.">
+  <link rel="icon" type="image/svg+xml" href="/styles/logo.svg">
+  <style>
+    :root {
+      --primary: #6753AE;
+      --primary-dark: #3B2D83;
+      --primary-soft: #ede9fe;
+      --primary-softer: #f5f3ff;
+      --accent: #f59e0b;
+      --bg: #f5f3fb;
+      --panel: #ffffff;
+      --border: #ecebe9;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --ink: #15131D;
+    }
+    * { box-sizing: border-box; }
+    /* ⚠️ NEdávat overflow-x:hidden na html/body — CSS spec pak promotuje
+       overflow-y na auto, body se stane scroll-kontejnerem a sticky hlavička
+       se přilepí k němu místo k viewportu (= uteče při scrollu). */
+    body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { color: var(--primary-dark); }
+
+    /* Sticky hlavička drží nahoře; Scalarův sticky sidebar je odsazen pod ni
+       přes --scalar-custom-header-height / --refs-header-height (viz JS níže),
+       takže při scrollu okna sidebar neuteče. */
+    .site-header {
+      padding: 14px 0;
+      position: sticky; top: 0; z-index: 1000;
+      background: rgba(245, 243, 251, 0.92);
+      backdrop-filter: saturate(180%) blur(14px);
+      -webkit-backdrop-filter: saturate(180%) blur(14px);
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 6px 22px rgba(59, 45, 131, 0.08), 0 1px 0 rgba(59, 45, 131, 0.04);
+    }
+    .site-header .row {
+      max-width: 1280px; margin: 0 auto; padding: 0 24px;
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+      justify-content: space-between;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--text); }
+    .brand:hover { text-decoration: none; }
+    .brand img { width: 40px; height: 40px; border-radius: 9px; }
+    .brand .name { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; color: var(--primary-dark); line-height: 1.1; }
+    .brand .tag { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .header-cta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .nav-link {
+      display: inline-flex; align-items: center; gap: 6px;
+      color: var(--primary-dark); text-decoration: none;
+      font-size: 14px; font-weight: 500;
+      padding: 8px 14px; border-radius: 10px;
+      border: 1px solid transparent;
+      transition: all .15s;
+    }
+    .nav-link:hover { background: #fff; border-color: var(--border); color: var(--primary-dark); text-decoration: none; }
+    .nav-link.is-current { background: #fff; border-color: var(--border); }
+    .btn-github {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--ink); color: #fff;
+      font-size: 14px; font-weight: 600;
+      padding: 9px 16px; border-radius: 10px;
+      text-decoration: none;
+      box-shadow: 0 4px 14px rgba(21, 19, 29, 0.18);
+      transition: all .2s;
+    }
+    .btn-github:hover { background: #25232f; color: #fff; transform: translateY(-1px); }
+    .btn-github svg { width: 16px; height: 16px; fill: currentColor; }
+
+    /* Scalar si řídí výšku/scroll sám (scrolluje okno). */
+    #scalar-app { min-height: calc(100vh - 69px); }
+
+    @media (max-width: 640px) {
+      .brand .tag { display: none; }
+      .nav-link span.lbl { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="row">
+      <a href="/" class="brand">
+        <img src="/styles/logo.svg" alt="MyInvoice.cz">
+        <div>
+          <div class="name">MyInvoice.cz</div>
+          <div class="tag">REST API · moderní reference</div>
+        </div>
+      </a>
+      <div class="header-cta">
+        <a class="nav-link" href="/api/docs" title="Swagger UI">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          <span class="lbl">Swagger UI</span>
+        </a>
+        <a class="nav-link" href="/api/reference" title="Redoc reference">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          <span class="lbl">Reference</span>
+        </a>
+        <a class="nav-link is-current" href="/api/scalar" title="Scalar reference">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+          <span class="lbl">Scalar</span>
+        </a>
+        <a class="nav-link" href="/api/openapi.yaml" target="_blank" title="Stáhnout openapi.yaml">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span class="lbl">openapi.yaml</span>
+        </a>
+        <a class="nav-link" href="/manual/?ch=39_API" target="_blank" title="Manuál API">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          <span class="lbl">Manuál</span>
+        </a>
+        <a href="https://github.com/radekhulan/myinvoice" target="_blank" rel="noopener" class="btn-github">
+          <svg viewBox="0 0 24 24"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.4 3-.405 1.02.005 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <div id="scalar-app"></div>
+  <script>
+    var scalarConfig = {
+      url: '/api/openapi.yaml',
+      theme: 'default',
+      darkMode: false,
+      hideDownloadButton: false,
+      withDefaultFonts: false,
+      metaData: { title: 'MyInvoice.cz API — Scalar' },
+      customCss: `
+        .scalar-app, :root {
+          --scalar-color-accent: #6753AE;
+          --scalar-color-1: #15131D;
+          --scalar-color-2: #3F3A52;
+          --scalar-color-3: #6b7280;
+          --scalar-background-1: #ffffff;
+          --scalar-background-2: #f7f5fc;
+          --scalar-background-3: #ede9fe;
+          --scalar-background-accent: #ede9fe;
+          --scalar-border-color: #ecebe9;
+          --scalar-radius: 10px;
+          --scalar-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
+          --scalar-font-code: "JetBrains Mono", "Fira Code", Consolas, monospace;
+          --scalar-color-green:  #21A86A;
+          --scalar-color-blue:   #6753AE;
+          --scalar-color-orange: #D49C2E;
+          --scalar-color-yellow: #D49C2E;
+          --scalar-color-red:    #D45B5B;
+          --scalar-color-purple: #7E6DD6;
+        }
+        .scalar-app .sidebar {
+          --scalar-sidebar-background-1: #f5f3fb;
+          --scalar-sidebar-color-1: #15131D;
+          --scalar-sidebar-color-2: #3F3A52;
+          --scalar-sidebar-border-color: #ecebe9;
+          --scalar-sidebar-item-hover-background: #ede9fe;
+          --scalar-sidebar-item-active-background: #ede9fe;
+          --scalar-sidebar-color-active: #3B2D83;
+          --scalar-sidebar-search-background: #ffffff;
+          --scalar-sidebar-search-border-color: #ecebe9;
+        }
+      `
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+  <script>
+    Scalar.createApiReference('#scalar-app', scalarConfig);
+
+    // Sdělíme Scalaru reálnou výšku naší sticky hlavičky → jeho sticky sidebar
+    // i pravý panel se odsadí pod ni a při scrollu okna neutečou nahoru.
+    (function () {
+      var header = document.querySelector('.site-header');
+      function syncHeaderOffset() {
+        var h = header ? header.offsetHeight : 0;
+        var root = document.documentElement;
+        root.style.setProperty('--scalar-custom-header-height', h + 'px');
+        root.style.setProperty('--refs-header-height', h + 'px');
+      }
+      syncHeaderOffset();
+      window.addEventListener('resize', syncHeaderOffset);
+      // Scalar mountuje asynchronně — doladíme po vykreslení.
+      setTimeout(syncHeaderOffset, 300);
+      setTimeout(syncHeaderOffset, 1200);
+    })();
   </script>
 </body>
 </html>

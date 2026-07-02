@@ -576,7 +576,7 @@ final class PurchaseInvoiceRepository
         }
         $sql = "SELECT pi.id, pi.vendor_invoice_number, pi.varsymbol, pi.document_kind,
                        pi.vendor_id, pi.issue_date, pi.due_date,
-                       pi.total_with_vat, pi.amount_to_pay,
+                       pi.total_with_vat, pi.amount_to_pay, pi.rounding,
                        (pi.pdf_path IS NOT NULL AND pi.pdf_path <> '') AS has_pdf,
                        pi.payment_account_number, pi.payment_bank_code, pi.payment_iban, pi.payment_bic,
                        pi.payment_variable_symbol, pi.payment_constant_symbol,
@@ -596,6 +596,7 @@ final class PurchaseInvoiceRepository
             $r['vendor_id']      = (int) $r['vendor_id'];
             $r['total_with_vat'] = (float) $r['total_with_vat'];
             $r['amount_to_pay']  = (float) $r['amount_to_pay'];
+            $r['rounding']       = (float) ($r['rounding'] ?? 0);
             $r['has_pdf']        = (bool) $r['has_pdf'];
         }
         return $rows;
@@ -750,8 +751,8 @@ final class PurchaseInvoiceRepository
         // Reverse charge + země dodavatele — určuje klasifikační kód:
         //   CZ vendor → '40'/'41'/'42' (tuzemsko podle sazby)
         //   CZ vendor + RC → '5' (přenesená povinnost)
-        //   EU vendor s 0% → '24' (přijetí služby z EU) — typický pro Anthropic, GitHub apod.
-        //   non-EU vendor s 0% → '25' (dovoz ze 3. země)
+        //   EU vendor s 0% → '24e' (přijetí služby z EU, ř.5) — typický pro Microsoft Ireland apod.
+        //   non-EU vendor s 0% → '24' (přijetí služby ze 3. země, ř.12) — Anthropic, GitHub apod.
         $metaStmt = $pdo->prepare(
             'SELECT pi.reverse_charge, co.iso2,
                     COALESCE(pi.tax_date, pi.issue_date) AS doc_date
@@ -804,14 +805,14 @@ final class PurchaseInvoiceRepository
      *     12% standard  → '41' (přijaté plnění tuzemsko — snížená)
      *     0%            → null (osvobozeno bez nároku — user si vybere)
      *   EU vendor (DE, SK, AT, IE, …):
-     *     0% → '24' (přijetí služby z EU — typický pro Anthropic, GitHub, Microsoft Ireland)
+     *     0% → '24e' (přijetí služby z EU, ř.5 — typický pro Microsoft Ireland)
      *     21%/12% → tuzemsko sazby (vendor v EU vykazuje českou DPH — vzácné)
      *   Non-EU vendor (US, UK, atd.):
-     *     0% → '25' (dovoz ze 3. země)
+     *     0% → '24' (přijetí služby ze 3. země / od neusazené osoby, ř.12 — Anthropic, GitHub)
      *     jinak tuzemsko sazby
      *
-     * Pro pořízení zboží z EU ('23' místo služby '24') si user změní ručně —
-     * default 0%+EU mapujeme na služby, což je častější CZ IT use case.
+     * Pro pořízení zboží z EU ('23') či dovoz zboží ze 3. země ('25') si user
+     * změní ručně — default 0%+zahraničí mapujeme na SLUŽBY, což je častější CZ IT use case.
      * AI import sem u RC dokladů nespadne: nastavuje explicitní kód (23/24/25 dle
      * supply_nature) + tuzemskou sazbu 21 % už v AiPdfExtractoru (issue #116).
      */
@@ -1586,6 +1587,21 @@ final class PurchaseInvoiceRepository
     }
 
     /**
+     * Zápis metadat ZDROJOVÉHO artefaktu (strojový originál — ISDOC/ISDOCX/…).
+     * Write-once: `AND source_path IS NULL` zaručí, že re-import / re-extrakce
+     * nepřepíše evidenční stopu (kterou už jednou uloženou nesmíme měnit).
+     */
+    public function setSourceMetadata(int $id, int $supplierId, string $path, string $hash, int $size, ?string $originalName, string $format): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE purchase_invoices
+                SET source_path = ?, source_hash = ?, source_size_bytes = ?, source_original_name = ?,
+                    source_format = ?, source_uploaded_at = NOW()
+              WHERE id = ? AND supplier_id = ? AND source_path IS NULL'
+        )->execute([$path, $hash, $size, $originalName, $format, $id, $supplierId]);
+    }
+
+    /**
      * Update totals na úrovni jedné položky (volá Calculator).
      */
     public function updateItemTotals(int $itemId, float $withoutVat, float $vatAmount, float $withVat): void
@@ -1657,7 +1673,7 @@ final class PurchaseInvoiceRepository
     private function castInvoice(array $row): array
     {
         foreach (['id', 'supplier_id', 'vendor_id', 'currency_id', 'payment_currency_id',
-                  'created_by', 'pdf_size_bytes', 'expense_category_id',
+                  'created_by', 'pdf_size_bytes', 'source_size_bytes', 'expense_category_id',
                   'advance_purchase_invoice_id', 'advance_link_suggested_id'] as $f) {
             if (isset($row[$f]) && $row[$f] !== null) $row[$f] = (int) $row[$f];
         }

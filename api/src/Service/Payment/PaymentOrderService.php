@@ -70,7 +70,10 @@ final class PaymentOrderService
                 'due_date'               => $r['due_date'],
                 'currency'               => $r['currency'],
                 'currency_symbol'        => $r['currency_symbol'],
-                'amount_to_pay'          => $r['amount_to_pay'],
+                // Částka PO zaokrouhlení dokladu (issue #166) — zaokrouhlení se
+                // vede mimo amount_to_pay, doplníme ho zde, ať UI i příkaz ukazují
+                // a předepisují skutečnou úhradu.
+                'amount_to_pay'          => round((float) $r['amount_to_pay'] + (float) ($r['rounding'] ?? 0), 2),
                 'total_with_vat'         => $r['total_with_vat'],
                 'account_number'         => $payee['account_number'],
                 'bank_code'              => $payee['bank_code'],
@@ -148,6 +151,9 @@ final class PaymentOrderService
                 $skipped[] = ['id' => $id, 'reason' => 'nothing_to_pay'];
                 continue;
             }
+            // Zaokrouhlení dokladu se vede mimo amount_to_pay → přičti ho, ať
+            // se předepíše částka PO zaokrouhlení (issue #166).
+            $amount = round($amount + (float) ($inv['rounding'] ?? 0), 2);
             $account = $inv['payment_account_number'] ?? null;
             $bank    = $inv['payment_bank_code'] ?? null;
             $iban    = $inv['payment_iban'] ?? null;

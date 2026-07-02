@@ -142,6 +142,13 @@ final class BearerAuthTest extends TestCase
         self::assertStringContainsString('redoc', $r['body']);
     }
 
+    public function testScalarPagePublic(): void
+    {
+        $r = $this->request('GET', '/api/scalar', null, null, ['Accept: text/html']);
+        self::assertSame(200, $r['status']);
+        self::assertStringContainsString('@scalar/api-reference', $r['body']);
+    }
+
     public function testRateLimitHeadersPresent(): void
     {
         $token = $this->mkToken('read');

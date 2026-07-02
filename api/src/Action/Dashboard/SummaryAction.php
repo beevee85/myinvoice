@@ -79,10 +79,12 @@ final class SummaryAction
         ]);
     }
 
-    /** Počet aktivních (neaarchivovaných) klientů v rámci aktuálního dodavatele. */
+    /** Počet aktivních (neaarchivovaných) zákazníků v rámci aktuálního dodavatele (bez čistých dodavatelů). */
     private function activeClientsCount(\PDO $pdo, int $sid): int
     {
-        $stmt = $pdo->prepare('SELECT COUNT(*) FROM clients WHERE supplier_id = ? AND archived_at IS NULL');
+        // is_customer <> 0 pokrývá i historická data (default 1 od migrace 0026a);
+        // čisté dodavatele (is_vendor=1, is_customer=0) se do počtu zákazníků nepočítají.
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM clients WHERE supplier_id = ? AND archived_at IS NULL AND is_customer <> 0');
         $stmt->execute([$sid]);
         return (int) $stmt->fetchColumn();
     }

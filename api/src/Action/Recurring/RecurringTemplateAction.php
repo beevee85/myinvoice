@@ -275,7 +275,8 @@ final class RecurringTemplateAction
             if ($forceDraft && (string) ($tpl['draft_open_mode'] ?? 'at_issue') === 'period_start') {
                 // period_start: ruční „Vygenerovat koncept" = stejný otevřený koncept jako
                 // cron na začátku období (openDraft) — idempotentní, NEposouvá rozvrh,
-                // koncept se pak vystaví v den next_run_date (cron issuePeriod).
+                // koncept se pak vystaví den po next_run_date (cron issuePeriod), s datem
+                // vystavení i DUZP na next_run_date (konci období).
                 $d = $this->generator->openDraft($id, $userId, $ip, $ua);
                 $result = [
                     'invoice_id'        => $d['invoice_id'],

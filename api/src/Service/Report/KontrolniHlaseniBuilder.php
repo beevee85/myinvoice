@@ -121,13 +121,15 @@ final class KontrolniHlaseniBuilder
         // (které je 0 pro RC).
         $rowNum = 0;
         foreach ($a2 as $r) {
-            $vatId = self::cleanDic($r['counterparty_dic'] ?? '');
-            // Některé doklady (např. od neplátce v EU) nemusí mít VAT ID dodavatele
-            // → atribut zůstává prázdný, jinak XSD pole povoluje.
+            // VAT ID dodavatele z JČS je ALFANUMERICKÉ (např. IE3668997OH → "3668997OH",
+            // AT U12345678 → "U12345678") — cleanDic() je jen pro české číselné DIČ a
+            // písmena by zahodil. Některé doklady (3. země / neplátce v EU) VAT ID nemají
+            // → atribut zůstává prázdný, což XSD (minLength 0) povoluje.
+            $vatId = self::cleanEuVatId($r['counterparty_dic'] ?? '', $r['country_iso2'] ?? '');
             $rowNum++;
             $v = $dom->createElement('VetaA2');
             $v->setAttribute('c_radku', (string) $rowNum);
-            $kStat = (string) ($r['country_iso2'] ?? '');
+            $kStat = self::khCountryCode($r['country_iso2'] ?? '');
             if ($kStat !== '') $v->setAttribute('k_stat', $kStat);
             if ($vatId !== '') $v->setAttribute('vatid_dod', $vatId);
             $v->setAttribute('c_evid_dd', (string) $r['vendor_invoice_number']);
@@ -306,6 +308,7 @@ final class KontrolniHlaseniBuilder
                     'vendor_invoice_number' => $r['vendor_invoice_number'],
                     'tax_date'              => $r['tax_date'],
                     'dic'                   => self::cleanDic($r['counterparty_dic']),
+                    'dic_raw'               => $r['counterparty_dic'], // syrové VAT ID pro A.2 (EU alfanum.)
                     'country_iso2'          => $r['country_iso2'],
                     'total_czk'             => (float) $r['total_with_vat_czk'],
                     'is_rc' => false, 'has_a2' => false, 'has_b1' => false, 'is_pomer' => false,
@@ -363,18 +366,22 @@ final class KontrolniHlaseniBuilder
                 }
             } else { // purchase
                 if ($g['has_a2']) {
+                    // A.2 = přeshraniční samovyměřená plnění (§ 24 služby z EU i 3. země,
+                    // § 25 pořízení zboží z JČS). vatid_dod nese syrové EU VAT ID (alfanum.).
                     $a2[] = ['vendor_invoice_number' => $g['vendor_invoice_number'], 'tax_date' => $g['tax_date'],
-                             'counterparty_dic' => $g['dic'], 'country_iso2' => $g['country_iso2'],
+                             'counterparty_dic' => $g['dic_raw'], 'country_iso2' => $g['country_iso2'],
                              'base21' => $g['a2_base21'], 'vat21' => $g['a2_vat21'],
                              'base12' => $g['a2_base12'], 'vat12' => $g['a2_vat12']];
                     continue;
                 }
-                if ($g['is_rc']) { // tuzemský RC příjemce (A.2 už odchyceno výše)
+                if ($g['has_b1']) { // TUZEMSKÝ režim přenesení (§ 92a–92e) — jen explicitní sekce B.1
                     $b1[] = ['counterparty_dic' => $g['dic'], 'vendor_invoice_number' => $g['vendor_invoice_number'],
                              'tax_date' => $g['tax_date'], 'base' => $g['base_total']];
                     continue;
                 }
-                if ($g['has_b1']) continue;       // B.1 sekce bez RC flagu → nepatří do B.2
+                // Zbylé samovyměřené (RC) plnění bez KH sekce = dovoz zboží ze 3. země
+                // (kód 25, DPHDP3 ř.7/8) — do KH se nevykazuje (jen DPHDP3 + odpočet ř.43/44).
+                if ($g['is_rc']) continue;
                 if ($zeroBase($g)) continue;      // osvobozená přijatá bez nároku → ne B.2/B.3
                 $row = ['vendor_invoice_number' => $g['vendor_invoice_number'], 'tax_date' => $g['tax_date'],
                         'counterparty_dic' => $g['dic'], 'base21' => $g['base21'], 'vat21' => $g['vat21'],
@@ -446,6 +453,35 @@ final class KontrolniHlaseniBuilder
         // CZ12345678 → 12345678. Pattern v XSD je [0-9]{1,10}, takže strip vše ne-digit po prefixu.
         $clean = preg_replace('/^CZ/i', '', strtoupper(trim($dic))) ?? '';
         return preg_replace('/[^0-9]/', '', $clean) ?? '';
+    }
+
+    /**
+     * VAT ID dodavatele z jiného členského státu pro VetaA2.vatid_dod (KH oddíl A.2).
+     *
+     * Na rozdíl od českého DIČ (jen číslice, viz cleanDic) je EU VAT ID alfanumerické a
+     * u řady států obsahuje písmena (IE 1234567X, AT U12345678, NL 123456789B01, …).
+     * XSD vyžaduje formát BEZ kódu členského státu — odstraníme prefix země, mezery a
+     * oddělovače, zachováme alfanumerickou kmenovou část.
+     */
+    public static function cleanEuVatId(?string $vatId, ?string $countryIso2): string
+    {
+        if (!$vatId) return '';
+        $s = preg_replace('/[^A-Z0-9]/', '', strtoupper(trim($vatId))) ?? '';
+        $country = self::khCountryCode($countryIso2);
+        if ($country !== '' && str_starts_with($s, $country)) {
+            $s = substr($s, strlen($country));
+        }
+        return $s;
+    }
+
+    /**
+     * Kód státu pro KH (VetaA2.k_stat / prefix VAT ID). Vychází z ISO 3166-1 alpha-2,
+     * ale s odchylkami EU registru DPH: Řecko má ISO "GR", ale DPH kód "EL".
+     */
+    public static function khCountryCode(?string $iso2): string
+    {
+        $c = strtoupper(trim((string) $iso2));
+        return $c === 'GR' ? 'EL' : $c;
     }
 
     /** Date pro KH XML — convert YYYY-MM-DD na DD.MM.YYYY (EPO datum format). */

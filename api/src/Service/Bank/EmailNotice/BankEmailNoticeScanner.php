@@ -229,7 +229,15 @@ final class BankEmailNoticeScanner
             );
             $match = $tx['match_result'];
             $matchedInvoiceId = isset($match['invoice_id']) ? (int) $match['invoice_id'] : null;
-            $status = $matchedInvoiceId !== null ? 'processed_success' : 'match_failed';
+            // Spárování je úspěšné i u ODCHOZÍ platby na přijatou fakturu — matcher v tom
+            // případě vrací `purchase_invoice_id` (ne `invoice_id`) se status auto_exact/
+            // auto_partial. Dřív se bral jen `invoice_id`, takže úhrada přijaté faktury
+            // padala na „match_failed" (a IMAP post-process ji řešil jako selhání).
+            $matchedPurchaseInvoiceId = isset($match['purchase_invoice_id']) ? (int) $match['purchase_invoice_id'] : null;
+            $matchStatus = (string) ($match['status'] ?? 'unmatched');
+            $isMatched = $matchStatus !== 'unmatched'
+                && ($matchedInvoiceId !== null || $matchedPurchaseInvoiceId !== null);
+            $status = $isMatched ? 'processed_success' : 'match_failed';
             $postError = null;
             if ($status === 'processed_success') {
                 $postError = $this->safePostProcess($settings, $message, 'success');
@@ -256,7 +264,7 @@ final class BankEmailNoticeScanner
                 'message_id' => $messageId,
                 'imap_account_id' => $imapAccountId,
                 'transaction_id' => $tx['transaction_id'],
-                'matched' => $matchedInvoiceId !== null,
+                'matched' => $isMatched,
                 'match_status' => $match['status'] ?? null,
                 'postprocess_error' => $postError,
             ];

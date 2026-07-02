@@ -677,7 +677,7 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                     <div class="inline-flex items-center gap-1 flex-wrap justify-center">
                       <button v-if="c.has_account" type="button" @click="toggleQr(c)" :title="t('payment_order.qr_code')"
                         class="cursor-pointer inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border font-medium"
-                        :class="qrPreviewId === c.id ? 'bg-neutral-800 text-white border-neutral-800' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100'">
+                        :class="qrPreviewId === c.id ? 'bg-neutral-800 text-neutral-50 border-neutral-800' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100'">
                         <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5z"/><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 19.5h2.25M13.5 13.5h.008v.008H13.5V13.5zm.375 5.625h.008v.008h-.008v-.008z"/></svg>
                         {{ t('payment_order.qr_code') }}
                       </button>
@@ -816,7 +816,7 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
               <div class="flex items-center gap-2 mt-2 flex-wrap">
                 <button v-if="c.has_account" type="button" @click="toggleQr(c)"
                   class="cursor-pointer inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border font-medium"
-                  :class="qrPreviewId === c.id ? 'bg-neutral-800 text-white border-neutral-800' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100'">
+                  :class="qrPreviewId === c.id ? 'bg-neutral-800 text-neutral-50 border-neutral-800' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100'">
                   <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5z"/></svg>
                   {{ t('payment_order.qr_code') }}
                 </button>

@@ -110,6 +110,27 @@ final class StatementImporterCurrencyTest extends TestCase
         $this->assertTransactionCurrencies($r['statement_id'], 'EUR');
     }
 
+    public function testSharedAccountNumberUsesExplicitCurrencyId(): void
+    {
+        // #167: víceměnový účet (Raiffeisenbank) — CZK i EUR sdílí JEDNO číslo účtu.
+        // GPC měnu nenese; bez explicitní volby by lookup vrátil první variantu (CZK).
+        // Předaný currencyId (EUR) musí být autoritativní.
+        $account = '9990562239';
+        $this->registerCurrency('CZK', accountNumber: $account, bankCode: '5500'); // založen první → default lookup
+        $eurId = $this->registerCurrency('EUR', accountNumber: $account, bankCode: '5500');
+
+        // Bez volby: dnešní (nejednoznačné) chování — vezme se první shoda = CZK.
+        $rAuto = $this->import($this->gpc($account, txCurrency: '00203', stmtNo: '003'));
+        $this->assertStatementCurrency($rAuto['statement_id'], 'CZK',
+            'bez currencyId vrátí lookup první variantu (CZK)');
+
+        // S volbou EUR: měna zvoleného účtu přebíjí pořadí v DB (jiné č. výpisu → jiný file_hash).
+        $rEur = $this->import($this->gpc($account, txCurrency: '00203', stmtNo: '004'), currencyId: $eurId);
+        $this->assertStatementCurrency($rEur['statement_id'], 'EUR',
+            'currencyId EUR musí přebít sdílené číslo účtu (#167)');
+        $this->assertTransactionCurrencies($rEur['statement_id'], 'EUR');
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private function registerCurrency(
@@ -117,7 +138,7 @@ final class StatementImporterCurrencyTest extends TestCase
         ?string $accountNumber = null,
         ?string $bankCode = null,
         ?string $iban = null,
-    ): void {
+    ): int {
         $this->db->pdo()->prepare(
             'INSERT INTO currencies
                 (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default,
@@ -127,13 +148,15 @@ final class StatementImporterCurrencyTest extends TestCase
             $this->supplierId, $code, "TEST {$code} #109", $code, $code, $code,
             $accountNumber, $bankCode, $iban !== null ? str_replace(' ', '', $iban) : null,
         ]);
-        $this->currencyIds[] = (int) $this->db->pdo()->lastInsertId();
+        $id = (int) $this->db->pdo()->lastInsertId();
+        $this->currencyIds[] = $id;
+        return $id;
     }
 
     /** @return array{statement_id:int, transactions:int} */
-    private function import(string $content): array
+    private function import(string $content, ?int $currencyId = null): array
     {
-        $r = $this->importer->import($content, 'TEST-109.gpc', null);
+        $r = $this->importer->import($content, 'TEST-109.gpc', null, $currencyId);
         $this->assertFalse($r['duplicate'], 'testovací GPC nesmí být dedupnuté');
         $this->statementIds[] = $r['statement_id'];
         return $r;
@@ -157,7 +180,7 @@ final class StatementImporterCurrencyTest extends TestCase
      * Minimální validní GPC (074 header + 2× 075 transakce) se zadaným per-tx
      * kódem měny — layout přesně dle GpcParser (fixed-width, viz reálný Fio výpis).
      */
-    private function gpc(string $account, string $txCurrency): string
+    private function gpc(string $account, string $txCurrency, string $stmtNo = '003'): string
     {
         $acc16 = str_pad($account, 16, '0', STR_PAD_LEFT);
         $header = '074' . $acc16
@@ -167,7 +190,7 @@ final class StatementImporterCurrencyTest extends TestCase
             . str_pad('133700', 14, '0', STR_PAD_LEFT) . '+'   // new balance
             . str_pad('0', 14, '0', STR_PAD_LEFT) . '+'        // debit total
             . str_pad('132363', 14, '0', STR_PAD_LEFT) . '+'   // credit total
-            . '003'                                            // statement number
+            . str_pad($stmtNo, 3, '0', STR_PAD_LEFT)           // statement number (salt pro odlišení file_hash)
             . '310326'                                         // statement date
             . 'FIO';
 

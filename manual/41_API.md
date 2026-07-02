@@ -6,12 +6,14 @@ a vlastními skripty. API používá **Personal Access Tokens** (PAT) v hlavičc
 
 ## Dokumentační rozhraní
 
-K dispozici jsou **dvě varianty** stejné dokumentace nad jedním OpenAPI specem:
+K dispozici jsou **tři varianty** stejné dokumentace nad jedním OpenAPI specem
+(navzájem se prolinkují v horní liště):
 
 | URL | Nástroj | Použití |
 |---|---|---|
 | **[/api/docs](/api/docs)** | Swagger UI | „Try it out" — vlož API token (Authorize) a volej endpointy přímo z prohlížeče |
 | **[/api/reference](/api/reference)** | Redoc | Pretty static reference, 3-sloupcový layout, lepší typografie pro čtení |
+| **[/api/scalar](/api/scalar)** | Scalar | Moderní reference s vestavěným API klientem a fulltext vyhledáváním |
 | **[/api/openapi.yaml](/api/openapi.yaml)** | Raw OpenAPI 3.1 | Import do Postmana, Insomnie, Zapier Custom App, Make HTTP modulu |
 
 ---

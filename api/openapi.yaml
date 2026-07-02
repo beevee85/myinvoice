@@ -1709,6 +1709,30 @@ paths:
     get:
       tags: [Bank]
       summary: Seznam nahraných bankovních výpisů
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+          description: Stránka (50 výpisů na stránku).
+        - in: query
+          name: filter
+          style: deepObject
+          explode: true
+          description: "Volitelné filtry, zadávané jako filter[year], filter[month], filter[account]."
+          schema:
+            type: object
+            properties:
+              year:
+                type: integer
+                description: "Rok dle statement_date."
+              month:
+                type: integer
+                minimum: 1
+                maximum: 12
+                description: "Měsíc dle statement_date."
+              account:
+                type: string
+                description: "Číslo účtu — porovnává se normalizovaně (padding, lomítko ani kód banky nevadí)."
       responses:
         '200':
           description: OK
@@ -1720,6 +1744,29 @@ paths:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/BankStatement' }
+                  total:
+                    type: integer
+                    description: "Celkový počet výpisů odpovídajících filtru."
+                  page: { type: integer }
+                  limit:
+                    type: integer
+                    description: "Počet položek na stránku (50)."
+                  years:
+                    type: array
+                    items: { type: integer }
+                    description: "Roky s alespoň jedním výpisem (volby filtru; přes celý scope, ne aktuální filtr)."
+                  accounts:
+                    type: array
+                    description: "Konfigurované bankovní účty s alespoň jedním výpisem (volby filtru)."
+                    items:
+                      type: object
+                      properties:
+                        account_number: { type: string }
+                        bank_code: { type: string, nullable: true }
+                        label: { type: string, nullable: true }
+                  scan_configured:
+                    type: boolean
+                    description: "Je nakonfigurované hostitelské adresářové skenování (cfg.bank_import.scan_root)? Interní příznak pro UI tlačítko Skenovat adresář."
 
   /api/v1/bank-statements/{id}:
     parameters:
@@ -1953,6 +2000,13 @@ paths:
       description: |
         Multipart upload. Server detekuje formát z obsahu a parsuje transakce.
         Auto-matching proti otevřeným fakturám se spustí po `POST /scan`.
+
+        GPC/ABO hlavička neobsahuje měnu. Pokud jedno číslo účtu evidujete ve více
+        měnách (např. Raiffeisenbank: CZK/EUR/USD = jedno číslo), je nutné zvolit
+        cílový měnový účet přes `account_id`. Když `account_id` chybí a číslo je
+        víceznačné, server vrátí `409` s kódem `ambiguous_account_currency` a polem
+        `candidates` (seznam měnových variant). Při jednoznačném čísle je `account_id`
+        nepovinné (zpětně kompatibilní).
       requestBody:
         required: true
         content:
@@ -1965,6 +2019,11 @@ paths:
                   type: string
                   format: binary
                   description: GPC, CSV (FIO/KB/MB formáty) nebo ABO výpis
+                account_id:
+                  type: integer
+                  description: |
+                    Cílový měnový účet (`currencies.id`). Povinné jen u víceměnového účtu
+                    se sdíleným číslem účtu (jinak server vrátí 409 `ambiguous_account_currency`).
       responses:
         '201':
           description: Naparsováno
@@ -1976,31 +2035,51 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: |
+            Číslo účtu není registrované u dodavatele (`wrong_supplier_account`),
+            nebo má více měnových variant a chybí `account_id` (`ambiguous_account_currency`
+            — `error.candidates` nese seznam `{account_id, code, label}`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Zvolený `account_id` neodpovídá číslu účtu výpisu / dodavateli (`invalid_account`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
-  /api/v1/bank-statements/scan:
+  /api/v1/bank-statements/{id}/rematch:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+        description: ID výpisu (např. z odpovědi `/bank-statements/upload`).
     post:
       tags: [Bank]
-      summary: Auto-matching transakcí proti otevřeným fakturám
+      summary: Přepáruje nespárované transakce výpisu proti fakturám
       description: |
-        Pro všechny `unmatched` transakce zkusí najít fakturu podle:
+        Auto-matching nad transakcemi výpisu **přímo v databázi** — žádný
+        souborový import ani konfigurace serveru se nepoužívá. Vhodné po nahrání
+        výpisu přes `/bank-statements/upload`, nebo když uživatel ex-post doplnil
+        faktury, které by se daly napárovat.
+
+        Projde transakce výpisu ve stavu `unmatched` a `auto_partial` a pro každou
+        zkusí najít fakturu podle:
         - variabilního symbolu (přesný match) — preferovaná cesta,
         - částky + protiúčtu (fallback).
 
-        Pokud najde unikátní match, transakce se označí `matched`, faktura
-        `paid` s `paid_at = transaction.posted_at`. Multi-match transakce
-        zůstávají nepřiřazené pro manuální rozhodnutí.
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                statement_id:
-                  type: integer
-                  format: int64
-                  description: Pokud chybí, scan-uje všechny unmatched napříč všemi výpisy
+        Příchozí platba se páruje na vystavenou fakturu, odchozí na přijatou.
+        Při unikátní shodě se transakce označí jako spárovaná a faktura `paid`
+        s `paid_at = transaction.posted_at`; transakce s více kandidáty zůstávají
+        nepřiřazené pro manuální rozhodnutí. Stavy `auto_exact`, `manual`
+        a `ignored` zůstávají nedotčené.
+
+        Pozn.: hromadný **import výpisů z adresáře na serveru** (`scan_root`) je
+        hostitelská/cron záležitost a není součástí veřejného API — výpisy se přes
+        API nahrávají endpointem `/bank-statements/upload`.
       responses:
         '200':
           description: OK
@@ -2009,11 +2088,529 @@ paths:
               schema:
                 type: object
                 properties:
-                  matched_count: { type: integer }
-                  multi_match_count:
+                  considered:
                     type: integer
-                    description: Transakce s víc kandidáty (nepárované, vyžadují ruční rozhodnutí)
-                  remaining_unmatched: { type: integer }
+                    description: Počet transakcí, které se přepárovávaly (unmatched + auto_partial).
+                  newly_matched:
+                    type: integer
+                    description: Nově přesně spárované (auto_exact).
+                  newly_partial:
+                    type: integer
+                    description: Nově částečně spárované (auto_partial — částka v širší toleranci).
+                  still_unmatched:
+                    type: integer
+                    description: Po přepárování stále nespárované.
+        '404': { description: "Výpis nenalezen nebo nepatří current supplier" }
+
+  /api/v1/purchase-invoices/payment-orders/candidates:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Purchase invoices]
+      summary: Kandidáti pro platební příkaz (nezaplacené přijaté faktury)
+      parameters:
+        - in: query
+          name: currency
+          schema: { type: string }
+          description: "ISO 4217 — omezí kandidáty i účty plátce na danou měnu."
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items: { type: object }
+                    description: "Nezaplacené přijaté faktury vhodné k zařazení do příkazu."
+                  payer_accounts:
+                    type: array
+                    items: { type: object }
+                    description: "Bankovní účty dodavatele (plátce) k výběru odesílacího účtu."
+                  supplier_currencies:
+                    type: array
+                    items: { type: object }
+
+  /api/v1/purchase-invoices/payment-orders/verify-account:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Purchase invoices]
+      summary: Ověří bankovní účet dodavatele faktury (CRPDPH)
+      parameters:
+        - in: query
+          name: invoice_id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK — výsledek ověření spolehlivosti účtu
+          content:
+            application/json:
+              schema: { type: object }
+        '404': { description: "Faktura nenalezena" }
+
+  /api/v1/purchase-invoices/payment-orders:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Purchase invoices]
+      summary: Historie vytvořených platebních příkazů
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { type: object }
+    post:
+      tags: [Purchase invoices]
+      summary: Vytvoří platební příkaz z vybraných přijatých faktur
+      description: |
+        Vyžaduje roli `accountant` nebo vyšší. Sestaví příkaz k úhradě
+        (ke stažení jako ABO/KPC, CSV nebo PDF přes `/payment-orders/{id}/download`).
+        Volitelně rovnou označí faktury jako „předáno k úhradě" (`mark_paid`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invoice_ids, payer_currency_id, payment_date]
+              properties:
+                invoice_ids:
+                  type: array
+                  items: { type: integer, format: int64 }
+                payer_currency_id:
+                  type: integer
+                  format: int64
+                  description: "Účet plátce (currencies.id) — určuje odesílací účet a měnu."
+                payment_date:
+                  type: string
+                  format: date
+                  description: "Datum splatnosti / provedení příkazu."
+                constant_symbol: { type: string, nullable: true }
+                note: { type: string, nullable: true }
+                mark_paid:
+                  type: boolean
+                  description: "Označit zařazené faktury jako předané k úhradě."
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order_id: { type: integer, format: int64 }
+                  view:
+                    type: object
+                    properties:
+                      item_count: { type: integer }
+                      total_amount: { type: number }
+                      currency: { type: string }
+                      mark_paid: { type: boolean }
+                  skipped:
+                    type: array
+                    items: { type: object }
+                    description: "Faktury vynechané z příkazu (s důvodem)."
+        '422':
+          description: Validace selhala
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/purchase-invoices/payment-orders/mark:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Purchase invoices]
+      summary: Označí faktury jako předané k úhradě (bez generování souboru)
+      description: "Vyžaduje roli `accountant` nebo vyšší. Nastaví příznak `payment_ordered_at` (NEmění stav faktury)."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invoice_ids]
+              properties:
+                invoice_ids:
+                  type: array
+                  items: { type: integer, format: int64 }
+                mark_paid: { type: boolean }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+        '422':
+          description: Validace selhala
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/purchase-invoices/payment-orders/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Purchase invoices]
+      summary: Detail platebního příkazu vč. položek
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order_id: { type: integer, format: int64 }
+                  created_at: { type: string, format: date-time }
+                  items:
+                    type: array
+                    items: { type: object }
+        '404': { description: "Příkaz nenalezen" }
+
+  /api/v1/purchase-invoices/payment-orders/{id}/download:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+      - in: query
+        name: format
+        schema: { type: string, enum: [abo, csv, pdf], default: abo }
+        description: "Formát ke stažení: abo (KPC/ABO), csv nebo pdf."
+    get:
+      tags: [Purchase invoices]
+      summary: Stáhne soubor platebního příkazu (ABO/CSV/PDF)
+      responses:
+        '200':
+          description: OK — binární soubor příkazu
+          content:
+            text/plain:
+              schema: { type: string, format: binary }
+            text/csv:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404': { description: "Příkaz nenalezen" }
+        '422': { description: "Export selhal" }
+
+  /api/v1/purchase-invoices/{id}/payment-qr:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Purchase invoices]
+      summary: QR platba a bankovní účet přijaté faktury
+      description: |
+        Vrátí QR platbu (SPAYD pro CZK, SEPA EPC jinak) a bankovní účet zjištěný
+        v pořadí ISDOC → AI → ruční edit. `needs_account=true` signalizuje, že
+        klient může spustit doplnění účtu přes `/payment-qr/extract-account`.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchasePaymentQr' }
+        '400': { description: "Neplatné ID" }
+        '404': { description: "Faktura nenalezena" }
+
+  /api/v1/purchase-invoices/{id}/payment-qr/extract-account:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [Purchase invoices]
+      summary: Doplní bankovní účet přijaté faktury (lazy z ISDOC/AI)
+      description: "Vyžaduje roli `accountant` nebo vyšší."
+      responses:
+        '200':
+          description: OK — stejný tvar jako GET /payment-qr
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchasePaymentQr' }
+        '404': { description: "Faktura nenalezena" }
+
+  /api/v1/purchase-invoices/{id}/payment-account:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    put:
+      tags: [Purchase invoices]
+      summary: Ruční nastavení bankovního účtu přijaté faktury
+      description: "Vyžaduje roli `accountant` nebo vyšší. Uloží účet a nastaví `source=manual`."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                account_number: { type: string, maxLength: 34 }
+                bank_code: { type: string, maxLength: 10 }
+                iban: { type: string, maxLength: 34 }
+                bic: { type: string, maxLength: 11 }
+                variable_symbol: { type: string, maxLength: 20 }
+      responses:
+        '200':
+          description: OK — stejný tvar jako GET /payment-qr
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchasePaymentQr' }
+        '404': { description: "Faktura nenalezena" }
+
+  /api/v1/invoices/{id}/work-report/materials:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+      - in: query
+        name: force
+        schema: { type: integer, enum: [1] }
+        description: "Jen admin — vynutí uložení i u vystavené faktury."
+    put:
+      tags: [WorkReports]
+      summary: Uloží materiálovou část výkazu práce
+      description: |
+        Vyžaduje roli `accountant` nebo vyšší. Standardně jen u konceptu faktury
+        (admin může vynutit u vystavené přes `?force=1`). Materiály jsou součástí
+        téhož výkazu práce jako práce a na faktuře se promítnou jako souhrnná položka.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [materials]
+              properties:
+                material_title: { type: string, default: "Materiál" }
+                material_vat_rate_id:
+                  type: integer
+                  nullable: true
+                  description: "Povinné, je-li alespoň jeden materiál; musí existovat v sazbách DPH."
+                project_id: { type: integer, nullable: true }
+                materials:
+                  type: array
+                  items:
+                    type: object
+                    required: [description, quantity, unit, unit_price]
+                    properties:
+                      description: { type: string }
+                      quantity: { type: number, description: "> 0" }
+                      unit: { type: string }
+                      unit_price: { type: number, description: ">= 0" }
+                      order_index: { type: integer }
+      responses:
+        '200':
+          description: OK — aktualizovaný výkaz práce
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { description: "Validace selhala" }
+        '404': { description: "Faktura nenalezena" }
+        '409': { description: "Faktura není editovatelná (není koncept)" }
+
+  /api/v1/clients/{id}/work-report-link:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [WorkReports]
+      summary: Stav veřejného sledovacího odkazu na výkaz (klient)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkReportLinkStatus' }
+        '404': { description: "Klient nenalezen" }
+    delete:
+      tags: [WorkReports]
+      summary: Zneplatní sledovací odkaz klienta
+      description: "Vyžaduje roli `accountant` nebo vyšší."
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  exists: { type: boolean }
+        '404': { description: "Klient nenalezen" }
+
+  /api/v1/clients/{id}/work-report-link/recipients:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [WorkReports]
+      summary: Příjemci pro odeslání odkazu (předvyplnění modalu) — klient
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkReportLinkRecipients' }
+        '404': { description: "Klient nenalezen" }
+
+  /api/v1/clients/{id}/work-report-link/send:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [WorkReports]
+      summary: Odešle sledovací odkaz na výkaz e-mailem (klient)
+      description: "Vyžaduje roli `accountant` nebo vyšší. Vytvoří odkaz, pokud ještě neexistuje."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                to: { type: array, items: { type: string } }
+                cc: { type: array, items: { type: string } }
+                bcc: { type: array, items: { type: string } }
+                note: { type: string, maxLength: 2000 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sent_to: { type: array, items: { type: string } }
+                  sent_at: { type: string, format: date-time }
+                  url: { type: string }
+        '422': { description: "Žádný příjemce (no_recipients)" }
+        '404': { description: "Klient nenalezen" }
+        '502': { description: "Odeslání selhalo (send_failed)" }
+
+  /api/v1/projects/{id}/work-report-link:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [WorkReports]
+      summary: Stav veřejného sledovacího odkazu na výkaz (zakázka)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkReportLinkStatus' }
+        '404': { description: "Zakázka nenalezena" }
+    delete:
+      tags: [WorkReports]
+      summary: Zneplatní sledovací odkaz zakázky
+      description: "Vyžaduje roli `accountant` nebo vyšší."
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  exists: { type: boolean }
+        '404': { description: "Zakázka nenalezena" }
+
+  /api/v1/projects/{id}/work-report-link/recipients:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [WorkReports]
+      summary: Příjemci pro odeslání odkazu (předvyplnění modalu) — zakázka
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkReportLinkRecipients' }
+        '404': { description: "Zakázka nenalezena" }
+
+  /api/v1/projects/{id}/work-report-link/send:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [WorkReports]
+      summary: Odešle sledovací odkaz na výkaz e-mailem (zakázka)
+      description: "Vyžaduje roli `accountant` nebo vyšší. Vytvoří odkaz, pokud ještě neexistuje."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                to: { type: array, items: { type: string } }
+                cc: { type: array, items: { type: string } }
+                bcc: { type: array, items: { type: string } }
+                note: { type: string, maxLength: 2000 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sent_to: { type: array, items: { type: string } }
+                  sent_at: { type: string, format: date-time }
+                  url: { type: string }
+        '422': { description: "Žádný příjemce (no_recipients)" }
+        '404': { description: "Zakázka nenalezena" }
+        '502': { description: "Odeslání selhalo (send_failed)" }
 
   /api/v1/codebooks/countries:
     get:
@@ -2100,182 +2697,6 @@ paths:
                     items: { type: integer }
                     example: [2026, 2025, 2024, 2023, 2018]
                     description: Sjednocení obou množin + aktuální a minulý rok jako floor
-
-  # ------------------------------------------------------------
-  # Recurring invoice templates (pravidelné fakturace) — admin API
-  # ------------------------------------------------------------
-  /api/recurring:
-    get:
-      tags: [Recurring]
-      summary: Seznam šablon pravidelných faktur (scoped na aktuálního dodavatele)
-      parameters:
-        - in: query
-          name: client_id
-          schema: { type: integer }
-          description: Filtr na klienta
-        - in: query
-          name: status
-          schema:
-            type: string
-            enum: [active, paused, expired]
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: '#/components/schemas/RecurringTemplate' }
-    post:
-      tags: [Recurring]
-      summary: Vytvořit šablonu pravidelné faktury
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/RecurringTemplateInput' }
-      responses:
-        '201':
-          description: Created
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/RecurringTemplate' }
-
-  /api/recurring/{id}:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: { type: integer }
-    get:
-      tags: [Recurring]
-      summary: Detail šablony
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/RecurringTemplate' }
-        '404': { description: Nenalezena }
-    put:
-      tags: [Recurring]
-      summary: Update šablony
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/RecurringTemplateInput' }
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/RecurringTemplate' }
-    delete:
-      tags: [Recurring]
-      summary: Smazat šablonu (vygenerované faktury zůstanou, jen ztratí vazbu)
-      responses:
-        '200':
-          description: OK
-
-  /api/recurring/{id}/invoices:
-    get:
-      tags: [Recurring]
-      summary: Seznam faktur vygenerovaných z této šablony (poslední první)
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: integer }
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        id: { type: integer }
-                        varsymbol: { type: string, nullable: true }
-                        invoice_type: { type: string }
-                        status: { type: string }
-                        issue_date: { type: string, format: date }
-                        due_date: { type: string, format: date }
-                        paid_at: { type: string, format: date, nullable: true }
-                        total_with_vat: { type: number, format: float }
-                        amount_to_pay: { type: number, format: float }
-                        currency: { type: string }
-
-  /api/recurring/{id}/pause:
-    post:
-      tags: [Recurring]
-      summary: Pozastavit šablonu (cron přeskočí, dokud není resumed)
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: integer }
-      responses:
-        '200':
-          description: OK
-
-  /api/recurring/{id}/resume:
-    post:
-      tags: [Recurring]
-      summary: Obnovit šablonu (vyžaduje next_run_date <= end_date)
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: integer }
-      responses:
-        '200':
-          description: OK
-        '409':
-          description: Šablona vypršela (next_run > end_date)
-
-  /api/recurring/{id}/run-now:
-    post:
-      tags: [Recurring]
-      summary: Manuálně vygenerovat fakturu ze šablony (pro testování)
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: integer }
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                issue_date:
-                  type: string
-                  format: date
-                  description: "Volitelný override; default = next_run_date šablony"
-      responses:
-        '201':
-          description: Faktura vygenerována
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  invoice_id: { type: integer }
-                  varsymbol: { type: string, nullable: true }
-                  issued:    { type: boolean }
-                  sent_to:   { type: array, items: { type: string } }
-                  new_next_run_date: { type: string, format: date, nullable: true }
-                  template_status:   { type: string, enum: [active, paused, expired] }
 
   # ============================================================================
   # Purchase invoices (přijaté faktury) — fáze 1 integrace forku
@@ -5561,13 +5982,54 @@ components:
             revenue: { type: number }
             count: { type: integer }
 
+    PurchasePaymentQr:
+      type: object
+      description: "QR platba + bankovní účet přijaté faktury (GET/POST/PUT na /purchase-invoices/{id}/payment-qr resp. /payment-account)."
+      properties:
+        ok: { type: boolean }
+        qr_data_uri: { type: string, nullable: true, description: "QR jako data URI (PNG)." }
+        source: { type: string, nullable: true, enum: [manual, isdoc, ai_reextract, qr_image] }
+        amount: { type: number }
+        currency: { type: string }
+        account:
+          type: object
+          properties:
+            account_number: { type: string, nullable: true }
+            bank_code: { type: string, nullable: true }
+            iban: { type: string, nullable: true }
+            bic: { type: string, nullable: true }
+            variable_symbol: { type: string, nullable: true }
+        editable: { type: boolean }
+        needs_account: { type: boolean }
+        can_extract: { type: boolean, nullable: true }
+
+    WorkReportLinkStatus:
+      type: object
+      description: "Stav veřejného sledovacího odkazu na výkaz (klient/zakázka)."
+      properties:
+        exists: { type: boolean }
+        url: { type: string, nullable: true }
+        last_sent_at: { type: string, format: date-time, nullable: true }
+        last_viewed_at: { type: string, format: date-time, nullable: true }
+
+    WorkReportLinkRecipients:
+      type: object
+      description: "Navržení příjemci pro odeslání odkazu (předvyplnění modalu)."
+      properties:
+        to: { type: array, items: { type: string } }
+        cc: { type: array, items: { type: string } }
+        bcc: { type: array, items: { type: string } }
+        resolved: { type: object }
+
     BankStatement:
       type: object
       description: "Položka seznamu výpisů (GET /bank-statements). Bankovní spojení dodavatele je per-měna na /settings/currencies, ne tady."
       properties:
         id: { type: integer, format: int64 }
+        source: { type: string, enum: [gpc, email_notice], description: "Původ výpisu: gpc = oficiální GPC/ABO výpis z banky, email_notice = virtuální výpis složený z e-mailových bankovních avíz." }
         file_name: { type: string, example: "vypis_2026_05.gpc" }
         account_number: { type: string, example: "1234567890/0100" }
+        bank_code: { type: string, nullable: true, example: "0100", description: "Kód banky účtu — autoritativně z konfigurovaného účtu (currencies.bank_code), fallback z výpisu. GPC výpisy ho samy nenesou." }
         currency: { type: string, nullable: true, example: EUR, description: "ISO 4217. Odvozeno z transakcí výpisu nebo z currencies.account_number. NULL u výpisů importovaných před v4.1.0." }
         statement_date: { type: string, format: date }
         statement_number: { type: string, nullable: true }
@@ -5587,7 +6049,6 @@ components:
         - type: object
           properties:
             file_hash: { type: string, description: "SHA-256 originálního souboru" }
-            bank_code: { type: string, nullable: true }
             credit_total: { type: number, format: float, nullable: true }
             debit_total: { type: number, format: float, nullable: true }
             imported_by: { type: integer, nullable: true, description: "User ID importujícího" }
@@ -6088,6 +6549,12 @@ components:
         pdf_size_bytes: { type: integer, nullable: true }
         pdf_original_name: { type: string, nullable: true }
         pdf_uploaded_at: { type: string, format: date-time, nullable: true }
+        source_path: { type: string, nullable: true, description: "Relative path to machine-readable source artifact within archive_storage (sources/ subtree)" }
+        source_hash: { type: string, nullable: true, description: "SHA-256 hex of source artifact" }
+        source_size_bytes: { type: integer, nullable: true }
+        source_original_name: { type: string, nullable: true }
+        source_format: { type: string, nullable: true, enum: [isdoc, isdocx, pdf, pohoda_xml, idoklad_json, fakturoid_json], description: "Format of the archived authoritative source document" }
+        source_uploaded_at: { type: string, format: date-time, nullable: true }
         vat_classification_code: { type: string, nullable: true }
         vat_overrides:
           type: array

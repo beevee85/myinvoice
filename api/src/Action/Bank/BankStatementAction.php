@@ -153,21 +153,25 @@ final class BankStatementAction
         } catch (\Throwable $e) {
             return Json::error($response, 'parse_failed', 'Nelze parsovat: ' . $e->getMessage(), 400);
         }
+        // MS-P2-1 + #167: ověř, že account_number patří currencies aktuálního supplieru,
+        // a vyber cílový měnový účet. U víceměnového účtu se SDÍLENÝM číslem (Raiffeisenbank:
+        // CZK/EUR/USD = jedno číslo) nelze měnu z GPC odvodit → vyžádej `account_id`.
+        $currencyId = null;
         $accountNumber = (string) ($parsed['header']['account_number'] ?? '');
         if ($accountNumber !== '') {
             $sid = SupplierGuard::currentId($request);
             $stmt = $this->db->pdo()->prepare(
-                'SELECT account_number FROM currencies WHERE supplier_id = ? AND account_number IS NOT NULL'
+                'SELECT id, code, label, account_number, iban FROM currencies WHERE supplier_id = ?'
             );
             $stmt->execute([$sid]);
-            $found = false;
-            foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $stored) {
-                if (\MyInvoice\Service\Bank\AccountNumberNormalizer::equals((string) $stored, $accountNumber)) {
-                    $found = true;
-                    break;
+            $matches = [];
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+                $iban = isset($row['iban']) && is_string($row['iban']) ? $row['iban'] : null;
+                if (\MyInvoice\Service\Bank\AccountNumberNormalizer::matchesAny($accountNumber, $row['account_number'] ?? null, $iban)) {
+                    $matches[] = $row;
                 }
             }
-            if (!$found) {
+            if ($matches === []) {
                 return Json::error(
                     $response,
                     'wrong_supplier_account',
@@ -175,10 +179,51 @@ final class BankStatementAction
                     409
                 );
             }
+
+            $body = (array) ($request->getParsedBody() ?? []);
+            $rawAccountId = $body['account_id'] ?? null;
+            if ($rawAccountId !== null && $rawAccountId !== '') {
+                // Zvolený účet musí být mezi shodami (tím je vynucený scope na supplieru
+                // i shoda čísla účtu — nelze podstrčit cizí účet/měnu).
+                $accId = (int) $rawAccountId;
+                $chosen = null;
+                foreach ($matches as $m) {
+                    if ((int) $m['id'] === $accId) { $chosen = $m; break; }
+                }
+                if ($chosen === null) {
+                    return Json::error(
+                        $response,
+                        'invalid_account',
+                        'Zvolený měnový účet neodpovídá číslu účtu ve výpisu nebo nepatří aktuálnímu dodavateli.',
+                        422
+                    );
+                }
+                $currencyId = $accId;
+            } else {
+                // Bez volby: víc měnových variant téhož čísla = nejednoznačné → vrať kandidáty.
+                $distinctCodes = array_values(array_unique(array_map(static fn ($m) => (string) $m['code'], $matches)));
+                if (count($distinctCodes) > 1) {
+                    $candidates = array_map(static fn ($m) => [
+                        'account_id' => (int) $m['id'],
+                        'code'       => (string) $m['code'],
+                        'label'      => (string) ($m['label'] ?? '') !== '' ? (string) $m['label'] : (string) $m['code'],
+                    ], $matches);
+                    return Json::error(
+                        $response,
+                        'ambiguous_account_currency',
+                        'Toto číslo účtu má více měnových variant — zvolte cílový měnový účet.',
+                        409,
+                        ['candidates' => array_values($candidates)]
+                    );
+                }
+                // Jednoznačný účet: použij konkrétní supplier-scoped řádek (autoritativní
+                // měna i kód banky, tenant-safe — na rozdíl od tenant-less lookupu v importeru).
+                $currencyId = (int) $matches[0]['id'];
+            }
         }
 
         try {
-            $r = $this->importer->import($content, $name, (int) ($user['id'] ?? 0));
+            $r = $this->importer->import($content, $name, (int) ($user['id'] ?? 0), $currencyId);
         } catch (\Throwable $e) {
             return Json::error($response, 'parse_failed', 'Nelze parsovat: ' . $e->getMessage(), 400);
         }
@@ -196,8 +241,16 @@ final class BankStatementAction
         // normalizované hodnoty (REGEXP_REPLACE non-digits + TRIM leading zeros).
         $sid = SupplierGuard::currentId($request);
         $limit = 50;
-        $page = max(1, (int) ($request->getQueryParams()['page'] ?? 1));
+        $qp = $request->getQueryParams();
+        $page = max(1, (int) ($qp['page'] ?? 1));
         $offset = ($page - 1) * $limit; // int (page castnuto) → bezpečně inline do LIMIT/OFFSET
+
+        // Volitelné filtry rok/měsíc (statement_date) + číslo účtu. statement_date je
+        // u avíz-výpisů 1. den měsíce, takže YEAR()/MONTH() funguje i pro ně.
+        $filter  = (array) ($qp['filter'] ?? []);
+        $year    = isset($filter['year'])  && $filter['year']  !== '' ? (int) $filter['year']  : null;
+        $month   = isset($filter['month']) && $filter['month'] !== '' ? (int) $filter['month'] : null;
+        $account = isset($filter['account']) ? trim((string) $filter['account']) : '';
 
         // Společný scope filtr (account_number/bank_code z currencies dodavatele).
         $scopeSql = "EXISTS (
@@ -207,14 +260,39 @@ final class BankStatementAction
                        = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''),  '[^0-9]', ''))
                      AND (bs.bank_code IS NULL OR cur.bank_code IS NULL OR cur.bank_code = bs.bank_code)
               )";
-        $countStmt = $this->db->pdo()->prepare("SELECT COUNT(*) FROM bank_statements bs WHERE $scopeSql");
-        $countStmt->execute([$sid]);
+
+        // Filtr WHERE fragment + parametry (sdílený mezi COUNT a výběrem řádků). Účet
+        // porovnáváme normalizovaně (stejně jako scope), ať padding/lomítko nevadí.
+        $filterSql = '';
+        $filterParams = [];
+        if ($year !== null)  { $filterSql .= ' AND YEAR(bs.statement_date) = ?';  $filterParams[] = $year; }
+        if ($month !== null) { $filterSql .= ' AND MONTH(bs.statement_date) = ?'; $filterParams[] = $month; }
+        if ($account !== '') {
+            $filterSql .= " AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''), '[^0-9]', ''))
+                              = TRIM(LEADING '0' FROM REGEXP_REPLACE(?, '[^0-9]', ''))";
+            $filterParams[] = $account;
+        }
+
+        $countStmt = $this->db->pdo()->prepare("SELECT COUNT(*) FROM bank_statements bs WHERE $scopeSql$filterSql");
+        $countStmt->execute(array_merge([$sid], $filterParams));
         $total = (int) $countStmt->fetchColumn();
 
         // account_label: vlastní pojmenování účtu z currencies.label (např. "CZK — Fio Bank")
         // přes scalar subselect (LIMIT 1 — sup. může mít jen 1 záznam per account_number+bank_code).
         $stmt = $this->db->pdo()->prepare(
-            "SELECT bs.id, bs.source, bs.file_name, bs.account_number, bs.currency, bs.statement_date, bs.statement_number,
+            "SELECT bs.id, bs.source, bs.file_name, bs.account_number,
+                    -- Kód banky autoritativně z konfigurovaného účtu (currencies); GPC výpisy
+                    -- ho neukládají (na rozdíl od e-mailových avíz), tak ať se zobrazí všude.
+                    COALESCE(
+                      (SELECT cur.bank_code FROM currencies cur
+                        WHERE cur.supplier_id = ?
+                          AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(cur.account_number, ''), '[^0-9]', ''))
+                            = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''),  '[^0-9]', ''))
+                          AND cur.bank_code IS NOT NULL AND cur.bank_code <> ''
+                        LIMIT 1),
+                      bs.bank_code
+                    ) AS bank_code,
+                    bs.currency, bs.statement_date, bs.statement_number,
                     bs.prev_balance, bs.curr_balance, bs.transaction_count, bs.matched_count, bs.imported_at,
                     (bs.file_content IS NOT NULL) AS has_file,
                     (bs.pdf_content IS NOT NULL) AS has_pdf, bs.pdf_name,
@@ -225,17 +303,11 @@ final class BankStatementAction
                         AND (bs.bank_code IS NULL OR cur.bank_code IS NULL OR cur.bank_code = bs.bank_code)
                       LIMIT 1) AS account_label
                FROM bank_statements bs
-              WHERE EXISTS (
-                  SELECT 1 FROM currencies cur
-                   WHERE cur.supplier_id = ?
-                     AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(cur.account_number, ''), '[^0-9]', ''))
-                       = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''),  '[^0-9]', ''))
-                     AND (bs.bank_code IS NULL OR cur.bank_code IS NULL OR cur.bank_code = bs.bank_code)
-              )
+              WHERE $scopeSql$filterSql
               ORDER BY bs.statement_date DESC, bs.id DESC
               LIMIT $limit OFFSET $offset"
         );
-        $stmt->execute([$sid, $sid]);
+        $stmt->execute(array_merge([$sid, $sid, $sid], $filterParams));
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         foreach ($rows as &$r) {
             $r['id'] = (int) $r['id'];
@@ -246,11 +318,55 @@ final class BankStatementAction
             $r['has_file'] = (bool) $r['has_file'];
             $r['has_pdf'] = (bool) $r['has_pdf'];
         }
+        unset($r);
+
+        // Volby pro filtry (počítané přes CELÝ scope, ne přes aktuální filtr — ať
+        // dropdowny nemizí podle zvoleného roku/účtu). Roky z statement_date,
+        // účty distinct + jejich label.
+        $yearsStmt = $this->db->pdo()->prepare(
+            "SELECT DISTINCT YEAR(bs.statement_date) AS y
+               FROM bank_statements bs WHERE $scopeSql AND bs.statement_date IS NOT NULL
+              ORDER BY y DESC"
+        );
+        $yearsStmt->execute([$sid]);
+        $years = array_values(array_filter(array_map(
+            static fn ($y) => (int) $y,
+            $yearsStmt->fetchAll(\PDO::FETCH_COLUMN)
+        )));
+
+        // Účty pro filtr bereme z CURRENCIES (konfigurované bankovní účty dodavatele),
+        // ne ze surových account_number ve výpisech — tím máme:
+        //   • každý účet právě 1× (tentýž účet chodí z avíza i z GPC v jiném formátu),
+        //   • autoritativní kód banky (na statementu může chybět, typicky u avíz),
+        //   • stejné pořadí jako v adminu (Nastavení → bankovní účty: code, výchozí, label).
+        // EXISTS jen omezí na účty, které reálně mají nějaký výpis (jinak by filtr nedával smysl).
+        $accStmt = $this->db->pdo()->prepare(
+            "SELECT cur.account_number, cur.bank_code, cur.label
+               FROM currencies cur
+              WHERE cur.supplier_id = ?
+                AND cur.account_number IS NOT NULL AND cur.account_number <> ''
+                AND EXISTS (
+                    SELECT 1 FROM bank_statements bs
+                     WHERE TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''), '[^0-9]', ''))
+                         = TRIM(LEADING '0' FROM REGEXP_REPLACE(cur.account_number, '[^0-9]', ''))
+                       AND (bs.bank_code IS NULL OR cur.bank_code IS NULL OR cur.bank_code = bs.bank_code)
+                )
+              ORDER BY cur.code, cur.is_default DESC, cur.label"
+        );
+        $accStmt->execute([$sid]);
+        $accounts = array_map(static fn ($a) => [
+            'account_number' => (string) $a['account_number'],
+            'bank_code'      => $a['bank_code'] !== null ? (string) $a['bank_code'] : null,
+            'label'          => $a['label'] !== null ? (string) $a['label'] : null,
+        ], $accStmt->fetchAll(\PDO::FETCH_ASSOC));
+
         return Json::ok($response, [
             'items' => $rows,
             'total' => $total,
             'page' => $page,
             'limit' => $limit,
+            'years' => $years,
+            'accounts' => $accounts,
             // Adresářové skenování je nastavené? UI podle toho zobrazí tlačítko „Skenovat adresář".
             'scan_configured' => $this->scanConfigured(),
         ]);

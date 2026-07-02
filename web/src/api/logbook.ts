@@ -41,6 +41,8 @@ export interface TripCategory {
   code: string
   label: string
   is_private: boolean
+  /** Výchozí kategorie tenantu — předvyplní se u nové jízdy (max jedna per supplier). */
+  is_default: boolean
   display_order: number
   is_archived: boolean
   trips_count?: number | null
@@ -50,6 +52,7 @@ export interface TripCategoryPayload {
   code: string
   label: string
   is_private?: boolean
+  is_default?: boolean
   display_order?: number
   is_archived?: boolean
 }

@@ -96,6 +96,7 @@ $skipExact = [
     '/api/openapi.yaml',
     '/api/docs',
     '/api/reference',
+    '/api/scalar',
     '/api/health',          // dokumentované, ale alias /api/v1/health
     '/api/version',
     '/api/invoices/preview-varsymbol', // admin tooling
