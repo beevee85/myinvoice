@@ -6,6 +6,10 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-02 — UPDATE z upstreamu: v4.43.4 → v4.44.0
+
+Merge 22 commitů (mj. e-mailové profily — migrace 0124, stavy transakcí — 0125, sjednocená stránka Banka se záložkami, Dodavatelé přesunuti do Číselníků). Jediný konflikt: `AppLayout.vue` — upstream přejmenoval nav položku Banka (sjednocená stránka) a náš řádek Pokladna byl hned pod ní; řešení = upstream položka + naše Pokladna pod ní. Checklist všech úprav (FÁZE 1–7) prošel; tokeny, grafy i invoice.css upstream neměnil. Migrace 0124–0125 + naše 0900–0902 aplikované.
+
 ## 2026-07-02 — FÁZE 7: redesign PDF faktury (inspirace iDoklad)
 
 **Co se změnilo (POZOR — mění vzhled dokladů pro klienty):**
