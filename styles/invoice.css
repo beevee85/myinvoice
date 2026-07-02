@@ -104,11 +104,14 @@ td.meta { width: 45%; text-align: right; }
     border-collapse: collapse;
     margin-bottom: 6mm;
 }
-/* Dodavatel bez výplně (vzdušnost) — zvýrazněný tintem zůstává jen odběratel. */
+/* Dodavatel bez výplně (vzdušnost) — zvýrazněný tintem zůstává jen odběratel.
+   Kompaktní střih (vzor iDoklad/Fakturoid): drobný štítek + hustá adresa 9pt. */
 .parties td {
     width: 50%;
     vertical-align: top;
-    padding: 4mm;
+    padding: 3mm 4mm;
+    font-size: 9pt;
+    line-height: 1.45;
 }
 /* Odběratel zvýrazněn jen podbarvením (bez rámečku) — na dokladu „skočí do oka" víc
    než blok dodavatele. Default bg zrcadlí akcentovou plochu (ISDOC badge); při
@@ -118,28 +121,28 @@ td.meta { width: 45%; text-align: right; }
     background: #EFEAFF;
 }
 /* Popisky sekcí v tiché šedé — akcentová barva zůstává jen značce, platebnímu
-   pásu a součtům (střídmost = moderní výraz). */
-.parties h2 {
-    margin: 0 0 4mm;
-    font-size: 8.5pt;
+   pásu a součtům (střídmost = moderní výraz). div místo h2: mPDF na h2 cpe
+   vlastní výchozí styl (obří tučný text) a class CSS ignoruje. */
+.party-label {
+    font-size: 7.5pt;
     text-transform: uppercase;
     letter-spacing: 1.2pt;
     color: #7A748C;
     font-weight: bold;
+    margin-bottom: 1.5mm;
+    line-height: 1.6;
 }
 .party-name {
-    font-size: 12pt;
+    font-size: 10.5pt;
     font-weight: bold;
-    margin-bottom: 1mm;
-    line-height: 1.3;
+    margin-bottom: 0.5mm;
+    line-height: 1.35;
     color: #15131D;
 }
 .ic-dic {
-    font-family: 'montserrat', 'DejaVu Sans', sans-serif;
-    font-size: 9pt;
+    font-size: 8pt;
     color: #5A5470;
-    margin-top: 5mm;
-    line-height: 1.6;
+    line-height: 1.55;
 }
 
 /* ─── METADATA ─── */

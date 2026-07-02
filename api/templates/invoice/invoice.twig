@@ -58,8 +58,7 @@
 <table class="parties">
   <tr>
     <td>
-      <h2>{{ t('Dodavatel', 'Supplier') }}</h2>
-      <div class="spacer-3">&nbsp;</div>
+      <div class="party-label">{{ t('Dodavatel', 'Supplier') }}</div>
       <div class="party-name">{{ supplier.company_name }}</div>
       {% if supplier.display_name and supplier.display_name != supplier.company_name %}
         <div>{{ supplier.display_name }}</div>
@@ -67,7 +66,7 @@
       <div>{{ supplier.street }}</div>
       <div>{{ supplier.zip }} {{ supplier.city }}</div>
       <div>{{ locale == 'en' ? supplier.country_name_en : supplier.country_name_cs }}</div>
-      <div class="spacer-4">&nbsp;</div>
+      <div class="spacer-2">&nbsp;</div>
       <div class="ic-dic">
         {% if supplier.ic %}{{ t('IČO', 'Reg. No.') }}: {{ supplier.ic }}<br>{% endif %}
         {# SK plátce DPH (#120): DIČ s prefixem SK je „IČ DPH"; vedle něj patří DIČ = totéž bez
@@ -84,8 +83,7 @@
       </div>
     </td>
     <td class="party-customer">
-      <h2>{{ t('Odběratel', 'Customer') }}</h2>
-      <div class="spacer-3">&nbsp;</div>
+      <div class="party-label">{{ t('Odběratel', 'Customer') }}</div>
       <div class="party-name">{{ client.company_name }}</div>
       {% if client.first_name or client.last_name %}
         <div>{{ client.first_name }} {{ client.last_name }}</div>
@@ -93,7 +91,7 @@
       <div>{{ client.street }}</div>
       <div>{{ client.zip }} {{ client.city }}</div>
       <div>{{ locale == 'en' ? client.country_name_en : client.country_name_cs }}</div>
-      <div class="spacer-4">&nbsp;</div>
+      <div class="spacer-2">&nbsp;</div>
       <div class="ic-dic">
         {# Národní daňové číslo (#120): SK DIČ / DE+AT Steuernummer / PL NIP / HU Adószám —
            nativní label podle země klienta. `dic` zůstává VAT ID s prefixem (u SK = IČ DPH,
