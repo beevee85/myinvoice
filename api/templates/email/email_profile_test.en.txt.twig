@@ -1,0 +1,16 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Sending profile test
+--------------------
+
+Hello,
+
+this e-mail verifies the sending profile {{ profile.name }} ({{ profile.code }}).
+
+From: {{ profile.from }}
+Reply-To: {{ profile.reply_to }}
+Transport: {{ profile.transport }}
+
+If the e-mail arrived and the headers match your expectations, the profile is usable for sending.
+{% endblock %}

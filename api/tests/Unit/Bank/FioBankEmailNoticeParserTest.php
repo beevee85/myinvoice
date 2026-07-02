@@ -41,6 +41,7 @@ TEXT;
         self::assertSame('0800', $parsed->counterpartyBank);
         self::assertSame('test potvrzeni', $parsed->message);
         self::assertNull($parsed->constantSymbol);
+        self::assertSame(168459.32, $parsed->balance);
     }
 
     public function testParsesOutgoingNoticeAsNegativeAmount(): void
@@ -72,6 +73,7 @@ TEXT;
         self::assertSame('3030', $parsed->counterpartyBank);
         self::assertSame('Najem skladovych prostor', $parsed->message);
         self::assertSame('0', $parsed->constantSymbol);
+        self::assertSame(17449.23, $parsed->balance);
     }
 
     public function testParsesNoticeWithExplicitCurrencyAndWithoutSymbols(): void

@@ -1,9 +1,13 @@
 # 37. Bankovní účty a e-mailová avíza (IMAP)
 
-**Cesta: `Systém → Bankovní účty`**
+**Cesta: `Finance → Bankovní účty`**
 
-Tato stránka spravuje **bankovní účty dodavatele** (pro PDF faktury, QR platby
-a GPC výpisy) a navíc **bankovní e-mailová avíza přes IMAP**. Bankovní avízo je
+Stránka sdružuje čtyři záložky: **Bankovní výpisy** (import GPC a párování
+plateb — viz [24. Banka](24_Banka.md)), **Měny a účty**, **Stavy na účtech**
+a **Bankovní avíza z e-mailu**. Záložky kromě výpisů vidí jen administrátor.
+
+Tato kapitola popisuje správu **bankovních účtů dodavatele** (pro PDF faktury,
+QR platby a GPC výpisy) a **bankovních e-mailových avíz přes IMAP**. Bankovní avízo je
 e-mail od banky s údaji o platbě — MyInvoice ho umí pravidelně načítat, vytěžit
 z něj VS, částku, měnu, datum a cílový účet a vytvořit z něj bankovní transakci
 stejně jako z [výpisu](24_Banka.md).
@@ -119,6 +123,8 @@ Volitelná pole:
 - `constant_symbol`
 - `message`
 - `bank_ref`
+- `balance` (disponibilní zůstatek účtu z avíza — zobrazí se v detailu
+  měsíčního avízo-výpisu a promítne se do přehledu **Stavy na účtech**)
 
 Regex parser používá první zachycenou skupinu nebo pojmenovanou skupinu se
 stejným názvem jako pole. Pro částku umí formáty typu `+1.234,56`, datum např.
@@ -183,6 +189,7 @@ Regexy pro vytěžená pole:
 | Konstantní symbol | `Konstantní\s+symbol\s*([0-9]+)` |
 | Zpráva | `Zpráva\s+pro\s+příjemce\s*(.*?)\s*Disponibilní\s+zůstatek` |
 | Reference banky | prázdné |
+| Disponibilní zůstatek | `Disponibilní\s+zůstatek(?:\s+po\s+pohybu)?\s*([+\-]?[0-9 .]+,[0-9]{2})` |
 
 > 🛈 Do UI zadávej regex bez krajních oddělovačů (`/.../`). Parser je doplní
 > sám.

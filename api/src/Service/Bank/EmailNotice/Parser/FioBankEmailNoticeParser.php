@@ -100,6 +100,10 @@ final class FioBankEmailNoticeParser extends AbstractBankEmailNoticeParser
         $constantSymbol = $this->optional($text, '/(?:^|\R)\s*KS\s*:\s*(?<value>[0-9]+)/u');
         $note = $this->optional($text, '/(?:^|\R)\s*(?:Zpráva\s+příjemci|US)\s*:\s*(?<value>[^\r\n]+)/u');
         $counterparty = $this->optional($text, '/(?:^|\R)\s*Protiúčet\s*:\s*(?<value>[0-9\-]+(?:\/[0-9]{4})?)/u');
+        $balance = $this->optional(
+            $this->foldDiacritics($text),
+            '/(?:^|\R)\s*Aktualni\s+zustatek\s*:\s*(?<value>[+\-]?[0-9][0-9 .]*,[0-9]{2})/iu',
+        );
 
         [$recipientAccount, $recipientBank] = $this->splitAccount((string) $header['account']);
         [$cpAccount, $cpBank] = $this->splitAccount((string) $counterparty);
@@ -116,6 +120,7 @@ final class FioBankEmailNoticeParser extends AbstractBankEmailNoticeParser
             counterpartyBank: $cpBank,
             constantSymbol: $constantSymbol,
             message: $note,
+            balance: $balance !== null ? $this->parseAmount($balance) : null,
         );
     }
 

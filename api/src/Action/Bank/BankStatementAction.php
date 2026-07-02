@@ -373,6 +373,254 @@ final class BankStatementAction
     }
 
     /**
+     * GET /api/bank-statements/account-balances
+     *
+     * Přehled zůstatků na bankovních účtech dodavatele:
+     *   • aktuální stav (konečný zůstatek posledního GPC výpisu daného účtu),
+     *   • měsíční vývoj (závěrečný zůstatek za každý měsíc, carry-forward),
+     *   • celkový součet přepočtený na CZK kurzem ČNB ke konci každého měsíce.
+     *
+     * Zdroje zůstatku (per měsíc/aktuální stav vyhrává novější datum, při shodě GPC):
+     *   • `source = 'gpc'` — autoritativní konečný zůstatek z hlavičky 074,
+     *   • e-mailová avíza (`bank_transactions.balance`) — disponibilní zůstatek
+     *     z těla avíza (Creditas/Fio/RB), typicky čerstvější než poslední výpis.
+     *
+     * Přepočet na CZK: kurz z cache `exchange_rates`, nejbližší rate_date ≤ konec měsíce
+     * (fallback nejstarší známý). Měny bez jakéhokoli kurzu → `missing_rates`.
+     */
+    public function accountBalances(Request $request, Response $response): Response
+    {
+        $sid = SupplierGuard::currentId($request);
+        if ($sid <= 0) {
+            return Json::error($response, 'no_supplier', 'Není zvolen dodavatel.', 400);
+        }
+        $pdo = $this->db->pdo();
+
+        // Měnové účty dodavatele s vyplněným číslem účtu (v pořadí jako v adminu).
+        $accStmt = $pdo->prepare(
+            "SELECT id, code, label, account_number, bank_code, is_default
+               FROM currencies
+              WHERE supplier_id = ?
+                AND account_number IS NOT NULL AND account_number <> ''
+              ORDER BY is_default DESC, code, label"
+        );
+        $accStmt->execute([$sid]);
+        $currencyAccounts = $accStmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        // GPC výpisy pro konkrétní účet: normalizovaný match čísla účtu (padding/lomítko),
+        // kompatibilní kód banky a měna (disambiguace víceměnového sdíleného čísla — #167).
+        $stStmt = $pdo->prepare(
+            "SELECT DATE_FORMAT(bs.statement_date, '%Y-%m') AS ym,
+                    bs.statement_date AS sdate,
+                    bs.curr_balance   AS bal
+               FROM bank_statements bs
+              WHERE bs.source = 'gpc'
+                AND bs.statement_date IS NOT NULL
+                AND bs.curr_balance IS NOT NULL
+                AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''), '[^0-9]', ''))
+                  = TRIM(LEADING '0' FROM REGEXP_REPLACE(?, '[^0-9]', ''))
+                AND (bs.bank_code IS NULL OR ? IS NULL OR bs.bank_code = ?)
+                AND (bs.currency IS NULL OR bs.currency = '' OR bs.currency = ?)
+              ORDER BY bs.statement_date ASC, bs.id ASC"
+        );
+
+        // Zůstatky z e-mailových avíz pro konkrétní účet (bank_transactions.balance,
+        // migrace 0125): měsíční email_notice statement má statement_date = 1. den
+        // měsíce, proto se datum bere z transakce (posted_at), ne z výpisu.
+        $emStmt = $pdo->prepare(
+            "SELECT DATE_FORMAT(bt.posted_at, '%Y-%m') AS ym,
+                    bt.posted_at AS sdate,
+                    bt.balance   AS bal
+               FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+              WHERE bs.source = 'email_notice'
+                AND bt.balance IS NOT NULL
+                AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''), '[^0-9]', ''))
+                  = TRIM(LEADING '0' FROM REGEXP_REPLACE(?, '[^0-9]', ''))
+                AND (bs.bank_code IS NULL OR ? IS NULL OR bs.bank_code = ?)
+                AND (bs.currency IS NULL OR bs.currency = '' OR bs.currency = ?)
+              ORDER BY bt.posted_at ASC, bt.id ASC"
+        );
+
+        /** @var array<int,array<string,mixed>> $perAcc */
+        $perAcc = [];
+        $allMonths = [];   // set 'YYYY-MM' napříč účty (osa celkového grafu)
+        $codesUsed = [];   // ne-CZK měny → potřebují kurz
+
+        foreach ($currencyAccounts as $ca) {
+            $code = strtoupper((string) $ca['code']);
+            $params = [
+                (string) $ca['account_number'],
+                $ca['bank_code'], $ca['bank_code'],
+                $code,
+            ];
+            $stStmt->execute($params);
+            $rows = $stStmt->fetchAll(\PDO::FETCH_ASSOC);
+            $emStmt->execute($params);
+            $emailRows = $emStmt->fetchAll(\PDO::FETCH_ASSOC);
+            if ($rows === [] && $emailRows === []) {
+                continue; // účet bez GPC výpisů i avíz se zůstatkem se nezobrazuje
+            }
+
+            // Závěrečný zůstatek za měsíc = poslední záznam v měsíci (řazeno ASC →
+            // přepíše se); avízo přebije GPC jen s ostře novějším datem (shoda → GPC).
+            $closings = [];
+            foreach ($rows as $r) {
+                $closings[(string) $r['ym']] = ['bal' => (float) $r['bal'], 'date' => (string) $r['sdate'], 'src' => 'gpc'];
+            }
+            foreach ($emailRows as $r) {
+                $ym = (string) $r['ym'];
+                $prev = $closings[$ym] ?? null;
+                if ($prev === null || $prev['src'] === 'email_notice' || (string) $r['sdate'] > $prev['date']) {
+                    $closings[$ym] = ['bal' => (float) $r['bal'], 'date' => (string) $r['sdate'], 'src' => 'email_notice'];
+                }
+            }
+            ksort($closings);
+            $monthClosings = array_map(static fn (array $c): float => $c['bal'], $closings);
+            $months = array_keys($closings);
+            $last = $closings[$months[count($months) - 1]];
+
+            $perAcc[] = [
+                'ca'            => $ca,
+                'code'          => $code,
+                'monthClosings' => $monthClosings,
+                'firstYm'       => $months[0],
+                'lastYm'        => $months[count($months) - 1],
+                'current'       => $last['bal'],
+                'currentDate'   => $last['date'],
+                'currentSource' => $last['src'],
+                'count'         => count($rows),
+            ];
+            foreach ($months as $m) { $allMonths[$m] = true; }
+            if ($code !== 'CZK') { $codesUsed[$code] = true; }
+        }
+
+        // Přednačti kurzy pro použité měny (vzestupně dle data) + eviduj chybějící.
+        $rateSeries = [];
+        $missing = [];
+        if ($codesUsed !== []) {
+            $in = implode(',', array_fill(0, count($codesUsed), '?'));
+            $rStmt = $pdo->prepare(
+                "SELECT currency_code, rate_date, rate FROM exchange_rates
+                  WHERE currency_code IN ($in) ORDER BY currency_code, rate_date ASC"
+            );
+            $rStmt->execute(array_keys($codesUsed));
+            foreach ($rStmt->fetchAll(\PDO::FETCH_ASSOC) as $rr) {
+                $rateSeries[(string) $rr['currency_code']][] = [
+                    'd' => (string) $rr['rate_date'],
+                    'r' => (float) $rr['rate'],
+                ];
+            }
+            foreach (array_keys($codesUsed) as $c) {
+                if (!isset($rateSeries[$c])) { $missing[] = $c; }
+            }
+        }
+
+        // CZK za 1 jednotku měny k datu (nejbližší kurz ≤ datum, fallback nejstarší známý).
+        $rateFor = static function (string $code, string $dateYmd) use ($rateSeries): ?float {
+            if ($code === 'CZK') return 1.0;
+            $series = $rateSeries[$code] ?? null;
+            if ($series === null) return null;
+            $chosen = null;
+            foreach ($series as $pt) {
+                if ($pt['d'] <= $dateYmd) { $chosen = $pt['r']; } else { break; }
+            }
+            return $chosen ?? $series[0]['r'];
+        };
+
+        // Enumeruj měsíce 'YYYY-MM' od–do včetně.
+        $enumMonths = static function (string $from, string $to): array {
+            $out = [];
+            $cur = $from;
+            $guard = 0;
+            while ($cur <= $to && $guard++ < 600) {
+                $out[] = $cur;
+                [$y, $m] = array_map('intval', explode('-', $cur));
+                if (++$m > 12) { $m = 1; $y++; }
+                $cur = sprintf('%04d-%02d', $y, $m);
+            }
+            return $out;
+        };
+
+        $capMonths = 36;      // grafy: max poslední 3 roky
+        $todayYmd = (new \DateTimeImmutable('now'))->format('Y-m-d');
+
+        // Sestav řádky účtů + jejich měsíční řady (nativní měna, carry-forward).
+        $accounts = [];
+        foreach ($perAcc as $pa) {
+            $full = $enumMonths($pa['firstYm'], $pa['lastYm']);
+            $carry = [];
+            $lk = null;
+            foreach ($full as $m) {
+                if (isset($pa['monthClosings'][$m])) { $lk = $pa['monthClosings'][$m]; }
+                $carry[$m] = $lk;
+            }
+            $range = count($full) > $capMonths ? array_slice($full, -$capMonths) : $full;
+            $series = [];
+            foreach ($range as $m) {
+                $series[] = ['month' => $m, 'balance' => $carry[$m] !== null ? round($carry[$m], 2) : null];
+            }
+
+            $curRate = $rateFor($pa['code'], $todayYmd);
+            $accounts[] = [
+                'id'                  => (int) $pa['ca']['id'],
+                'code'                => $pa['code'],
+                'label'               => (string) ($pa['ca']['label'] ?? '') !== '' ? (string) $pa['ca']['label'] : $pa['code'],
+                'account_number'      => (string) $pa['ca']['account_number'],
+                'bank_code'           => $pa['ca']['bank_code'] !== null ? (string) $pa['ca']['bank_code'] : null,
+                'is_default'          => (bool) $pa['ca']['is_default'],
+                'current_balance'     => round($pa['current'], 2),
+                'current_balance_czk' => $curRate !== null ? round($pa['current'] * $curRate, 2) : null,
+                'statement_date'      => $pa['currentDate'],
+                'current_source'      => $pa['currentSource'],
+                'statement_count'     => (int) $pa['count'],
+                'months'              => $series,
+            ];
+        }
+
+        // Celkový graf v CZK — společná osa, carry-forward per účet, kurz ke konci měsíce.
+        $totalMonths = [];
+        if ($allMonths !== []) {
+            $ms = array_keys($allMonths);
+            sort($ms);
+            $axis = $enumMonths($ms[0], $ms[count($ms) - 1]);
+            if (count($axis) > $capMonths) { $axis = array_slice($axis, -$capMonths); }
+            foreach ($axis as $m) {
+                $monthEnd = date('Y-m-t', (int) strtotime($m . '-01'));
+                $sum = 0.0;
+                $have = false;
+                foreach ($perAcc as $pa) {
+                    $bal = null;
+                    foreach ($pa['monthClosings'] as $ym => $b) {
+                        if ($ym <= $m) { $bal = $b; } else { break; }
+                    }
+                    if ($bal === null) { continue; }
+                    $rate = $rateFor($pa['code'], $monthEnd);
+                    if ($rate === null) { continue; } // měna bez kurzu — vynech (flag missing_rates)
+                    $sum += $bal * $rate;
+                    $have = true;
+                }
+                $totalMonths[] = ['month' => $m, 'balance_czk' => $have ? round($sum, 2) : null];
+            }
+        }
+
+        $totalCurrent = 0.0;
+        foreach ($accounts as $a) {
+            if ($a['current_balance_czk'] !== null) { $totalCurrent += $a['current_balance_czk']; }
+        }
+
+        return Json::ok($response, [
+            'base_currency' => 'CZK',
+            'accounts'      => $accounts,
+            'total_czk'     => [
+                'current' => round($totalCurrent, 2),
+                'months'  => $totalMonths,
+            ],
+            'missing_rates' => $missing,
+        ]);
+    }
+
+    /**
      * DELETE /api/bank-statements/{id}
      *
      * Smaže výpis vč. transakcí (ON DELETE CASCADE) a payment_matches (CASCADE
@@ -768,6 +1016,7 @@ final class BankStatementAction
         foreach ($transactions as &$t) {
             $t['id'] = (int) $t['id'];
             $t['amount'] = (float) $t['amount'];
+            $t['balance'] = isset($t['balance']) ? (float) $t['balance'] : null;
             $t['matched_invoice_id'] = $t['matched_invoice_id'] !== null ? (int) $t['matched_invoice_id'] : null;
             $t['matched_purchase_invoice_id'] = $t['matched_purchase_invoice_id'] !== null ? (int) $t['matched_purchase_invoice_id'] : null;
             $t['matched_purchase_ref'] = isset($t['matched_purchase_ref']) && $t['matched_purchase_ref'] !== null ? (string) $t['matched_purchase_ref'] : null;

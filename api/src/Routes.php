@@ -48,6 +48,7 @@ use MyInvoice\Action\Admin\ListActivityLogAction;
 use MyInvoice\Action\Admin\ListSentEmailsAction;
 use MyInvoice\Action\Admin\UserAdminAction;
 use MyInvoice\Action\Settings\EmailBrandingAction;
+use MyInvoice\Action\Settings\EmailProfilesAction;
 use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\SignatureDocumentSelectionAction;
@@ -522,6 +523,16 @@ final class Routes
         // Settings (M6) — aktuální supplier (z X-Supplier-Id)
         $app->get ('/api/settings/supplier',                [SettingsAction::class, 'getSupplier']);
         $app->put ('/api/settings/supplier',                [SettingsAction::class, 'updateSupplier']);
+        $app->get    ('/api/settings/email-profiles',       [EmailProfilesAction::class, 'list']);
+        $app->post   ('/api/settings/email-profiles',       [EmailProfilesAction::class, 'create']);
+        $app->post   ('/api/settings/email-profiles/test',  [EmailProfilesAction::class, 'testDraft']);
+        $app->post   ('/api/settings/email-profiles/imap-test', [EmailProfilesAction::class, 'testImapSettings']);
+        $app->post   ('/api/settings/email-profiles/folders', [EmailProfilesAction::class, 'browseImapFolders']);
+        $app->post   ('/api/settings/email-profiles/{id:[0-9]+}/test', [EmailProfilesAction::class, 'test']);
+        $app->post   ('/api/settings/email-profiles/{id:[0-9]+}/imap-test', [EmailProfilesAction::class, 'testImapSettings']);
+        $app->post   ('/api/settings/email-profiles/{id:[0-9]+}/folders', [EmailProfilesAction::class, 'browseImapFolders']);
+        $app->put    ('/api/settings/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'update']);
+        $app->delete ('/api/settings/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'delete']);
         $app->get    ('/api/settings/pdf-signing/diagnostics', PdfSigningDiagnosticsAction::class);
         $app->get    ('/api/settings/pdf-signing',          [SigningProfilesAction::class, 'pdfSettings']);
         $app->post   ('/api/settings/pdf-signing/test',     [SigningProfilesAction::class, 'testPdfSigning']);
@@ -589,6 +600,7 @@ final class Routes
         $app->post ('/api/bank-statements/upload',           [BankStatementAction::class, 'upload']);
         $app->post ('/api/bank-statements/scan',             [BankStatementAction::class, 'scan']);
         $app->get  ('/api/bank-statements',                  [BankStatementAction::class, 'list']);
+        $app->get  ('/api/bank-statements/account-balances', [BankStatementAction::class, 'accountBalances']);
         $app->get  ('/api/bank-statements/{id:[0-9]+}',      [BankStatementAction::class, 'detail']);
         $app->get  ('/api/bank-statements/{id:[0-9]+}/download', [BankStatementAction::class, 'download']);
         $app->post ('/api/bank-statements/{id:[0-9]+}/pdf',  [BankStatementAction::class, 'uploadPdf']);

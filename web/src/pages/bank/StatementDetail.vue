@@ -38,6 +38,25 @@ const filteredTransactions = computed<BankTransaction[]>(() => {
   const txs = statement.value?.transactions ?? []
   return statusFilter.value === '' ? txs : txs.filter(tx => tx.match_status === statusFilter.value)
 })
+// Souhrn pro měsíční avízo-výpis: disponibilní zůstatek z nejnovějšího avíza,
+// které ho neslo (Creditas/Fio/RB), + součty příjmů/výdajů měsíce z transakcí.
+const noticeSummary = computed(() => {
+  const s = statement.value
+  if (!s || s.source !== 'email_notice') return null
+  let last: BankTransaction | null = null
+  let credit = 0
+  let debit = 0
+  for (const tx of s.transactions) {
+    if (tx.amount >= 0) credit += tx.amount
+    else debit += -tx.amount
+    if (tx.balance === null || tx.balance === undefined) continue
+    if (last === null || tx.posted_at > last.posted_at || (tx.posted_at === last.posted_at && tx.id > last.id)) {
+      last = tx
+    }
+  }
+  return { balance: last?.balance ?? null, balanceAt: last?.posted_at ?? null, credit, debit }
+})
+
 const rematching = ref(false)
 const matchingTx = ref<number | null>(null)
 const matchCtx = ref<BankTransaction | null>(null)
@@ -335,9 +354,32 @@ async function rematchStatement() {
       <span>· {{ statement.file_name }}</span>
     </p>
 
-    <!-- Zůstatky a celky nese jen nahraný výpis (GPC); e-mailová avíza jsou měsíční
-         souhrn jednotlivých plateb bez průběžného zůstatku → boxy by byly prázdné. -->
-    <div v-if="statement.source !== 'email_notice'" class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 mb-4">
+    <!-- Měsíční avízo-výpis: disponibilní zůstatek z nejnovějšího avíza (nesou ho
+         Creditas/Fio/RB) + součty příjmů/výdajů měsíce spočtené z transakcí. -->
+    <div v-if="statement.source === 'email_notice' && noticeSummary" class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 mb-4">
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
+        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.available_balance') }}</div>
+        <div class="text-lg font-mono font-semibold">
+          {{ noticeSummary.balance !== null ? formatMoney(noticeSummary.balance, statement.currency ?? 'CZK') : '—' }}
+        </div>
+      </div>
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
+        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.available_balance_as_of') }}</div>
+        <div class="text-lg font-mono">
+          {{ noticeSummary.balanceAt !== null ? formatDate(noticeSummary.balanceAt) : '—' }}
+        </div>
+      </div>
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
+        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.credit_total') }}</div>
+        <div class="text-lg font-mono text-success-600">+{{ formatMoney(noticeSummary.credit, statement.currency ?? 'CZK') }}</div>
+      </div>
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
+        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.debit_total') }}</div>
+        <div class="text-lg font-mono text-danger-500">−{{ formatMoney(noticeSummary.debit, statement.currency ?? 'CZK') }}</div>
+      </div>
+    </div>
+
+    <div v-else-if="statement.source !== 'email_notice'" class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 mb-4">
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.prev_balance') }}</div>
         <div class="text-lg font-mono">{{ formatMoney(statement.prev_balance, statement.currency ?? 'CZK') }}</div>

@@ -67,6 +67,7 @@ final class RaiffeisenbankEmailNoticeParser extends AbstractBankEmailNoticeParse
         $variableSymbol = $this->required($text, '/Variabilní\s+symbol\s*(?<value>[0-9]+)/iu', 'variabilní symbol');
         $constantSymbol = $this->optional($text, '/Konstantní\s+symbol\s*(?<value>[0-9]+)/iu');
         $note = $this->optional($text, '/Zpráva\s+pro\s+příjemce\s*(?<value>.*?)Disponibilní\s+zůstatek/isu');
+        $balance = $this->optional($text, '/Disponibilní\s+zůstatek(?:\s+po\s+pohybu)?\s*(?<value>[+\-]?[0-9][0-9 .]*,[0-9]{2})/iu');
 
         [$counterpartyAccount, $counterpartyBank] = $this->splitAccount((string) ($counterparty['account'] ?? ''));
 
@@ -81,6 +82,7 @@ final class RaiffeisenbankEmailNoticeParser extends AbstractBankEmailNoticeParse
             counterpartyName: $this->cleanNullable((string) ($counterparty['name'] ?? '')),
             constantSymbol: $constantSymbol,
             message: $note,
+            balance: $balance !== null ? $this->parseAmount($balance) : null,
         );
     }
 

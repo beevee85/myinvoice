@@ -111,8 +111,9 @@ final class SigningProfileRepository
      */
     public function findProfile(int $supplierId, int $profileId, bool $includeDeleted = false): ?array
     {
-        $sql = 'SELECT * FROM signing_profiles WHERE supplier_id = ? AND id = ?'
-             . ($includeDeleted ? '' : ' AND deleted_at IS NULL');
+        $sql = $this->profileSelectSql()
+             . ' WHERE p.supplier_id = ? AND p.id = ?'
+             . ($includeDeleted ? '' : ' AND p.deleted_at IS NULL');
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$supplierId, $profileId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -125,9 +126,10 @@ final class SigningProfileRepository
      */
     public function listProfiles(int $supplierId, bool $includeDeleted = false): array
     {
-        $sql = 'SELECT * FROM signing_profiles WHERE supplier_id = ?'
-             . ($includeDeleted ? '' : ' AND deleted_at IS NULL')
-             . ' ORDER BY owner_user_id IS NOT NULL, name, id';
+        $sql = $this->profileSelectSql()
+             . ' WHERE p.supplier_id = ?'
+             . ($includeDeleted ? '' : ' AND p.deleted_at IS NULL')
+             . ' ORDER BY p.owner_user_id IS NOT NULL, p.name, p.id';
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$supplierId]);
 
@@ -139,11 +141,11 @@ final class SigningProfileRepository
      */
     public function listProfilesForOwner(int $supplierId, ?int $ownerUserId, bool $includeDeleted = false): array
     {
-        $sql = 'SELECT * FROM signing_profiles
-                 WHERE supplier_id = ? AND '
-             . ($ownerUserId === null ? 'owner_user_id IS NULL' : 'owner_user_id = ?')
-             . ($includeDeleted ? '' : ' AND deleted_at IS NULL')
-             . ' ORDER BY name, id';
+        $sql = $this->profileSelectSql()
+             . ' WHERE p.supplier_id = ? AND '
+             . ($ownerUserId === null ? 'p.owner_user_id IS NULL' : 'p.owner_user_id = ?')
+             . ($includeDeleted ? '' : ' AND p.deleted_at IS NULL')
+             . ' ORDER BY p.name, p.id';
         $params = $ownerUserId === null ? [$supplierId] : [$supplierId, $ownerUserId];
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
@@ -679,6 +681,19 @@ final class SigningProfileRepository
         return $stmt->fetchColumn() !== false;
     }
 
+    private function profileSelectSql(): string
+    {
+        return 'SELECT p.*,
+                       c.id AS credential_id,
+                       c.certificate_subject AS credential_certificate_subject,
+                       c.certificate_email AS credential_certificate_email,
+                       c.certificate_valid_from AS credential_certificate_valid_from,
+                       c.certificate_valid_to AS credential_certificate_valid_to,
+                       c.is_active AS credential_is_active
+                  FROM signing_profiles p
+             LEFT JOIN signing_credentials c ON c.profile_id = p.id AND c.deleted_at IS NULL';
+    }
+
     /**
      * @param array<string,mixed> $row
      * @return array<string,mixed>
@@ -697,6 +712,12 @@ final class SigningProfileRepository
             'pdf_tsa_username' => ($row['pdf_tsa_username'] ?? null) !== null ? (string) $row['pdf_tsa_username'] : null,
             'has_pdf_tsa_password' => ($row['pdf_tsa_password_enc'] ?? null) !== null && (string) $row['pdf_tsa_password_enc'] !== '',
             'pdf_reason' => ($row['pdf_reason'] ?? null) !== null ? (string) $row['pdf_reason'] : null,
+            'has_certificate' => ($row['credential_id'] ?? null) !== null,
+            'certificate_subject' => ($row['credential_certificate_subject'] ?? null) !== null ? (string) $row['credential_certificate_subject'] : null,
+            'certificate_email' => ($row['credential_certificate_email'] ?? null) !== null ? (string) $row['credential_certificate_email'] : null,
+            'certificate_valid_from' => ($row['credential_certificate_valid_from'] ?? null) !== null ? (string) $row['credential_certificate_valid_from'] : null,
+            'certificate_valid_to' => ($row['credential_certificate_valid_to'] ?? null) !== null ? (string) $row['credential_certificate_valid_to'] : null,
+            'certificate_is_active' => ($row['credential_is_active'] ?? null) !== null && (int) $row['credential_is_active'] === 1,
             'is_active' => (int) $row['is_active'] === 1,
             'created_by' => $row['created_by'] !== null ? (int) $row['created_by'] : null,
             'created_at' => (string) $row['created_at'],

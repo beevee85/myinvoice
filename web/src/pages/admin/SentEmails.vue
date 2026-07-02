@@ -46,6 +46,7 @@ const EMAIL_TYPES: Record<string, { key: string; badge: string }> = {
   'recurring.reminder_sent':        { key: 'recurring_reminder_sent', badge: 'bg-warning-50 text-warning-600' },
   'email.sent_test':                { key: 'test',                    badge: 'bg-neutral-100 text-neutral-600' },
   'email.sent_test_reminder':       { key: 'test_reminder',           badge: 'bg-neutral-100 text-neutral-600' },
+  'email.sent_profile_test':        { key: 'profile_test',            badge: 'bg-neutral-100 text-neutral-600' },
 }
 
 function typeLabel(action: string): string {

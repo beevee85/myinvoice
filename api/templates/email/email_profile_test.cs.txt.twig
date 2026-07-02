@@ -1,0 +1,16 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Test odesílacího profilu
+------------------------
+
+Dobrý den,
+
+tento e-mail ověřuje nastavení odesílacího profilu {{ profile.name }} ({{ profile.code }}).
+
+From: {{ profile.from }}
+Reply-To: {{ profile.reply_to }}
+Transport: {{ profile.transport }}
+
+Pokud e-mail dorazil a hlavičky odpovídají očekávání, profil je pro toto odeslání použitelný.
+{% endblock %}

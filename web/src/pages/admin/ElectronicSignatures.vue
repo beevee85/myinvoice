@@ -44,6 +44,14 @@ const showSigningProfileForm = ref(false)
 const editingSigningProfile = ref<number | null>(null)
 const signingProfileTsaEnabled = ref(false)
 const signingProfileOwnerMode = ref<'supplier' | 'current_user' | 'other_user'>('supplier')
+type EmailSmimeIdentityPolicy = 'strict_match' | 'warning_only' | 'same_domain_override' | 'allowlist_override'
+const emailSmimeIdentityPolicies: EmailSmimeIdentityPolicy[] = [
+  'strict_match',
+  'warning_only',
+  'same_domain_override',
+  'allowlist_override',
+]
+
 const signingProfileDraft = reactive<SigningProfilePayload & { owner_user_id: number | null; is_active: boolean }>({
   owner_user_id: null,
   name: '',
@@ -501,6 +509,49 @@ function signingOutputBadges(outputType: string): string[] {
   return [signingOutputUsage(outputType) === 'email_smime' ? 'S/MIME' : 'PDF']
 }
 
+function smimeIdentityPolicy(setting: PdfSignatureOutputSetting): EmailSmimeIdentityPolicy {
+  // Default warning_only = shodné s backendem: podepíše i při neshodě From↔cert,
+  // jen zaloguje varování. strict_match / *_override jsou vědomý opt-in.
+  const policy = setting.signature_config?.smime_identity_policy
+  return isEmailSmimeIdentityPolicy(policy) ? policy : 'warning_only'
+}
+
+function setSmimeIdentityPolicy(setting: PdfSignatureOutputSetting, policy: EmailSmimeIdentityPolicy) {
+  setting.signature_config = {
+    ...(setting.signature_config || {}),
+    smime_identity_policy: policy,
+  }
+}
+
+function onSmimeIdentityPolicyChange(setting: PdfSignatureOutputSetting, event: Event) {
+  const value = (event.target as HTMLSelectElement | null)?.value
+  setSmimeIdentityPolicy(setting, isEmailSmimeIdentityPolicy(value) ? value : 'warning_only')
+}
+
+function isEmailSmimeIdentityPolicy(value: unknown): value is EmailSmimeIdentityPolicy {
+  return typeof value === 'string' && emailSmimeIdentityPolicies.includes(value as EmailSmimeIdentityPolicy)
+}
+
+function smimeIdentityAllowlistText(setting: PdfSignatureOutputSetting): string {
+  const allowlist = setting.signature_config?.smime_identity_allowlist
+  if (Array.isArray(allowlist)) {
+    return allowlist.filter(item => typeof item === 'string' && item.trim() !== '').join('\n')
+  }
+  return typeof allowlist === 'string' ? allowlist : ''
+}
+
+function onSmimeIdentityAllowlistChange(setting: PdfSignatureOutputSetting, event: Event) {
+  const value = (event.target as HTMLTextAreaElement | null)?.value || ''
+  const allowlist = value
+    .split(/[\n,;]+/)
+    .map(item => item.trim().toLowerCase())
+    .filter(Boolean)
+  setting.signature_config = {
+    ...(setting.signature_config || {}),
+    smime_identity_allowlist: Array.from(new Set(allowlist)),
+  }
+}
+
 function signingProfileName(profileId: number | null): string {
   if (profileId === null) return t('settings.signing_output_profile_none')
   return signingProfiles.value.find(profile => profile.id === profileId)?.name || `#${profileId}`
@@ -872,6 +923,7 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                   <th class="px-3 py-2 text-left font-medium">{{ t('settings.signing_output_profile') }}</th>
                   <th class="px-3 py-2 text-left font-medium">{{ t('settings.signing_output_user_fallback') }}</th>
                   <th class="px-3 py-2 text-left font-medium">{{ t('settings.signing_output_failure_policy') }}</th>
+                  <th class="px-3 py-2 text-left font-medium">{{ t('settings.signing_output_identity_policy') }}</th>
                   <th class="px-3 py-2 w-40"></th>
                 </tr>
               </thead>
@@ -925,6 +977,33 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                       <option value="fail_closed">{{ t('settings.signing_output_policy_fail_closed') }}</option>
                       <option value="skip_when_unconfigured">{{ t('settings.signing_output_policy_skip_when_unconfigured') }}</option>
                     </select>
+                  </td>
+                  <td class="px-3 py-2">
+                    <div v-if="signingOutputUsage(setting.output_type) === 'email_smime'" class="space-y-2">
+                      <select
+                        :value="smimeIdentityPolicy(setting)"
+                        @change="onSmimeIdentityPolicyChange(setting, $event)"
+                        class="h-8 w-56 px-2 border border-neutral-300 rounded-md bg-surface text-xs">
+                        <option value="strict_match">{{ t('settings.signing_output_identity_strict_match') }}</option>
+                        <option value="warning_only">{{ t('settings.signing_output_identity_warning_only') }}</option>
+                        <option value="same_domain_override">{{ t('settings.signing_output_identity_same_domain_override') }}</option>
+                        <option value="allowlist_override">{{ t('settings.signing_output_identity_allowlist_override') }}</option>
+                      </select>
+                      <p v-if="smimeIdentityPolicy(setting) === 'same_domain_override'" class="max-w-56 text-[11px] leading-snug text-neutral-500">
+                        {{ t('settings.signing_output_identity_same_domain_hint') }}
+                      </p>
+                      <div v-if="smimeIdentityPolicy(setting) === 'allowlist_override'" class="space-y-1">
+                        <textarea
+                          :value="smimeIdentityAllowlistText(setting)"
+                          @input="onSmimeIdentityAllowlistChange(setting, $event)"
+                          :placeholder="t('settings.signing_output_identity_allowlist_placeholder')"
+                          class="min-h-20 w-56 px-2 py-1.5 border border-neutral-300 rounded-md bg-surface text-xs leading-snug"></textarea>
+                        <p class="max-w-56 text-[11px] leading-snug text-neutral-500">
+                          {{ t('settings.signing_output_identity_allowlist_hint') }}
+                        </p>
+                      </div>
+                    </div>
+                    <span v-else class="text-neutral-400">{{ t('settings.signing_output_identity_policy_not_applicable') }}</span>
                   </td>
                   <td class="px-3 py-2 text-right whitespace-nowrap">
                     <button @click="savePdfOutputSetting(setting)" type="button"

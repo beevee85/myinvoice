@@ -18,6 +18,7 @@ use Psr\Log\LoggerInterface;
  *   - GET  https://api.idoklad.cz/v3/Contacts
  *   - GET  https://api.idoklad.cz/v3/IssuedInvoices
  *   - GET  https://api.idoklad.cz/v3/ReceivedInvoices
+ *   - GET  https://api.idoklad.cz/v3/ReceivedReceipts
  *
  * Rate limit per docs: 60 req/min. Vlastní hint counter — pokud >50 req/min,
  * sleep 1s před requestem (smooth rate).

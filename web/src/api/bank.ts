@@ -34,6 +34,8 @@ export interface BankTransaction {
   statement_id: number
   posted_at: string
   amount: number
+  /** Disponibilní zůstatek účtu z e-mailového avíza (Creditas/Fio/RB); u GPC transakcí null. */
+  balance?: number | null
   currency: string | null
   variable_symbol: string | null
   constant_symbol: string | null
@@ -155,6 +157,46 @@ export interface BankListParams {
   account?: string
 }
 
+/** Jeden bod měsíční řady zůstatku (nativní měna účtu). */
+export interface AccountBalanceMonth {
+  /** 'YYYY-MM'. */
+  month: string
+  /** Závěrečný zůstatek za měsíc (carry-forward), null když účet ještě neexistoval. */
+  balance: number | null
+}
+
+/** Stav jednoho bankovního účtu dle GPC výpisů a zůstatků z e-mailových avíz. */
+export interface AccountBalance {
+  /** currencies.id */
+  id: number
+  code: string
+  label: string
+  account_number: string
+  bank_code: string | null
+  is_default: boolean
+  /** Aktuální stav = nejnovější známý zůstatek (GPC výpis, nebo čerstvější avízo). */
+  current_balance: number
+  /** Aktuální stav přepočtený na CZK aktuálním kurzem; null když měna nemá kurz. */
+  current_balance_czk: number | null
+  /** Datum, ke kterému aktuální stav platí (výpis / avízo). */
+  statement_date: string
+  /** Odkud aktuální stav pochází: GPC výpis, nebo disponibilní zůstatek z avíza. */
+  current_source: 'gpc' | 'email_notice'
+  statement_count: number
+  months: AccountBalanceMonth[]
+}
+
+export interface AccountBalancesResponse {
+  base_currency: string
+  accounts: AccountBalance[]
+  total_czk: {
+    current: number
+    months: { month: string; balance_czk: number | null }[]
+  }
+  /** Měny bez jakéhokoli kurzu v cache (nešly přepočíst na CZK). */
+  missing_rates: string[]
+}
+
 export const bankApi = {
   list: (params: BankListParams = {}) =>
     api.get<BankStatementPage>('/bank-statements', { params: {
@@ -164,6 +206,9 @@ export const bankApi = {
       ...(params.account ? { 'filter[account]': params.account } : {}),
     } }).then(r => r.data),
   get: (id: number) => api.get<BankStatementDetail>(`/bank-statements/${id}`).then(r => r.data),
+  /** Přehled zůstatků na účtech dle GPC výpisů (tabulka + měsíční vývoj + CZK součet). */
+  accountBalances: () =>
+    api.get<AccountBalancesResponse>('/bank-statements/account-balances').then(r => r.data),
   /**
    * Nahraje GPC/ABO výpis. `accountId` (currencies.id) je volitelný — povinný jen
    * u víceměnového účtu se sdíleným číslem účtu, kdy server vrátí 409

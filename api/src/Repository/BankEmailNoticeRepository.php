@@ -412,11 +412,24 @@ final class BankEmailNoticeRepository
      */
     public function processedMessages(int $supplierId, int $limit = 100, int $offset = 0): array
     {
+        // Stav `status` je snapshot z okamžiku skenu. Když se avízo-transakce spáruje
+        // AŽ POZDĚJI (např. faktura vznikla po přijetí avíza), scanner už řádek nepřepíše
+        // a zůstane viset na `match_failed`, přestože transakce je dnes spárovaná. Proto
+        // odvozujeme `effective_status` ze živého `bank_transactions.match_status`
+        // (a případný link na přijatou fakturu z payment_matches). Sloupec `status`
+        // zůstává věrným záznamem výsledku skenu; pro zobrazení řídí `effective_status`.
         $stmt = $this->db->pdo()->prepare(
-            'SELECT pm.*, im.name AS imap_account_name, i.varsymbol AS matched_varsymbol
+            'SELECT pm.*, im.name AS imap_account_name, i.varsymbol AS matched_varsymbol,
+                    bt.match_status AS tx_match_status,
+                    (SELECT recv.purchase_invoice_id
+                       FROM payment_matches recv
+                      WHERE recv.bank_transaction_id = pm.bank_transaction_id
+                        AND recv.supplier_id = pm.supplier_id
+                      ORDER BY recv.id LIMIT 1) AS matched_purchase_invoice_id
                FROM bank_email_processed_messages pm
           LEFT JOIN bank_email_imap_settings im ON im.id = pm.imap_account_id AND im.supplier_id = pm.supplier_id
           LEFT JOIN invoices i ON i.id = pm.matched_invoice_id AND i.supplier_id = pm.supplier_id
+          LEFT JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
               WHERE pm.supplier_id = ?
            ORDER BY pm.processed_at DESC, pm.id DESC
               LIMIT ? OFFSET ?'
@@ -435,8 +448,28 @@ final class BankEmailNoticeRepository
             $row['bank_statement_id'] = $row['bank_statement_id'] !== null ? (int) $row['bank_statement_id'] : null;
             $row['bank_transaction_id'] = $row['bank_transaction_id'] !== null ? (int) $row['bank_transaction_id'] : null;
             $row['matched_invoice_id'] = $row['matched_invoice_id'] !== null ? (int) $row['matched_invoice_id'] : null;
+            $row['matched_purchase_invoice_id'] = $row['matched_purchase_invoice_id'] !== null ? (int) $row['matched_purchase_invoice_id'] : null;
             $row['attempts'] = (int) $row['attempts'];
             $row['parsed_payload'] = $this->decodeJson($row['parsed_payload'] ?? null);
+
+            // Odvozený stav ze živého párování transakce (viz komentář u dotazu).
+            $txStatus = isset($row['tx_match_status']) && $row['tx_match_status'] !== null
+                ? (string) $row['tx_match_status'] : null;
+            $row['tx_match_status'] = $txStatus;
+            $raw = (string) $row['status'];
+            $effective = $raw;
+            if ($row['bank_transaction_id'] !== null && $txStatus !== null) {
+                $txMatched = in_array($txStatus, ['auto_exact', 'auto_partial', 'manual'], true);
+                if ($txMatched && $raw === 'match_failed') {
+                    // Spárováno až po skenu → už to není selhání.
+                    $effective = 'processed_success';
+                } elseif (!$txMatched && $raw === 'processed_success') {
+                    // Původně spárováno, později rozpárováno.
+                    $effective = 'match_failed';
+                }
+            }
+            $row['effective_status'] = $effective;
+            $row['matched'] = $effective === 'processed_success';
         }
         return $rows;
     }
@@ -540,15 +573,16 @@ final class BankEmailNoticeRepository
 
         $pdo->prepare(
             'INSERT INTO bank_transactions
-                (source, source_ref, statement_id, posted_at, amount, currency, variable_symbol, constant_symbol,
+                (source, source_ref, statement_id, posted_at, amount, balance, currency, variable_symbol, constant_symbol,
                  counterparty_account, counterparty_bank, counterparty_name, description, bank_ref, match_tolerance)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         )->execute([
             'email_notice',
             $sourceRef,
             $statementId,
             $notice->postedAt,
             $notice->amount,
+            $notice->balance,
             $currency,
             $notice->variableSymbol,
             $notice->constantSymbol,

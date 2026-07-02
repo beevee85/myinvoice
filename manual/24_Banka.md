@@ -13,7 +13,7 @@ spořitelna**, **mBank**, a další.
 > z IMAP schránky — hodí se, když banka posílá oznámení o příchozí platbě rychleji
 > než pravidelný výpis. Konfigurace bankovních účtů, IMAP schránek a parserů má
 > vlastní kapitolu [Bankovní účty a e-mailová avíza (IMAP)](37_Bankovni_ucty.md)
-> v sekci Systém.
+> — najdeš ji na dalších záložkách téže stránky **Finance → Bankovní účty**.
 
 ## 24.1 Stažení GPC výpisu z banky
 
@@ -32,7 +32,8 @@ na měsíc obvykle.
 
 ## 24.2 Upload výpisu do MyInvoice
 
-V hlavním menu **Banka → Nahrát výpis**.
+V hlavním menu **Finance → Bankovní účty**, záložka **Bankovní výpisy** →
+tlačítko **Nahrát výpis**.
 
 ![Upload výpisu](img/11_banka_upload.webp)
 
@@ -56,7 +57,7 @@ Importováno: 12 transakcí, spárováno: 8, k manuálnímu párování: 4.
 
 ## 24.3 Seznam výpisů
 
-**Banka → Výpisy** ukáže historii.
+Záložka **Bankovní výpisy** ukáže historii.
 
 | Sloupec | Význam |
 |---|---|

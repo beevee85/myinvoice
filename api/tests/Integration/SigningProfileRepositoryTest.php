@@ -149,11 +149,18 @@ final class SigningProfileRepositoryTest extends TestCase
             'certificate_path' => 'signing/pdf/itest.p12',
             'certificate_fingerprint' => str_repeat('a', 64),
             'certificate_subject' => 'CN=Integration Test',
+            'certificate_email' => 'integration@example.test',
             'certificate_usage' => ['digital_signature' => true],
             'passphrase_policy' => 'passphrase_file',
             'passphrase_profile_id' => 'itest-profile',
             'encrypted_passphrase' => null,
         ], $this->userId);
+
+        $profileWithCredential = $this->profiles->findProfile($this->supplierId, $profileId);
+        self::assertNotNull($profileWithCredential);
+        self::assertTrue($profileWithCredential['has_certificate']);
+        self::assertSame('CN=Integration Test', $profileWithCredential['certificate_subject']);
+        self::assertSame('integration@example.test', $profileWithCredential['certificate_email']);
 
         $credential = $this->profiles->credential($this->supplierId, $profileId);
         self::assertNotNull($credential);

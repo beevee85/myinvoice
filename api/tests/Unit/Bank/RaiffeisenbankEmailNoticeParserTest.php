@@ -59,5 +59,6 @@ TEXT;
         self::assertSame('Plátce Demo s.r.o.', $parsed->counterpartyName);
         self::assertSame('308', $parsed->constantSymbol);
         self::assertSame('Faktura 2606001', $parsed->message);
+        self::assertSame(99999.99, $parsed->balance);
     }
 }

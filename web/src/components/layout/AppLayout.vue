@@ -167,7 +167,9 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/crm',            label: t('nav.crm'),            icon: ICONS.crm },
         { to: '/stats',          label: t('nav.stats'),          icon: ICONS.stats },
         { to: '/purchase-stats', label: t('nav.purchase_stats'), icon: ICONS.purchase },
-        { to: '/bank',           label: t('nav.bank'),           icon: ICONS.bank },
+        // Sjednocená stránka: výpisy + měny/účty + stavy + avíza (bývalé Systém → Bankovní účty).
+        { to: '/bank',           label: t('nav.bank_accounts'),  icon: ICONS.bank },
+        // FORK (beevee85): pokladní doklady
         { to: '/cash-documents', label: t('nav.cash'),           icon: ICONS.payment_orders },
       ],
     },
@@ -203,7 +205,6 @@ const navSections = computed<NavSection[]>(() => {
       accent: 'neutral',
       items: [
         { to: '/admin/settings',         label: t('nav.settings'),        icon: ICONS.settings },
-        { to: '/admin/bank-accounts',    label: t('nav.bank_accounts'),   icon: ICONS.bank },
         { to: '/admin/codebooks',        label: t('nav.codebooks'),       icon: ICONS.codebooks },
         { to: '/admin/users',            label: t('nav.users'),           icon: ICONS.users },
         { to: '/admin/emails',           label: t('nav.emails'),          icon: ICONS.email },

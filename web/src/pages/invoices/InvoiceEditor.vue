@@ -810,12 +810,18 @@ async function loadWorkReport() {
   if (wr) {
     wrTitle.value = wr.title
     wrItems.value = wr.items.map(i => ({ ...i }))
-    wrVatRateId.value = wr.vat_rate_id ?? vatRateIdByPercent(21) ?? defaultVatRateId()
+    // Neplátce DPH: vždy 0% „Osvobozeno" (defaultVatRateId()), ať se do položek faktury
+    // nepropíše DPH — sazba je pro něj skrytá. Plátce: uložená → 21 % → fallback.
+    wrVatRateId.value = supplierIsVatPayer.value
+      ? (wr.vat_rate_id ?? vatRateIdByPercent(21) ?? defaultVatRateId())
+      : defaultVatRateId()
     if (wr.items.length > 0) wrOpen.value = true
     // Materiál
     if (wr.material_title) matTitle.value = wr.material_title
     matItems.value = (wr.materials ?? []).map(m => ({ ...m }))
-    matVatRateId.value = wr.material_vat_rate_id ?? vatRateIdByPercent(12) ?? defaultVatRateId()
+    matVatRateId.value = supplierIsVatPayer.value
+      ? (wr.material_vat_rate_id ?? vatRateIdByPercent(12) ?? defaultVatRateId())
+      : defaultVatRateId()
     if (matItems.value.length > 0) matOpen.value = true
   }
 }
@@ -850,7 +856,7 @@ function moveWrItem(idx: number, dir: -1 | 1) {
   wrItems.value.splice(newIdx, 0, item)
 }
 function openWorkReport() {
-  if (wrVatRateId.value == null) wrVatRateId.value = vatRateIdByPercent(21) ?? defaultVatRateId()
+  if (wrVatRateId.value == null) wrVatRateId.value = supplierIsVatPayer.value ? (vatRateIdByPercent(21) ?? defaultVatRateId()) : defaultVatRateId()
   if (wrItems.value.length === 0) {
     const date = (form.value.tax_date || form.value.issue_date || '').slice(0, 7) // YYYY-MM
     wrTitle.value = date ? t('invoice.wr_title_with_date', { date }) : t('invoice.work_report')
@@ -1016,7 +1022,7 @@ function moveMatItem(idx: number, dir: -1 | 1) {
   matItems.value.splice(newIdx, 0, item)
 }
 function openMaterial() {
-  if (matVatRateId.value == null) matVatRateId.value = vatRateIdByPercent(12) ?? defaultVatRateId()
+  if (matVatRateId.value == null) matVatRateId.value = supplierIsVatPayer.value ? (vatRateIdByPercent(12) ?? defaultVatRateId()) : defaultVatRateId()
   if (!matTitle.value) matTitle.value = t('invoice.wr_material_title')
   if (matItems.value.length === 0) addMatItem()
   matOpen.value = true
@@ -1812,7 +1818,7 @@ async function deleteDraft() {
           <div class="flex flex-col sm:flex-row gap-2">
             <input v-model="wrTitle" type="text" :placeholder="t('invoice.wr_title')"
               class="flex-1 h-10 px-3 border border-neutral-300 rounded-md text-sm" />
-            <select v-model.number="wrVatRateId"
+            <select v-if="supplierIsVatPayer" v-model.number="wrVatRateId"
               :title="t('invoice.wr_vat_rate')"
               class="h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface sm:w-48">
               <option v-for="r in selectableVatRates" :key="r.id" :value="r.id">{{ vatRateLabel(r) }}</option>
@@ -1975,7 +1981,7 @@ async function deleteDraft() {
           <div class="flex flex-col sm:flex-row gap-2">
             <input v-model="matTitle" type="text" :placeholder="t('invoice.wr_material_title')"
               class="flex-1 h-10 px-3 border border-neutral-300 rounded-md text-sm" />
-            <select v-model.number="matVatRateId"
+            <select v-if="supplierIsVatPayer" v-model.number="matVatRateId"
               :title="t('invoice.wr_vat_rate')"
               class="h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface sm:w-48">
               <option v-for="r in selectableVatRates" :key="r.id" :value="r.id">{{ vatRateLabel(r) }}</option>

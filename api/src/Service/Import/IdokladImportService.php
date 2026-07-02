@@ -59,6 +59,7 @@ final class IdokladImportService
      *   - include_clients: bool (default true)
      *   - include_issued: bool (default true)
      *   - include_received: bool (default true)
+     *   - include_receipts: bool (default true) — přijaté účtenky/paragony
      *   - dry_run: bool (default false)
      */
     public function run(int $jobId): void
@@ -96,6 +97,10 @@ final class IdokladImportService
             }
             if (!empty($params['include_received']) || ($params['include_received'] ?? null) === null) {
                 $this->importReceived($jobId, $supplierId, $userId, $dryRun, $bookmarkSince, $downloadAttachments);
+                $this->checkCancel($jobId);
+            }
+            if (!empty($params['include_receipts']) || ($params['include_receipts'] ?? null) === null) {
+                $this->importReceipts($jobId, $supplierId, $userId, $dryRun, $bookmarkSince, $downloadAttachments);
             }
 
             // Mark completed + bookmark
@@ -585,6 +590,236 @@ final class IdokladImportService
         );
 
         return $id;
+    }
+
+    /**
+     * Import ReceivedReceipts (přijaté účtenky / paragony) → purchase_invoices (document_kind='receipt').
+     *
+     * iDoklad endpoint GET /v3/ReceivedReceipts používá stejný paginated envelope jako
+     * ReceivedInvoices, takže řídicí smyčka je shodná s importReceived(). Liší se mapování:
+     * účtenky nemají splatnost ani DUZP a Partner může být null (hotovostní nákup) — viz
+     * createReceiptFromIdoklad().
+     */
+    private function importReceipts(int $jobId, int $supplierId, int $userId, bool $dryRun, ?string $bookmarkSince = null, bool $downloadAttachments = false): void
+    {
+        $this->jobs->updateProgress($jobId, ['current_step' => 'Importing received receipts…', 'processed' => 0]);
+        $this->jobs->appendLog($jobId, 'Stahuji přijaté účtenky z iDoklad…');
+
+        $query = $bookmarkSince !== null ? ['filter' => "DateLastChange>={$bookmarkSince}"] : [];
+
+        $created = 0; $skipped = 0; $failed = 0; $processed = 0;
+        foreach ($this->idoklad->getAll($supplierId, 'ReceivedReceipts', $query) as $idoklad) {
+            $processed++;
+            if ($processed % self::PROGRESS_FLUSH_EVERY === 0) {
+                $this->jobs->updateProgress($jobId, ['processed' => $processed, 'created_count' => $created, 'skipped_count' => $skipped, 'failed_count' => $failed]);
+                $this->checkCancel($jobId);
+            }
+
+            $idokladId = (int) ($idoklad['Id'] ?? 0);
+            if ($idokladId === 0) continue;
+
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT id FROM purchase_invoices WHERE supplier_id = ? AND idoklad_id = ? LIMIT 1'
+            );
+            $stmt->execute([$supplierId, $idokladId]);
+            if ($stmt->fetchColumn() !== false) { $skipped++; continue; }
+
+            if ($dryRun) { $created++; continue; }
+
+            try {
+                $purchaseId = $this->createReceiptFromIdoklad($idoklad, $supplierId, $userId);
+                if ($purchaseId === null) { $skipped++; continue; } // hotovostní účtenka bez Partnera
+                $this->db->pdo()->prepare(
+                    'UPDATE purchase_invoices SET idoklad_id = ? WHERE id = ?'
+                )->execute([$idokladId, $purchaseId]);
+                $this->purCalc->recompute($purchaseId);
+                if ($downloadAttachments) {
+                    $this->archiveReceivedPdf($supplierId, $purchaseId, $idokladId);
+                }
+                $created++;
+            } catch (\Throwable $e) {
+                $failed++;
+                $this->jobs->appendLog($jobId, "Účtenka #{$idokladId}: " . $e->getMessage());
+            }
+        }
+        $this->jobs->updateProgress($jobId, ['processed' => $processed, 'created_count' => $created, 'skipped_count' => $skipped, 'failed_count' => $failed]);
+        $this->jobs->appendLog($jobId, "Přijaté účtenky: vytvořeno {$created}, přeskočeno {$skipped}, chyby {$failed} (z {$processed}).");
+    }
+
+    /**
+     * Vytvoří jednu přijatou účtenku z iDoklad payloadu jako purchase_invoice s document_kind='receipt'.
+     *
+     * Rozdíly oproti createReceivedFromIdoklad():
+     *   • Partner je vnořený a MŮŽE být null (hotovostní nákup bez kontaktu) → doklad se naváže
+     *     na sběrného systémového dodavatele „Hotovostní nákup (účtenka)" (náklad se neztratí)
+     *     a importuje se bez nároku na odpočet DPH (viz níže).
+     *   • Účtenka nemá splatnost (DateOfMaturity) ani DUZP (DateOfTaxing) → vše z DateOfIssue.
+     *   • Číslo dokladu dodavatele je ExternalDocumentNumber (ne ReceivedDocumentNumber); často chybí.
+     *   • iDoklad u účtenek nevrací hlavičkovou slevu (DiscountType/DiscountPercentage).
+     */
+    private function createReceiptFromIdoklad(array $i, int $supplierId, int $userId): ?int
+    {
+        $hdr = self::idokladReceiptHeader($i, date('Y-m-d'));
+
+        // Hotovostní účtenka bez kontaktu (Partner == null) — dodavatele neznáme. Místo zahození
+        // nákladu ji navážeme na sběrného systémového vendora a odpočet DPH necháme neuplatněný
+        // (nemůžeme ověřit dodavatele ani jeho plátcovství — bezpečný default pro plátce; neplátce
+        // to neřeší). Uživatel může po doplnění dodavatele odpočet povolit.
+        $unknownVendor = ($hdr['partner_id'] === 0);
+        if ($unknownVendor) {
+            $vendorId = $this->clients->findOrCreateCashReceiptVendor($supplierId);
+        } else {
+            $vendorId = $this->resolveClientByIdoklad($hdr['partner_id'], $supplierId);
+            if ($vendorId === null) {
+                throw new \RuntimeException("Dodavatel s iDoklad ID {$hdr['partner_id']} nenalezen — nejdřív naimportuj kontakty.");
+            }
+            $this->clients->markAsVendor($vendorId);
+        }
+
+        // Číslo dokladu — createDraft ho vyžaduje neprázdné; hotovostní účtenka ho nemusí mít.
+        // Fallback na stabilní iDoklad Id, aby dedup (vendor+číslo+datum) i re-import fungovaly.
+        $vendorNumber = $this->sanitizeVendorNumber($hdr['vendor_invoice_number']);
+        if ($vendorNumber === '') {
+            $vendorNumber = 'UCT-' . (int) ($i['Id'] ?? 0);
+        }
+
+        $issueDate = $hdr['issue_date'];
+        $taxDate   = $hdr['tax_date'];
+        $dueDate   = $hdr['due_date'];
+
+        $vatRates = $this->loadVatRateMap();
+        $defaultVatRateId = $this->matchVatRateId($vatRates, 21.0) ?? $this->matchVatRateId($vatRates, 0.0) ?? 0;
+
+        // Položky — stejný tvar jako ReceivedInvoices (Amount/Name/Unit/VatRate + per-řádek Prices).
+        // idokladNetUnitPrice() řeší i PriceType=WithVat (účtenky bývají ceny s DPH).
+        $items = [];
+        foreach (($i['Items'] ?? []) as $idx => $line) {
+            $rate = (float) ($line['VatRate'] ?? 0);
+            $vatRateId = $this->matchVatRateId($vatRates, $rate) ?? $defaultVatRateId;
+            $items[] = [
+                'description'            => (string) ($line['Name'] ?? $line['Description'] ?? ''),
+                'quantity'               => (float) ($line['Amount'] ?? 1),
+                'unit'                   => (string) ($line['Unit'] ?? 'ks'),
+                'unit_price_without_vat' => self::idokladNetUnitPrice($line, $rate),
+                'vat_rate_id'            => $vatRateId,
+                'order_index'            => $idx,
+            ];
+        }
+
+        $reverseCharge = $this->inferReverseChargeFromItems($vendorId, $items);
+        $currencyCode  = $this->idokladCurrencyCode($i, $supplierId);
+
+        $payload = [
+            'vendor_id'             => $vendorId,
+            'vendor_invoice_number' => $vendorNumber,
+            'document_kind'         => 'receipt',
+            'issue_date'            => $issueDate,
+            'tax_date'              => $taxDate,
+            'due_date'              => $dueDate,
+            'received_at'           => date('Y-m-d'),
+            'currency_id'           => $this->resolveCurrencyId($currencyCode, $supplierId, isActive: false),
+            'exchange_rate'         => self::idokladExchangeRate($i),
+            'exchange_rate_source'  => 'manual',
+            'reverse_charge'        => $reverseCharge,
+            // Neznámý dodavatel (hotovostní účtenka) → bez nároku na odpočet DPH. Import jde přes
+            // createDraft(), který NEuplatňuje auto-none z CreatePurchaseInvoiceAction, proto explicitně.
+            'vat_deduction'         => $unknownVendor ? 'none' : 'full',
+            'language'              => 'cs',
+            'items'                 => $items,
+        ];
+
+        // Dedup guard — re-import stejné účtenky (typicky při opakovaném pullu) by jinak hodil
+        // SQL 23000 duplicate key. Vrátíme existující ID.
+        $existingId = $this->purchaseRepo->findIdByVendorInvoice(
+            $supplierId, $vendorId,
+            (string) $payload['vendor_invoice_number'],
+            (string) $payload['issue_date'],
+        );
+        if ($existingId !== null) {
+            return $existingId;
+        }
+
+        $id = $this->purchaseRepo->createDraft($payload, $userId, $supplierId);
+        if (!empty($items)) {
+            $this->purchaseRepo->replaceItems($id, $items);
+        }
+        $this->cnbApplier->applyIfMissing(
+            $id,
+            $supplierId,
+            $currencyCode,
+            (string) ($payload['tax_date'] ?? $payload['issue_date'] ?? ''),
+            $payload['exchange_rate'] ?? null,
+        );
+
+        // Seed override rekapitulace DPH z per-řádek Prices (stejně jako createReceivedFromIdoklad).
+        // Účtenka nemá hlavičkovou slevu, takže recap seedujeme bezpodmínečně, je-li kompletní.
+        $docByRate = self::idokladVatRecap($i['Items'] ?? []);
+        if ($docByRate !== []) {
+            $this->purCalc->recompute($id);
+            $warning = (new PurchaseVatRecapSeeder($this->purchaseRepo, $this->purCalc))->seed(
+                $id,
+                $supplierId,
+                $docByRate,
+                $currencyCode,
+                false,
+            );
+            if ($warning !== null) {
+                try {
+                    $this->purchaseRepo->appendExtractionWarning($id, $supplierId, $warning);
+                } catch (\Throwable) {
+                    // Varování je „nice to have".
+                }
+            }
+        }
+
+        // Hotovostní účtenka bez identifikace dodavatele — upozorni na revizi (odpočet je záměrně
+        // neuplatněný; uživatel po doplnění dodavatele může nárok povolit).
+        if ($unknownVendor) {
+            try {
+                $this->purchaseRepo->appendExtractionWarning(
+                    $id,
+                    $supplierId,
+                    'Účtenka bez identifikace dodavatele (hotovostní nákup) — pro uplatnění odpočtu DPH doplňte dodavatele a povolte odpočet.',
+                );
+            } catch (\Throwable) {
+                // Varování je „nice to have".
+            }
+        }
+
+        // Účtenka/paragon je hrazená na místě → import rovnou jako zaplacená (paid_at = datum
+        // vystavení). ReceivedReceipts payload obvykle PaymentStatus nenese (ověřeno živě: null),
+        // takže fromIdoklad() vrátí null; přesto když by iDoklad stav úhrady vrátil, respektuj ho.
+        $paymentState = ImportedPaymentStateMapper::fromIdoklad($i)
+            ?? ['status' => 'paid', 'paid_at' => $issueDate];
+        $this->applyPurchasePaymentState($id, $supplierId, $paymentState, $issueDate);
+
+        return $id;
+    }
+
+    /**
+     * Receipt-specifické mapování hlavičky (čistá funkce, bez DB — proto unit-testovatelná).
+     *
+     * Účtenky se od přijatých faktur liší: Partner je vnořený a může být null (hotovostní
+     * nákup), chybí splatnost (DateOfMaturity) i DUZP (DateOfTaxing) → issue/tax/due odvodíme
+     * shodně z DateOfIssue; číslo dokladu dodavatele je ExternalDocumentNumber (fallback
+     * DocumentNumber) — účtenka ho nemusí mít vůbec, prázdné je u document_kind='receipt' OK.
+     *
+     * @param array<string,mixed> $i      iDoklad ReceivedReceipt payload
+     * @param string              $today  fallback datum (Y-m-d), když DateOfIssue chybí
+     * @return array{partner_id:int, vendor_invoice_number:string, issue_date:string, tax_date:string, due_date:string}
+     */
+    public static function idokladReceiptHeader(array $i, string $today): array
+    {
+        $partnerId = (int) ($i['Partner']['Id'] ?? $i['PartnerId'] ?? 0);
+        $issueDate = (string) ($i['DateOfIssue'] ?? '') ?: $today;
+
+        return [
+            'partner_id'            => $partnerId,
+            'vendor_invoice_number' => (string) ($i['ExternalDocumentNumber'] ?? $i['DocumentNumber'] ?? ''),
+            'issue_date'            => $issueDate,
+            'tax_date'              => $issueDate,
+            'due_date'              => $issueDate,
+        ];
     }
 
     /**

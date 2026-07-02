@@ -6064,6 +6064,7 @@ components:
         statement_id: { type: integer, format: int64 }
         posted_at: { type: string, format: date }
         amount: { type: number, format: float, example: 12500.00 }
+        balance: { type: number, format: float, nullable: true, description: "Disponibilní zůstatek účtu z e-mailového avíza (Creditas/Fio/RB); u transakcí z GPC výpisu null." }
         currency: { type: string, nullable: true, example: CZK }
         variable_symbol: { type: string, nullable: true }
         constant_symbol: { type: string, nullable: true }

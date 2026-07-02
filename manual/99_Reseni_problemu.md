@@ -140,7 +140,7 @@ v názvu firmy), použij **Editovat (force)** s admin rolí.
 
 SHA-256 hash souboru se shoduje s nějakým dříve importovaným. Buď:
 
-- Skutečně už je naimportovaný (zkontroluj **Banka → Výpisy**)
+- Skutečně už je naimportovaný (zkontroluj **Finance → Bankovní účty**, záložka Bankovní výpisy)
 - Stáhl jsi stejný výpis 2× → použij jiný (nebo si vyžádej z banky export
   s jiným časovým rozsahem)
 

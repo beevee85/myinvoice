@@ -9,6 +9,9 @@ use PDO;
 
 final class ClientRepository
 {
+    /** Název sběrného systémového dodavatele hotovostních účtenek (viz findOrCreateCashReceiptVendor). */
+    private const CASH_RECEIPT_VENDOR_NAME = 'Hotovostní nákup (účtenka)';
+
     public function __construct(private readonly Connection $db) {}
 
     public function find(int $id): ?array
@@ -294,6 +297,37 @@ final class ClientRepository
         $this->db->pdo()
             ->prepare('UPDATE clients SET is_vendor = 1 WHERE id = ? AND is_vendor = 0')
             ->execute([$id]);
+    }
+
+    /**
+     * Systémový (sběrný) dodavatel „Hotovostní nákup (účtenka)" — pod něj se navazují
+     * hotovostní účtenky bez identifikace protistrany (iDoklad Partner == null). Jeden na
+     * tenanta; poznává se podle názvu (bez potřeby extra sloupce — iDoklad import je okrajový).
+     * Zakládá se jako neplátce DPH (neznámý/neověřený dodavatel) → bezpečný default pro odpočet.
+     * Idempotentní: při opakovaném importu vrací stejný řádek.
+     */
+    public function findOrCreateCashReceiptVendor(int $supplierId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id FROM clients WHERE supplier_id = ? AND company_name = ? AND is_vendor = 1 LIMIT 1'
+        );
+        $stmt->execute([$supplierId, self::CASH_RECEIPT_VENDOR_NAME]);
+        $id = $stmt->fetchColumn();
+        if ($id !== false) {
+            return (int) $id;
+        }
+
+        return $this->create([
+            'company_name' => self::CASH_RECEIPT_VENDOR_NAME,
+            'street'       => '',
+            'city'         => '',
+            'zip'          => '',
+            'main_email'   => '',
+            'country_iso2' => 'CZ',
+            'is_customer'  => false,
+            'is_vendor'    => true,
+            'is_vat_payer' => false,
+        ], $supplierId);
     }
 
     /**

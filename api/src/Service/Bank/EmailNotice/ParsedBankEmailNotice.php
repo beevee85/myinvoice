@@ -18,6 +18,7 @@ final class ParsedBankEmailNotice
         public readonly ?string $constantSymbol = null,
         public readonly ?string $message = null,
         public readonly ?string $bankRef = null,
+        public readonly ?float $balance = null,
     ) {}
 
     /**
@@ -37,6 +38,7 @@ final class ParsedBankEmailNotice
             'constant_symbol' => $this->constantSymbol,
             'message' => $this->message,
             'bank_ref' => $this->bankRef,
+            'balance' => $this->balance,
         ];
     }
 }

@@ -43,6 +43,7 @@ final class ListSentEmailsAction
         'recurring.reminder_sent'        => 'recurring.reminder_failed',
         'email.sent_test'                => 'email.test_failed',
         'email.sent_test_reminder'       => 'email.test_reminder_failed',
+        'email.sent_profile_test'        => 'email.profile_test_failed',
     ];
 
     public function __construct(private readonly Connection $db) {}

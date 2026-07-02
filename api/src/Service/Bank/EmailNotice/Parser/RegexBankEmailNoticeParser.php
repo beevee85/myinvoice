@@ -152,6 +152,9 @@ final class RegexBankEmailNoticeParser extends AbstractBankEmailNoticeParser
             constantSymbol: $this->cleanNullable((string) ($data['constant_symbol'] ?? '')),
             message: $this->cleanNullable((string) ($data['message'] ?? '')),
             bankRef: $this->cleanNullable((string) ($data['bank_ref'] ?? '')),
+            balance: trim((string) ($data['balance'] ?? '')) !== ''
+                ? $this->parseAmount((string) $data['balance'])
+                : null,
         );
     }
 }

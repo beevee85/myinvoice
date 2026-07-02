@@ -37,6 +37,7 @@ final class SigningProfilesAction
         'email_recurring_draft_reminder',
     ];
     private const PASSPHRASE_POLICIES = ['encrypted_store', 'passphrase_file', 'prompt_on_use'];
+    private const SMIME_IDENTITY_POLICIES = ['strict_match', 'warning_only', 'same_domain_override', 'allowlist_override'];
     private const MAX_CERT_SIZE = 128 * 1024;
 
     public function __construct(
@@ -309,7 +310,7 @@ final class SigningProfilesAction
             $data['default_profile_id'] = $this->nullableInt($body['default_profile_id']);
         }
         if (array_key_exists('signature_config', $body)) {
-            $data['signature_config'] = is_array($body['signature_config']) ? $body['signature_config'] : [];
+            $data['signature_config'] = $this->normalizeSignatureConfig($body['signature_config'], $usage);
         }
 
         try {
@@ -890,6 +891,87 @@ final class SigningProfilesAction
     private function usageForOutputType(string $outputType): string
     {
         return str_starts_with($outputType, 'email_') ? 'email_smime' : 'pdf';
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<string,mixed>
+     */
+    private function normalizeSignatureConfig($value, string $usage): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+
+        if ($usage !== 'email_smime') {
+            return $value;
+        }
+
+        $policy = (string) ($value['smime_identity_policy'] ?? 'strict_match');
+        if (!in_array($policy, self::SMIME_IDENTITY_POLICIES, true)) {
+            $policy = 'strict_match';
+        }
+
+        $config = $value;
+        $config['smime_identity_policy'] = $policy;
+
+        $allowlist = $this->normalizeSmimeIdentityAllowlist($config['smime_identity_allowlist'] ?? []);
+        if ($allowlist !== []) {
+            $config['smime_identity_allowlist'] = $allowlist;
+        } else {
+            unset($config['smime_identity_allowlist']);
+        }
+
+        return $config;
+    }
+
+    /**
+     * @param mixed $value
+     * @return list<string>
+     */
+    private function normalizeSmimeIdentityAllowlist($value): array
+    {
+        if (is_string($value)) {
+            $value = preg_split('/[\r\n,;]+/', $value) ?: [];
+        }
+        if (!is_array($value)) {
+            return [];
+        }
+
+        $items = [];
+        foreach ($value as $item) {
+            if (!is_string($item)) {
+                continue;
+            }
+            $item = strtolower(trim($item));
+            if ($item === '') {
+                continue;
+            }
+            if (!$this->isValidSmimeIdentityAllowlistItem($item)) {
+                throw new \InvalidArgumentException('Neplatná položka S/MIME allowlistu.');
+            }
+            $items[] = $item;
+        }
+
+        return array_values(array_unique($items));
+    }
+
+    private function isValidSmimeIdentityAllowlistItem(string $item): bool
+    {
+        if (filter_var($item, FILTER_VALIDATE_EMAIL) !== false) {
+            return true;
+        }
+
+        $domain = $item;
+        if (str_starts_with($item, '*@')) {
+            $domain = substr($item, 2);
+        } elseif (str_starts_with($item, '@')) {
+            $domain = substr($item, 1);
+        } elseif (str_contains($item, '@')) {
+            return false;
+        }
+
+        return preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/', $domain) === 1;
     }
 
     private function passphrasePolicy(string $policy): ?string

@@ -35,7 +35,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'logbook',                name: 'logbook',          component: () => import('@/pages/logbook/LogbookPage.vue') },
       { path: 'stats',                  name: 'stats',           component: () => import('@/pages/Stats.vue') },
       { path: 'purchase-stats',         name: 'purchase-stats',  component: () => import('@/pages/PurchaseStats.vue') },
-      { path: 'bank',                   name: 'bank-statements', component: () => import('@/pages/bank/StatementList.vue') },
+      // Sjednocená stránka „Bankovní účty" (Finance): výpisy + měny/účty + stavy + avíza.
+      { path: 'bank',                   name: 'bank-statements', component: () => import('@/pages/bank/BankPage.vue') },
       { path: 'bank/:id(\\d+)',         name: 'bank-detail',     component: () => import('@/pages/bank/StatementDetail.vue') },
       // FORK (beevee85): pokladní doklady
       { path: 'cash-documents',         name: 'cash-documents',  component: () => import('@/pages/cash/CashDocuments.vue') },
@@ -45,8 +46,17 @@ const routes: RouteRecordRaw[] = [
       { path: 'admin/cron-jobs',        name: 'cron-jobs',      component: () => import('@/pages/admin/CronJobs.vue'),    meta: { adminOnly: true } },
       { path: 'admin/users',            name: 'admin-users',    component: () => import('@/pages/admin/Users.vue'),       meta: { adminOnly: true } },
       { path: 'admin/settings',         name: 'admin-settings', component: () => import('@/pages/admin/Settings.vue'),    meta: { adminOnly: true } },
-      { path: 'admin/bank-accounts',    name: 'admin-bank-accounts', component: () => import('@/pages/admin/BankAccounts.vue'), meta: { adminOnly: true } },
-      { path: 'admin/bank-email-notices', name: 'admin-bank-email-notices', redirect: '/admin/bank-accounts' },
+      // Bývalá stránka Systém → Bankovní účty je nyní součástí /bank (Finance) jako záložky.
+      // Redirect zachovává bookmarks vč. původního ?tab=.
+      {
+        path: 'admin/bank-accounts',
+        name: 'admin-bank-accounts',
+        redirect: to => ({
+          path: '/bank',
+          query: { tab: ['accounts', 'balances', 'email'].includes(String(to.query.tab)) ? String(to.query.tab) : 'accounts' },
+        }),
+      },
+      { path: 'admin/bank-email-notices', name: 'admin-bank-email-notices', redirect: '/bank?tab=email' },
       // /admin/suppliers byla samostatná stránka — Suppliers jsou nyní embedded jako první tab v Codebooks.
       // Redirect zachovává bookmarks / staré odkazy.
       { path: 'admin/suppliers',        name: 'admin-suppliers', redirect: '/admin/codebooks' },

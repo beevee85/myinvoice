@@ -1,0 +1,31 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#18181b;">Test odesílacího profilu</h1>
+
+<p style="margin:0 0 16px;">Dobrý den,</p>
+
+<p style="margin:0 0 16px;">
+  tento e-mail ověřuje nastavení odesílacího profilu
+  <strong>{{ profile.name }}</strong> (<code>{{ profile.code }}</code>).
+</p>
+
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:20px 0;border:1px solid #e4e4e7;border-radius:8px;border-collapse:separate;overflow:hidden;">
+  <tr>
+    <td style="padding:10px 12px;background:#fafafa;color:#71717a;font-size:12px;width:34%;">From</td>
+    <td style="padding:10px 12px;font-size:13px;">{{ profile.from }}</td>
+  </tr>
+  <tr>
+    <td style="padding:10px 12px;background:#fafafa;color:#71717a;font-size:12px;">Reply-To</td>
+    <td style="padding:10px 12px;font-size:13px;">{{ profile.reply_to }}</td>
+  </tr>
+  <tr>
+    <td style="padding:10px 12px;background:#fafafa;color:#71717a;font-size:12px;">Transport</td>
+    <td style="padding:10px 12px;font-size:13px;">{{ profile.transport }}</td>
+  </tr>
+</table>
+
+<p style="margin:0;font-size:13px;color:#71717a;">
+  Pokud e-mail dorazil a hlavičky odpovídají očekávání, profil je pro toto odeslání použitelný.
+</p>
+{% endblock %}

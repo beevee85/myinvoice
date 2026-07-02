@@ -105,6 +105,8 @@ final class Bootstrap
                 $c->get(Connection::class),
                 $c->get(\MyInvoice\Repository\EmailTemplateRepository::class),
                 $c->get(\MyInvoice\Service\Signing\Email\EmailSigningService::class),
+                $c->get(\MyInvoice\Repository\EmailProfileRepository::class),
+                $c->get(\MyInvoice\Service\Mail\SentMailImapAppender::class),
             ),
             \MyInvoice\Service\Bank\EmailNotice\ImapMailboxClientInterface::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\EmailNotice\WebklexImapMailboxClient(
                 $c->get(\MyInvoice\Service\Bank\EmailNotice\EmailNoticeTextNormalizer::class),

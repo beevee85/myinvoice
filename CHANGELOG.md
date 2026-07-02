@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.44.0] — 2026-07-02
+
+### Added
+
+- **Zůstatek účtu z e-mailových bankovních avíz.** Avíza Banky CREDITAS („Disponibilní zůstatek"), Fio banky („Aktuální zůstatek") a Raiffeisenbank („Disponibilní zůstatek po pohybu") nesou kromě platby i aktuální zůstatek účtu — nově se při skenu vytěží a uloží k transakci (`bank_transactions.balance`, migrace 0125). Detail měsíčního avízo-výpisu, který dosud žádné souhrny neukazoval, dostal boxy: **disponibilní zůstatek** z nejnovějšího avíza, **k datu**, a součty **příjmů/výdajů** měsíce. Zůstatky z avíz se promítají i do přehledu **Stavy na účtech** — v každém měsíci i pro aktuální stav vyhrává novější údaj (avízo typicky předběhne pravidelný výpis; při shodě dne zůstává autoritativní GPC) a u data je pak štítek „z avíza". U vlastních regex parserů lze zůstatek vytěžovat novým volitelným polem `balance`. Zůstatek se ukládá od této verze — u dříve naskenovaných avíz zpětně doplnit nejde (surové tělo e-mailu se neuchovává).
+- **Odesílací e-mailové profily s vlastním SMTP transportem (#87).** Dodavatel může mít víc odesílacích identit (adres) s vlastním SMTP serverem, podpisem a volitelnou **S/MIME identitou** — profil se vybírá při odesílání dokladů. Odeslané zprávy se navíc umí **archivovat do IMAP složky** („Odeslané") daného profilu; selhání archivace neshodí samotné doručení. Kontroluje se soulad adresy From s S/MIME certifikátem (u nových i stávajících profilů default jen varování). Bez nastavených profilů se chování nemění — použije se globální SMTP. (migrace 0124)
+- **Stavy na účtech.** Nový přehled zůstatků na bankovních účtech: aktuální stav každého účtu, měsíční vývoj (graf na účet, poslední 3 roky) a celkový součet přepočtený na CZK kurzem ČNB ke konci měsíce. Zdrojem jsou konečné zůstatky z GPC výpisů (a nově i avíza, viz výše).
+- **iDoklad import — přijaté účtenky/paragony (`ReceivedReceipts`).** Import z iDokladu dosud stahoval jen `ReceivedInvoices` (přijaté faktury) a koncový bod `ReceivedReceipts` přeskakoval — přijaté účtenky/paragony se tak vůbec nepřenesly. Nově se importují do `purchase_invoices` s `document_kind='receipt'` (řídí se přes nový parametr `include_receipts`, default zapnuto). Mapování zohledňuje odlišnosti účtenky od faktury: účtenka nemá splatnost (`DateOfMaturity`) ani DUZP (`DateOfTaxing`) → `issue_date`/`tax_date`/`due_date` se odvodí z `DateOfIssue`, a číslo dokladu dodavatele je `ExternalDocumentNumber` (fallback `DocumentNumber`). Hotovostní účtenka bez kontaktu (`Partner` = null) se **naváže na sběrného systémového dodavatele „Hotovostní nákup (účtenka)"** (aby se náklad neztratil) a importuje se **bez nároku na odpočet DPH** (`vat_deduction='none'`) s upozorněním k doplnění dodavatele — u plátce tak nevzniká chybný odpočet, u neplátce je to bez dopadu. Dedup přes `idoklad_id` i `(vendor, číslo, datum)` zůstává — opakovaný import nepřidává duplicity. Položkové ceny i rekapitulace DPH se skládají z autoritativních per-řádkových `Prices` stejně jako u přijatých faktur (řeší i ceny s DPH na účtenkách). Účtenka je hrazená na místě, takže se importuje rovnou jako **zaplacená** (`paid_at` = datum vystavení), pokud iDoklad nevrátí konkrétnější stav úhrady.
+
+### Changed
+
+- **Bankovní stránky sjednocené pod Finance → „Bankovní účty".** Bývalá stránka *Systém → Bankovní účty* (Měny a účty / Stavy na účtech / Bankovní avíza z e-mailu) se přesunula jako záložky na stránku s bankovními výpisy — vše bankovní je teď na jednom místě se **4 záložkami**: *Bankovní výpisy* | *Měny a účty* | *Stavy na účtech* | *Bankovní avíza z e-mailu*. Záložky kromě výpisů vidí jen administrátor (stejná oprávnění jako dřív); položka v menu Systém zmizela. Staré odkazy a záložky prohlížeče (`/admin/bank-accounts`, i s `?tab=`) se automaticky přesměrují.
+
+### Fixed
+
+- **Zpracovaná avíza — stav se odvozuje z živého párování transakce.** Přehled „Zpracované e-maily" ukazoval stav zamrzlý z okamžiku skenu: avízo dodatečně spárované ručně zůstávalo jako *match_failed*, a naopak později rozpárovaná transakce dál vypadala jako úspěch. Stav se nově dopočítává z aktuálního stavu párování navázané bankovní transakce.
+- **Výkaz práce pro neplátce DPH — bez sazby DPH (#181).** Výkaz práce dodavatele-neplátce nabízel volbu sazby DPH a zapékal ji do fakturovaných položek. Nově se u neplátce sazba v UI výkazu nenabízí a položky vzniklé z výkazu se fakturují bez DPH.
+
 ## [4.43.4] — 2026-07-01
 
 ### Fixed

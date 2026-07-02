@@ -11,6 +11,10 @@ import { useAuthStore } from '@/stores/auth'
 import FilterBar from '@/components/ui/FilterBar.vue'
 import { formatAccountNumber } from '@/utils/bankAccount'
 
+// embedded = vykresleno jako záložka „Bankovní výpisy" uvnitř BankPage.vue
+// (hlavičku stránky dodává obálka, tady zůstávají jen akční tlačítka).
+defineProps<{ embedded?: boolean }>()
+
 const { t, tm, rt, locale } = useI18n()
 const toast = useToast()
 const authStore = useAuthStore()
@@ -293,11 +297,11 @@ async function onFileSelected(e: Event) {
 <template>
   <div>
     <div class="flex items-center justify-between mb-4">
-      <div>
+      <div v-if="!embedded">
         <h1 class="text-2xl font-semibold">{{ t('bank.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('bank.subtitle') }}</p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 ml-auto">
         <button v-if="authStore.canWrite && scanConfigured" @click="onScan" :disabled="scanning"
           class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-primary-500/40 text-primary-700 hover:bg-primary-50 disabled:opacity-50 text-sm font-medium rounded-md">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 0 0 4.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 0 1-15.357-2m15.357 2H15"/></svg>

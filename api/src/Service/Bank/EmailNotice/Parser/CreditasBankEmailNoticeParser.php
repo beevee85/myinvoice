@@ -131,6 +131,14 @@ final class CreditasBankEmailNoticeParser extends AbstractBankEmailNoticeParser
         // čte se z $raw, aby se zachovala diakritika popisku.
         $type = $this->optional($raw, '/[0-9][0-9\x{00A0} .]*,[0-9]{2}\s*[A-Za-z]{3}\s*\((?<value>[^)]+)\)/u');
 
+        // Disponibilní zůstatek — v úvodní větě („Disponibilní zůstatek 23.06.2026 18:41
+        // je 96 163,53 CZK.") i v odrážce („- disponibilní zůstatek: 96 163,53 CZK");
+        // stačí první výskyt, hodnota je stejná.
+        $balance = $this->optional(
+            $text,
+            '/disponibilni\s+zustatek(?:\s+\d{1,2}\.\d{1,2}\.\d{4}(?:\s+\d{1,2}:\d{2})?)?\s*(?::|je)\s*(?<value>[+\-]?[0-9][0-9 .]*,[0-9]{2})/iu',
+        );
+
         [$recipientAccount, $recipientBank] = $this->splitAccount((string) $account['value']);
         $currency = trim((string) ($amountCurrency['currency'] ?? ''));
 
@@ -147,6 +155,7 @@ final class CreditasBankEmailNoticeParser extends AbstractBankEmailNoticeParser
             counterpartyBank: $cpBank,
             constantSymbol: $constantSymbol,
             message: $type,
+            balance: $balance !== null ? $this->parseAmount($balance) : null,
         );
     }
 

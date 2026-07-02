@@ -79,6 +79,12 @@ function rateIdByPercent(p: number): number | null {
   const r = vatRates.value.find(x => Math.round(Number(x.rate_percent)) === p)
   return r ? r.id : null
 }
+// Neplátce DPH → 0% „Osvobozeno" (rate_percent=0, ne reverse charge). Zrcadlí
+// defaultVatRateId() z InvoiceEditor.vue, aby výkaz nezapekl DPH do položek faktury.
+function zeroVatRateId(): number | null {
+  const r = vatRates.value.find(x => Number(x.rate_percent) === 0 && !x.is_reverse_charge)
+  return r ? r.id : null
+}
 const defaultUnit = computed(() => units.value.find(u => u.code === 'ks')?.code || 'ks')
 
 const supplierIsVatPayer = computed(() => supplierStore.currentSupplier?.is_vat_payer ?? true)
@@ -136,14 +142,20 @@ async function load() {
     wrTitle.value = wr?.title || (date ? t('invoice.wr_title_with_date', { date }) : t('invoice.work_report'))
     origWorkTitle.value = wr?.title ?? ''
     wrItems.value = (wr?.items ?? []).map(i => ({ ...i }))
-    workVatRateId.value = wr?.vat_rate_id ?? rateIdByPercent(21) ?? defaultVatRateId.value
+    // Neplátce DPH: vždy 0% (ignoruj případnou uloženou sazbu i default 21 %), ať se
+    // do položek faktury nepropíše DPH. Plátce: uložená sazba → 21 % → fallback.
+    workVatRateId.value = supplierIsVatPayer.value
+      ? (wr?.vat_rate_id ?? rateIdByPercent(21) ?? defaultVatRateId.value)
+      : (zeroVatRateId() ?? defaultVatRateId.value)
     wrOpen.value = wrItems.value.length > 0
 
     // ── Materiál ── (sekce zabalená, dokud nemá řádky)
     matTitle.value = wr?.material_title || t('invoice.wr_material_title')
     origMatTitle.value = wr?.material_title ?? ''
     matItems.value = (wr?.materials ?? []).map(m => ({ ...m }))
-    matVatRateId.value = wr?.material_vat_rate_id ?? rateIdByPercent(12) ?? defaultVatRateId.value
+    matVatRateId.value = supplierIsVatPayer.value
+      ? (wr?.material_vat_rate_id ?? rateIdByPercent(12) ?? defaultVatRateId.value)
+      : (zeroVatRateId() ?? defaultVatRateId.value)
     matOpen.value = matItems.value.length > 0
   } catch (e: any) {
     error.value = apiErrorMessage(e, t('common.error'))
@@ -375,12 +387,12 @@ onMounted(() => {
           </div>
           <div v-if="wrOpen" class="space-y-4">
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div class="md:col-span-2">
+            <div :class="supplierIsVatPayer ? 'md:col-span-2' : 'md:col-span-3'">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.wr_title') }} *</label>
               <input v-model="wrTitle" type="text" maxlength="100" required
                      class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
-            <div>
+            <div v-if="supplierIsVatPayer">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.wr_vat_rate') }}</label>
               <select v-model.number="workVatRateId"
                       class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
@@ -534,12 +546,12 @@ onMounted(() => {
           </div>
           <div v-if="matOpen" class="space-y-4">
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div class="md:col-span-2">
+            <div :class="supplierIsVatPayer ? 'md:col-span-2' : 'md:col-span-3'">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.wr_title') }}</label>
               <input v-model="matTitle" type="text" maxlength="100"
                      class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
-            <div>
+            <div v-if="supplierIsVatPayer">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.wr_vat_rate') }}</label>
               <select v-model.number="matVatRateId"
                       class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface">

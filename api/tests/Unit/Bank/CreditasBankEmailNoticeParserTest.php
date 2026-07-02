@@ -42,6 +42,7 @@ TEXT;
         self::assertSame('1000000005/2250', $parsed->recipientAccount);
         self::assertSame('Blokace', $parsed->message);
         self::assertNull($parsed->counterpartyAccount);
+        self::assertSame(12489.48, $parsed->balance);
     }
 
     public function testParsesIncomingPaymentWithCounterparty(): void
@@ -76,6 +77,7 @@ TEXT;
         self::assertSame('1900000007', $parsed->counterpartyAccount);
         self::assertSame('0800', $parsed->counterpartyBank);
         self::assertSame('Příchozí úhrada', $parsed->message);
+        self::assertSame(96163.53, $parsed->balance);
     }
 
     public function testParsesIncomingPaymentWithVariableSymbol(): void
@@ -116,6 +118,7 @@ TEXT;
         $parsed = $parser->parse($message, $provider);
         self::assertSame(-315.0, $parsed->amount);
         self::assertSame('1000000005/2250', $parsed->recipientAccount);
+        self::assertNull($parsed->balance);
     }
 
     public function testRejectsSpoofedSenderDomain(): void
