@@ -513,7 +513,7 @@
 <div style="margin-bottom:5mm;">
   <div class="wr-title">{{ work_report.title }}</div>
   <div style="font-size:9pt;color:#5A5470;">
-    {{ t('K faktuře', 'For invoice') }} <span style="font-family:'jetbrainsmono','DejaVu Sans Mono',monospace;">{{ invoice.varsymbol }}</span>
+    {{ t('K faktuře', 'For invoice') }} <strong>{{ invoice.varsymbol }}</strong>
     {% if invoice.project_name %} · {{ t('Zakázka', 'Project') }}: {{ invoice.project_name }}{% endif %}
   </div>
 </div>
