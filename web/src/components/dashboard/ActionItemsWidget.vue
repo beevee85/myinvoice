@@ -51,7 +51,7 @@ onMounted(async () => {
 <template>
   <!-- ═══ Action items widget (daily TODO) ═══ -->
   <div v-if="actionItems && actionItems.total > 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
-    <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between bg-gradient-to-r from-primary-50 to-white rounded-t-lg">
+    <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between bg-gradient-to-r from-primary-50 to-surface rounded-t-lg">
       <h3 class="text-sm font-semibold uppercase tracking-wide text-primary-700">
         ⚡ {{ t('crm.action_items.title') }}
         <span class="ml-2 px-1.5 py-0.5 bg-primary-600 text-white rounded text-xs">{{ actionItems.total }}</span>
