@@ -1,0 +1,81 @@
+/* ═══════════════════════ FORK (beevee85): CUSTOM THEME ═══════════════════════
+ * Modernizovaná paleta této instalace — přepis design tokenů z main.css.
+ * Importováno v main.ts PO main.css, takže hodnoty tady vyhrávají.
+ *
+ * Proč samostatný soubor: upstream main.css zůstává netknutý → updaty autora
+ * se mergují bez konfliktů. Při změně palety srovnej i chart barvy
+ * v composables/useTheme.ts (chart.js nečte CSS proměnné).
+ *
+ * PDF faktur a e-mail branding se řídí server-side/per-supplier nastavením —
+ * tenhle soubor je záměrně nemění.
+ */
+
+:root {
+  /* ─── Primary — moderní syté indigo (původně tlumená fialová #5C45A0) ─── */
+  --color-primary-50:  #EEF2FF;
+  --color-primary-100: #E0E7FF;
+  --color-primary-200: #C7D2FE;
+  --color-primary-300: #A5B4FC;
+  --color-primary-400: #818CF8;
+  --color-primary-500: #6366F1;   /* main interactive, logo */
+  --color-primary-600: #4F46E5;   /* primary button */
+  --color-primary-700: #4338CA;   /* accents */
+  --color-primary-800: #3730A3;
+  --color-primary-900: #312E81;
+
+  /* ─── Neutrály — čistý chladný slate (původně nafialovělá šedá) ─── */
+  --color-neutral-50:  #F8FAFC;   /* page background */
+  --color-neutral-100: #F1F5F9;   /* subtle tint */
+  --color-neutral-200: #E2E8F0;   /* borders */
+  --color-neutral-300: #CBD5E1;
+  --color-neutral-400: #94A3B8;
+  --color-neutral-500: #64748B;
+  --color-neutral-600: #475569;
+  --color-neutral-700: #334155;
+  --color-neutral-800: #1E293B;
+  --color-neutral-900: #0F172A;   /* text */
+
+  /* ─── Rádiusy — měkčí, současnější ─── */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* ─── Status badge „Vystaveno" sladěný s novým indigem ─── */
+  --color-status-issued-bg: #E0E7FF;
+  --color-status-issued-fg: #3730A3;
+}
+
+/* ─── Dark mode — slate-indigo tmavá (zrcadlí strukturu .dark v main.css) ─── */
+.dark {
+  /* Neutral — invertovaná, chladná slate tmavá */
+  --color-neutral-50:  #0F1626;   /* page background */
+  --color-neutral-100: #161F33;   /* subtle tint / hover */
+  --color-neutral-200: #253147;   /* borders */
+  --color-neutral-300: #33415C;
+  --color-neutral-400: #64708D;   /* velmi tlumené/disabled */
+  --color-neutral-500: #8E9AB3;   /* muted text (AA na tmavém) */
+  --color-neutral-600: #A6B0C6;   /* sekundární text */
+  --color-neutral-700: #C4CCDD;
+  --color-neutral-800: #E1E6F0;
+  --color-neutral-900: #F2F5FA;   /* hlavní text */
+
+  --color-surface: #171F33;       /* karty / panely / topbar / sidebar */
+
+  /* Primary — zesvětlené indigo pro kontrast na tmavém podkladu */
+  --color-primary-50:  #1E2547;   /* soft pill bg */
+  --color-primary-100: #283061;
+  --color-primary-600: #6366F1;   /* primary button */
+  --color-primary-700: #818CF8;   /* accent text */
+  --color-primary-800: #A5B4FC;
+  --color-primary-900: #C7D2FE;
+}
+
+/* ─── Měkčí vrstvené stíny karet a modálů ───
+ * Tailwind utility jsou v @layer utilities; tahle nevrstvená pravidla je přebijí. */
+.shadow-sm {
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05), 0 2px 8px -2px rgb(15 23 42 / 0.08);
+}
+.shadow-lg {
+  box-shadow: 0 8px 30px -6px rgb(15 23 42 / 0.18), 0 2px 8px -2px rgb(15 23 42 / 0.08);
+}

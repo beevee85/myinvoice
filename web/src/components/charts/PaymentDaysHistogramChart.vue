@@ -15,7 +15,7 @@ const canvas = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
 const colors = useChartColors()
 
-const palette = ['#4CAF7A', '#A99CD8', '#E8A547', '#D45B5B']
+const palette = ['#4CAF7A', '#A5B4FC', '#E8A547', '#D45B5B']
 
 function build() {
   if (!canvas.value) return
@@ -23,7 +23,7 @@ function build() {
 
   const labels = props.buckets.map(b => b.label)
   const data = props.buckets.map(b => b.count)
-  const barColors = props.buckets.map((_, i) => palette[i] ?? '#5C45A0')
+  const barColors = props.buckets.map((_, i) => palette[i] ?? '#4F46E5')
 
   chart = new Chart(canvas.value, {
     type: 'bar',

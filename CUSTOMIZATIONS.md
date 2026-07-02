@@ -6,6 +6,28 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-02 — FÁZE 3: modernizace UI (indigo/slate theme)
+
+**Co se změnilo:** vizuální refresh aplikace — primární barva z tlumené fialové (#5C45A0) na moderní indigo (#4F46E5), neutrály z nafialovělé šedé na chladný slate, měkčí rádiusy (6–16 px), vrstvené stíny karet, sladěné barvy grafů. Light i dark mode.
+
+**Které soubory:**
+- `web/src/styles/custom-theme.css` — **nový** soubor s přepisem design tokenů (`:root` + `.dark`) a stíny. Jádro celé změny.
+- `web/src/main.ts` — +1 řádek importu (jediný zásah do upstream souboru kvůli theme).
+- `web/src/composables/useTheme.ts` — chart.js paleta (nečte CSS proměnné, hodnoty se zrcadlí ručně — viz komentář v souboru).
+- `web/src/components/charts/{StatusDoughnut,PurchaseStatus,VatBreakdown,InvoiceSize,PaymentDaysHistogram}Chart.vue` — lokální hex barvy přemapované na indigo/slate ekvivalenty (mechanická náhrada, sémantické barvy success/warning/danger nedotčené).
+
+**Co se záměrně NEmění:**
+- PDF faktur a e-mail branding (server-side / per-supplier nastavení `email_accent_color`) — doklady pro klienty vypadají stejně.
+- Fallback akcent veřejné work-report stránky a error banner (`WorkReportTrackingPublic.vue`, `api/client.ts`, `Settings.vue`) — patří k brand identitě dokladů.
+- `manual/manual.css` — manuál si nechává upstream vzhled (AGENTS.md sice doporučuje sync tokenů, ale editace manual.css by přidala merge konflikty; vědomé rozhodnutí).
+
+**Proč:** požadavek uživatele na modernější vzhled; přístup „vrstva vlastních tokenů" zvolen pro minimální konfliktní plochu s upstreamem (viz jednořádkový import + nový soubor).
+
+**Jak ověřit po merge:**
+1. Aplikace má indigo akcenty a slate neutrály (light i dark), kulatější karty/tlačítka.
+2. Grafy (dashboard, tržby, DPH) používají indigo tóny — pokud upstream přidá nový graf s fialovými hex hodnotami, přemapovat podle tabulky v `custom-theme.css` hlavičce.
+3. Po upstream merge zkontrolovat: `main.ts` (import řádek přežil), `useTheme.ts` (konflikt palety řešit ve prospěch indigo verze) a nové tokeny v upstream `main.css` (případně doplnit jejich override).
+
 ## 2026-07-02 — FÁZE 2: omezení uživatele na vybrané dodavatele
 
 **Co se změnilo:** admin může uživateli (role `accountant`/`readonly`) přiřadit povolené dodavatele. Omezený uživatel vidí v přepínači firem jen povolené a k jiným se nedostane ani přímým API voláním (403). Žádný záznam = vidí vše (zpětná kompatibilita). Role `admin` vidí vždy vše.

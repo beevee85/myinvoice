@@ -18,9 +18,9 @@ const colors = useChartColors()
 
 const palette: Record<string, string> = {
   paid:      '#4CAF7A',
-  booked:    '#5C45A0',
+  booked:    '#4F46E5',
   received:  '#E8A547',
-  draft:     '#A7A0BA',
+  draft:     '#94A3B8',
   cancelled: '#D45B5B',
 }
 
@@ -38,7 +38,7 @@ const slice = computed(() => {
     if (v > 0) {
       labelArr.push(statusLabel(k))
       valueArr.push(v)
-      colorArr.push(palette[k] || '#A99CD8')
+      colorArr.push(palette[k] || '#A5B4FC')
     }
   }
   return { labelArr, valueArr, colorArr }

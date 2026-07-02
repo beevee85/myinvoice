@@ -27,8 +27,8 @@ const { isDark } = useTheme()
 // Semantic gradient stáří pohledávek. V dark je nejtmavší maroon (90+) nahrazen
 // světlejší červenou, aby na tmavém pozadí nesplýval.
 const palette = computed(() => isDark.value
-  ? ['#4CAF7A', '#A99CD8', '#E8A547', '#D45B5B', '#E07A7A']
-  : ['#4CAF7A', '#A99CD8', '#E8A547', '#D45B5B', '#7A2E2E'])
+  ? ['#4CAF7A', '#A5B4FC', '#E8A547', '#D45B5B', '#E07A7A']
+  : ['#4CAF7A', '#A5B4FC', '#E8A547', '#D45B5B', '#7A2E2E'])
 const bucketKeys = ['current', 'b1_30', 'b31_60', 'b61_90', 'b90_plus'] as const
 const bucketLabels = ['Aktuální', '1–30 dní', '31–60 dní', '61–90 dní', '90+ dní']
 

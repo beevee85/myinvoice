@@ -38,13 +38,14 @@ export function useTheme() {
  */
 // Kategorická paleta pro grafy (rozlišení kategorií, ne sémantika). V dark posunutá do
 // světlejších indigo tónů, aby nejtmavší segmenty nesplývaly s tmavým pozadím.
-const CHART_PALETTE_LIGHT = ['#3B2D83', '#5C45A0', '#6753AE', '#8675C5', '#A99CD8', '#C9C0E9', '#E5E0F4', '#F4A261', '#E8A547', '#4CAF7A']
-const CHART_PALETTE_DARK = ['#A99CD8', '#7C68C4', '#C9C0E9', '#8B79C8', '#E5E0F4', '#6753AE', '#D8CEF0', '#F4A261', '#E8A547', '#5FBF8E']
+// FORK (beevee85): sladěno s custom-theme.css (indigo/slate) — při změně palety srovnej oba soubory.
+const CHART_PALETTE_LIGHT = ['#3730A3', '#4F46E5', '#6366F1', '#818CF8', '#A5B4FC', '#C7D2FE', '#E0E7FF', '#F4A261', '#E8A547', '#4CAF7A']
+const CHART_PALETTE_DARK = ['#A5B4FC', '#818CF8', '#C7D2FE', '#939CF9', '#E0E7FF', '#6366F1', '#DBE0FE', '#F4A261', '#E8A547', '#5FBF8E']
 
 const chartColors = computed(() =>
   isDark.value
-    ? { border: '#1E1B2B', tick: '#A8A1BE', grid: '#2C2840', tooltipBg: '#322C4A', primary: '#7C68C4', primarySoft: '#A99CD8', palette: CHART_PALETTE_DARK }
-    : { border: '#FFFFFF', tick: '#5A5470', grid: '#E7E3EE', tooltipBg: '#15131D', primary: '#5C45A0', primarySoft: '#A99CD8', palette: CHART_PALETTE_LIGHT },
+    ? { border: '#171F33', tick: '#A6B0C6', grid: '#253147', tooltipBg: '#2A3550', primary: '#6366F1', primarySoft: '#A5B4FC', palette: CHART_PALETTE_DARK }
+    : { border: '#FFFFFF', tick: '#64748B', grid: '#E2E8F0', tooltipBg: '#0F172A', primary: '#4F46E5', primarySoft: '#A5B4FC', palette: CHART_PALETTE_LIGHT },
 )
 
 export function useChartColors() {

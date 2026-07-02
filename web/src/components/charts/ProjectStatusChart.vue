@@ -15,7 +15,7 @@ const colors = useChartColors()
 const palette: Record<string, string> = {
   active: '#4CAF7A',
   paused: '#E5A23B',
-  closed: '#A7A0BA',
+  closed: '#94A3B8',
 }
 
 const slice = computed(() => {
@@ -28,7 +28,7 @@ const slice = computed(() => {
     if (v > 0) {
       labelArr.push(k === 'active' ? t('common.active') : k === 'paused' ? t('project.status_paused') : t('project.status_closed'))
       valueArr.push(v)
-      colorArr.push(palette[k] || '#A99CD8')
+      colorArr.push(palette[k] || '#A5B4FC')
     }
   }
   return { labelArr, valueArr, colorArr }

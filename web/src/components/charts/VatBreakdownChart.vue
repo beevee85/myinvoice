@@ -21,11 +21,11 @@ const colors = useChartColors()
 // Barevné mapování podle obvyklých CZ sazeb (21 % red, 12 % blue, 0 % grey, RC purple).
 const palette: Record<string, string> = {
   '21 %': '#D45B5B',
-  '12 %': '#5C45A0',
+  '12 %': '#4F46E5',
   '15 %': '#4CAF7A',
   '10 %': '#E8A547',
-  '0 %':  '#A7A0BA',
-  'RC (reverse charge)': '#A99CD8',
+  '0 %':  '#94A3B8',
+  'RC (reverse charge)': '#A5B4FC',
 }
 
 const filtered = computed(() => props.items.filter(i => i.currency === props.currency && i.base !== 0))
@@ -43,7 +43,7 @@ function build() {
   const total = items.reduce((s, i) => s + i.base, 0)
   const labels = items.map(i => i.label)
   const data = items.map(i => i.base)
-  const segmentColors = items.map(i => palette[i.label] ?? '#5C45A0')
+  const segmentColors = items.map(i => palette[i.label] ?? '#4F46E5')
 
   chart = new Chart(canvas.value, {
     type: 'doughnut',
