@@ -90,13 +90,12 @@ final class PdfBranding
         return "\n/* ─── Branding override (per-supplier accent color) ─── */\n"
             . ".head { border-bottom-color: {$color}; }\n"
             . ".brand-name, .doc-type { color: {$color}; }\n"
-            . ".parties h2, td.meta-label, .bank-label { color: {$color}; }\n"
             . ".parties td.party-customer { background: {$bgSoft}; }\n"
-            // FORK (beevee85): pay-panel → pay-band; items th a grand jsou nově „light"
-            // (akcentový text + linky místo plných bloků) — override barví totéž.
+            // FORK (beevee85): sekční popisky (parties h2, meta-label, items th) jsou nově
+            // záměrně neutrální šedé — branding je nebarví; akcent nesou jen brand,
+            // platební pás a součty.
             . ".pay-band { background: {$bgSoft}; border-color: {$lineMedium}; }\n"
             . ".pb-label, .pb-amount-big { color: {$color}; }\n"
-            . "table.items th { color: {$color}; border-bottom-color: {$color}; }\n"
             . "table.totals-table tr.grand td { border-top-color: {$color}; color: {$color}; }\n"
             . "table.totals-table tr.to-pay td { border-top-color: {$color}; color: {$color}; background: {$bgSoft}; }\n"
             . "table.totals-table tr.subtotal td { border-top-color: {$lineSoft}; }\n"

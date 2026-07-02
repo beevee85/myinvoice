@@ -76,9 +76,8 @@ td.meta { width: 45%; text-align: right; }
     font-size: 24pt;
     font-weight: bold;
     color: #15131D;
-    font-family: 'jetbrainsmono', 'DejaVu Sans Mono', monospace;
     line-height: 1.05;
-    letter-spacing: -0.5pt;
+    letter-spacing: -0.2pt;
 }
 .parent-ref {
     font-size: 9pt;
@@ -103,7 +102,7 @@ td.meta { width: 45%; text-align: right; }
 .parties {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 5mm;
+    margin-bottom: 6mm;
 }
 /* Dodavatel bez výplně (vzdušnost) — zvýrazněný tintem zůstává jen odběratel. */
 .parties td {
@@ -118,12 +117,14 @@ td.meta { width: 45%; text-align: right; }
 .parties td.party-customer {
     background: #EFEAFF;
 }
+/* Popisky sekcí v tiché šedé — akcentová barva zůstává jen značce, platebnímu
+   pásu a součtům (střídmost = moderní výraz). */
 .parties h2 {
     margin: 0 0 4mm;
-    font-size: 9pt;
+    font-size: 8.5pt;
     text-transform: uppercase;
-    letter-spacing: 1pt;
-    color: #6753AE;
+    letter-spacing: 1.2pt;
+    color: #7A748C;
     font-weight: bold;
 }
 .party-name {
@@ -134,7 +135,7 @@ td.meta { width: 45%; text-align: right; }
     color: #15131D;
 }
 .ic-dic {
-    font-family: 'jetbrainsmono', 'DejaVu Sans Mono', monospace;
+    font-family: 'montserrat', 'DejaVu Sans', sans-serif;
     font-size: 9pt;
     color: #5A5470;
     margin-top: 5mm;
@@ -145,7 +146,7 @@ td.meta { width: 45%; text-align: right; }
 .meta-grid {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 5mm;
+    margin-bottom: 6mm;
     font-size: 9.5pt;
 }
 .meta-grid td {
@@ -158,7 +159,7 @@ td.meta { width: 45%; text-align: right; }
 }
 td.meta-label {
     width: 32mm;
-    color: #6753AE;
+    color: #7A748C;
     font-size: 8.5pt;
     font-weight: bold;
     white-space: nowrap;
@@ -168,7 +169,7 @@ td.meta-value {
     font-weight: bold;
     white-space: nowrap;
 }
-td.meta-value.mono { font-family: 'jetbrainsmono', 'DejaVu Sans Mono', monospace; }
+td.meta-value.mono { font-family: 'montserrat', 'DejaVu Sans', sans-serif; }
 
 /* Univerzální — zákaz wrap pro číselné buňky */
 .nowrap { white-space: nowrap; }
@@ -184,26 +185,26 @@ td.meta-value.mono { font-family: 'jetbrainsmono', 'DejaVu Sans Mono', monospace
 table.items {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 5mm;
+    margin-bottom: 6mm;
     font-size: 9pt;
 }
-/* Lehká hlavička místo plného barevného bloku — akcentový text + silná spodní linka. */
+/* Lehká hlavička — tichý šedý popisek + tenká neutrální linka (žádný barevný blok). */
 table.items th {
-    color: #3B2D83;
+    color: #7A748C;
     font-size: 8pt;
     text-transform: uppercase;
     letter-spacing: 0.8pt;
     padding: 2.2mm 2.5mm;
     text-align: left;
     font-weight: 700;
-    border-bottom: 1.2pt solid #3B2D83;
+    border-bottom: 0.8pt solid #D2CCDF;
 }
 table.items td {
     padding: 3mm 2.5mm;
     border-bottom: 0.3pt solid #E7E3EE;
     vertical-align: top;
 }
-table.items .num { text-align: right; font-family: 'jetbrainsmono', 'DejaVu Sans Mono', monospace; }
+table.items .num { text-align: right; font-family: 'montserrat', 'DejaVu Sans', sans-serif; }
 table.items .center { text-align: center; }
 /* DPH sloupec je užší (místo dostal Cena/j) — sazba „21 %" / „12,5 %" o stupínek
    menší, aby se vešla bez zalomení. */
@@ -234,7 +235,7 @@ td.tot-label {
 }
 td.tot-num {
     text-align: right;
-    font-family: 'jetbrainsmono', 'DejaVu Sans Mono', monospace;
+    font-family: 'montserrat', 'DejaVu Sans', sans-serif;
     width: 38mm;
     font-weight: bold;
 }
@@ -302,7 +303,7 @@ table.czk-recap td.tot-label {
 }
 table.czk-recap td.tot-num {
     text-align: right;
-    font-family: 'jetbrainsmono', 'DejaVu Sans Mono', monospace;
+    font-family: 'montserrat', 'DejaVu Sans', sans-serif;
     width: 32mm;
     font-weight: bold;
 }
@@ -357,12 +358,12 @@ table.czk-recap tr.grand td {
     font-size: 17pt;
     font-weight: bold;
     color: #3B2D83;
-    font-family: 'jetbrainsmono', 'DejaVu Sans Mono', monospace;
+    font-family: 'montserrat', 'DejaVu Sans', sans-serif;
     line-height: 1.2;
     white-space: nowrap;
 }
 .pay-band-paid .pb-amount-big { color: #2E7D32; }
-.pb-mono { font-family: 'jetbrainsmono', 'DejaVu Sans Mono', monospace; color: #15131D; font-weight: bold; }
+.pb-mono { font-family: 'montserrat', 'DejaVu Sans', sans-serif; color: #15131D; font-weight: bold; }
 /* Bílý podklad QR = quiet zone pro spolehlivé skenování na tintovaném pásu. */
 .pb-qr-box {
     display: inline-block;
@@ -389,7 +390,7 @@ table.czk-recap tr.grand td {
     line-height: 1.2;
 }
 .bank-value {
-    font-family: 'jetbrainsmono', 'DejaVu Sans Mono', monospace;
+    font-family: 'montserrat', 'DejaVu Sans', sans-serif;
     font-weight: bold;
     color: #15131D;
     font-size: 9.5pt;
