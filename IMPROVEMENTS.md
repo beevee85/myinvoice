@@ -11,8 +11,18 @@ Před implementací čehokoli VŽDY ověř v aktuální verzi upstreamu, že to 
   push notifikace (přišla platba / faktura po splatnosti) — vyžaduje service worker
   + Web Push na serveru; od iOS 16.4 funguje i na iPhonu.
 - [x] **Pokladní doklady** — HOTOVO 2026-07-02 (FÁZE 5, viz CUSTOMIZATIONS.md).
-  Nápady pro v2: DPH režim „zjednodušený daňový doklad" (přes VatLedgerService),
-  výběr protistrany z klientů, souhrn stavu pokladny (zůstatek za období).
+  Nápady pro v2 (nezávislé na sobě):
+  - **DPH režim (zjednodušený daňový doklad):** v1 je doklad jen o pohybu hotovosti —
+    daňovým dokladem zůstává faktura a DPH výkazy pokladnu ignorují. Zákon o DPH ale
+    u plateb do 10 000 Kč umožňuje zjednodušený daňový doklad („účtenka" místo faktury).
+    V2 = rozpis základ + sazba + daň na dokladu a zapojení do VatLedgerService, aby se
+    doklad propsal do DPH přiznání/KH — drobný hotovostní prodej pak jde odbavit jen
+    pokladnou, bez faktury. Citlivý zásah do daňové evidence (proto není ve v1);
+    má smysl JEN pokud se reálně prodává za hotové bez faktur.
+  - **Zůstatek pokladny (pokladní kniha):** počáteční zůstatek + příjmy − výdaje =
+    kolik má být fyzicky v kase; součty za měsíc/rok. Kontrola „sedí šuplík
+    s evidencí?". Malé, bezpečné, lze udělat samostatně a rychle.
+  - Drobnost: výběr protistrany našeptávačem z klientů (dnes volný text).
 
 ## Kandidáti na issue u autora (radekhulan/myinvoice) — velké funkce
 
