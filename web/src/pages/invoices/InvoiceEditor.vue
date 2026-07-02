@@ -1549,6 +1549,33 @@ async function deleteDraft() {
         </div>
       </div>
 
+      <!-- Klasifikace (VAT pro DPH přiznání + volitelný revenue tag) — FORK: nad poznámkou nad položkami -->
+      <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h2 class="text-sm font-medium text-neutral-700 mb-3">{{ t('invoice.classification.title') }}</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs text-neutral-500 mb-1">{{ t('invoice.classification.vat_classification') }}</label>
+            <select v-model="form.vat_classification_code" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+              <option :value="null">— {{ t('invoice.classification.no_vat_class') }} —</option>
+              <option v-for="vc in vatClassifications" :key="vc.id" :value="vc.code">
+                {{ vc.code }} — {{ vc.label.length > 60 ? vc.label.slice(0, 60) + '…' : vc.label }}
+              </option>
+            </select>
+            <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.classification.vat_classification_hint') }}</p>
+          </div>
+          <div>
+            <label class="block text-xs text-neutral-500 mb-1">{{ t('invoice.classification.revenue_category') }}</label>
+            <select v-model="form.revenue_category_id" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+              <option :value="null">— {{ t('invoice.classification.revenue_category_none') }} —</option>
+              <option v-for="rc in revenueCategories" :key="rc.id" :value="rc.id">
+                {{ rc.label }} ({{ rc.code }})
+              </option>
+            </select>
+            <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.classification.revenue_category_hint') }}</p>
+          </div>
+        </div>
+      </div>
+
       <!-- Poznámka nad položkami (na PDF se tiskne nad tabulkou položek) -->
       <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.note_above') }}</label>
@@ -1757,33 +1784,6 @@ async function deleteDraft() {
               }) }}
             </div>
           </dl>
-        </div>
-      </div>
-
-      <!-- Klasifikace (VAT pro DPH přiznání + volitelný revenue tag) -->
-      <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <h2 class="text-sm font-medium text-neutral-700 mb-3">{{ t('invoice.classification.title') }}</h2>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-xs text-neutral-500 mb-1">{{ t('invoice.classification.vat_classification') }}</label>
-            <select v-model="form.vat_classification_code" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
-              <option :value="null">— {{ t('invoice.classification.no_vat_class') }} —</option>
-              <option v-for="vc in vatClassifications" :key="vc.id" :value="vc.code">
-                {{ vc.code }} — {{ vc.label.length > 60 ? vc.label.slice(0, 60) + '…' : vc.label }}
-              </option>
-            </select>
-            <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.classification.vat_classification_hint') }}</p>
-          </div>
-          <div>
-            <label class="block text-xs text-neutral-500 mb-1">{{ t('invoice.classification.revenue_category') }}</label>
-            <select v-model="form.revenue_category_id" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
-              <option :value="null">— {{ t('invoice.classification.revenue_category_none') }} —</option>
-              <option v-for="rc in revenueCategories" :key="rc.id" :value="rc.id">
-                {{ rc.label }} ({{ rc.code }})
-              </option>
-            </select>
-            <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.classification.revenue_category_hint') }}</p>
-          </div>
         </div>
       </div>
 
