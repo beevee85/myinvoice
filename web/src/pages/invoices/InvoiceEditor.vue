@@ -162,6 +162,7 @@ const form = ref<{
   language: 'cs' | 'en'
   note_above_items: string
   note_below_items: string
+  internal_note: string
   advance_paid_amount: number
   discount_percent: number
   payment_method: 'bank_transfer' | 'card' | 'cash' | 'other'
@@ -189,6 +190,7 @@ const form = ref<{
   language: 'cs',
   note_above_items: '',
   note_below_items: '',
+  internal_note: '',
   advance_paid_amount: 0,
   discount_percent: 0,
   payment_method: 'bank_transfer',
@@ -413,6 +415,7 @@ onMounted(async () => {
       language: inv.language,
       note_above_items: inv.note_above_items ?? '',
       note_below_items: inv.note_below_items ?? '',
+      internal_note: inv.internal_note ?? '',
       advance_paid_amount: inv.advance_paid_amount,
       discount_percent: inv.discount_percent ?? 0,
       payment_method: inv.payment_method ?? 'bank_transfer',
@@ -1180,6 +1183,7 @@ async function submit() {
       language: form.value.language,
       note_above_items: form.value.note_above_items || null,
       note_below_items: form.value.note_below_items || null,
+      internal_note: form.value.internal_note || null,
       advance_paid_amount: form.value.advance_paid_amount,
       discount_percent: form.value.discount_percent || 0,
       payment_method: form.value.payment_method,
@@ -1707,17 +1711,24 @@ async function deleteDraft() {
         </div>
       </div>
 
-      <!-- Sumace + poznámky -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="md:col-span-2 space-y-4">
-          <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.note_below') }}</label>
-            <textarea v-model="form.note_below_items" rows="2" class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm"></textarea>
-          </div>
-        </div>
+      <!-- FORK (beevee85): poznámky a sumace přes celou šířku (poznámka pod položkami → interní → sumace) -->
+      <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.note_below') }}</label>
+        <textarea v-model="form.note_below_items" rows="2" class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm"></textarea>
+      </div>
 
-        <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-          <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('invoice.summary') }}</h3>
+      <!-- Interní poznámka — jen v aplikaci, netiskne se na PDF -->
+      <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.internal_note') }}</label>
+        <textarea v-model="form.internal_note" rows="2" maxlength="1000" class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm"></textarea>
+        <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.internal_note_hint') }}</p>
+      </div>
+
+      <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('invoice.summary') }}</h3>
+        <!-- Součty držíme vpravo v šířce sloupce jako na tiskové faktuře — přes celou
+             šířku by se dvojice popisek/částka špatně četla. -->
+        <div class="md:max-w-md md:ml-auto">
           <div class="flex items-center justify-between gap-3 mb-3 pb-3 border-b border-neutral-100">
             <label for="discount_percent" class="text-sm text-neutral-700">{{ t('invoice.discount.label') }}</label>
             <div class="relative w-28">

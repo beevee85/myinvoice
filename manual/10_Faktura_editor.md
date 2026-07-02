@@ -129,7 +129,7 @@ v PDF.
 Křížek vpravo. Pokud položka je propojená s výkazem víceprací (viz § 10.6),
 smazání se zeptá, jestli i smazat výkaz.
 
-## 10.4 Sumář (vpravo)
+## 10.4 Sumář
 
 Automaticky se přepočítává:
 
@@ -145,7 +145,7 @@ Automaticky se přepočítává:
 
 ### 10.4.1 Sleva z celé faktury
 
-Pole **Sleva z celé faktury** (v sumáři vpravo) je **procentuální sleva (0–100 %)** na
+Pole **Sleva z celé faktury** (v sumáři) je **procentuální sleva (0–100 %)** na
 úrovni celého dokladu — typicky „sleva 10 % z celé faktury".
 
 Jak to funguje:
@@ -372,7 +372,20 @@ Pokud zjistíš, že vystavená faktura je špatně:
   položkami, který klientovi pošleš jako oficiální opravu. Účetně správné, ale
   vyžaduje, abys měl s klientem komunikaci o tom, co a proč.
 
-## 10.10 Tipy
+## 10.10 Poznámky na faktuře
+
+Editor má tři pole poznámek (v tomto pořadí na stránce):
+
+| Pole | Kde se zobrazí |
+|---|---|
+| **Poznámka nad položkami** | na PDF nad tabulkou položek |
+| **Poznámka pod položkami** | na PDF pod položkami |
+| **Interní poznámka** | **jen v aplikaci** — netiskne se na PDF ani se neposílá klientovi; v detailu faktury je zvýrazněná žlutě s označením „netiskne se" |
+
+Interní poznámka se hodí na kontext ke klientovi, dohody o splatnosti, interní
+čísla objednávek apod.
+
+## 10.11 Tipy
 
 - **Vždy uložené jako koncept** — Ctrl+S kdykoli uloží rozpracovanou fakturu.
 - **Klonování zachová položky i výkaz víceprací** — datum se aktualizuje na
@@ -383,7 +396,7 @@ Pokud zjistíš, že vystavená faktura je špatně:
 - **PDF náhled konceptu** má vodoznak „NÁHLED" přes celou stranu — klient si ho
   spletl s vystavenou fakturou by neměl.
 
-## 10.11 Výkaz materiálu
+## 10.12 Výkaz materiálu
 
 Vedle výkazu víceprací (§ 10.6) lze ke stejné faktuře vést i **výkaz materiálu** —
 samostatný rozpis spotřebovaného materiálu, který se do faktury přenese jako
@@ -395,7 +408,7 @@ Zatímco výkaz práce počítá *hodiny × sazba*, výkaz materiálu má místo
 **množství + měrnou jednotku** (default „ks") a **cenu za jednotku** — zadává se
 tedy ve stylu položek faktury.
 
-### 10.11.1 Aktivace
+### 10.12.1 Aktivace
 
 Editor materiálu je na dvou místech (stejně jako výkaz práce):
 
@@ -415,7 +428,7 @@ Dokud výkaz nemá žádný řádek, je sekce **zabalená** — rozbalíš ji tl
 | Cena/MJ | Jednotková cena — **bez DPH, nebo s DPH podle režimu faktury** (viz níže) |
 | Celkem | Auto: `množství × cena/MJ` |
 
-### 10.11.2 Sazba DPH výkazu
+### 10.12.2 Sazba DPH výkazu
 
 Každý výkaz nese **jednu sazbu DPH** (sumarizuje se do jedné položky faktury):
 
@@ -425,7 +438,7 @@ Každý výkaz nese **jednu sazbu DPH** (sumarizuje se do jedné položky faktur
 Sazbu vybereš v záhlaví příslušné sekce. Materiál a práce tak mohou mít **různou
 sazbu DPH** na jednom dokladu — DPH se na faktuře rekapituluje správně po sazbách.
 
-### 10.11.3 Ceny s DPH / bez DPH
+### 10.12.3 Ceny s DPH / bez DPH
 
 Cena za jednotku se zadává v **cenové konvenci dokladu** (přepínač „Ceny zadávám
 včetně DPH", viz [§ 10.2.6](#1026-ceny-s-dph-vs-bez-dph-brutto-netto-rezim)):
@@ -437,7 +450,7 @@ včetně DPH", viz [§ 10.2.6](#1026-ceny-s-dph-vs-bez-dph-brutto-netto-rezim)):
 Sazba DPH (12 %) a konvence ceny (s/bez) jsou **dvě nezávislé věci** — materiál má
 12 % bez ohledu na to, jestli cenu píšeš s DPH nebo bez.
 
-### 10.11.4 PDF a schválení
+### 10.12.4 PDF a schválení
 
 Pokud má výkaz materiálu aspoň jeden řádek, na **2. straně PDF faktury** se pod
 tabulkou práce vytiskne i tabulka **Materiál** (popis, množství, MJ, cena/MJ,

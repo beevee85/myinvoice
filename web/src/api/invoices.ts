@@ -107,6 +107,8 @@ export interface Invoice {
   language: 'cs' | 'en'
   note_above_items: string | null
   note_below_items: string | null
+  /** FORK (beevee85): interní poznámka — jen v aplikaci, netiskne se na PDF */
+  internal_note: string | null
   revenue_category_id: number | null
   revenue_category_label?: string | null
   revenue_category_code?: string | null
@@ -270,6 +272,7 @@ export interface InvoicePayload {
   language?: 'cs' | 'en'
   note_above_items?: string | null
   note_below_items?: string | null
+  internal_note?: string | null
   advance_paid_amount?: number
   discount_percent?: number
   payment_method?: PaymentMethod

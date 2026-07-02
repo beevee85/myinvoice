@@ -2,6 +2,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { cashDocumentsApi, type CashDocument, type CashDocumentKind } from '@/api/cashDocuments'
+import { clientsApi } from '@/api/clients'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { useHotkey } from '@/composables/useHotkey'
@@ -43,6 +44,17 @@ async function load() {
   }
 }
 onMounted(load)
+
+// Našeptávač protistrany — jména klientů/dodavatelů (nativní datalist, načte se jednou)
+const counterpartyOptions = ref<string[]>([])
+onMounted(async () => {
+  try {
+    const res = await clientsApi.list({ per_page: 500, role: 'all' })
+    counterpartyOptions.value = [...new Set(res.data.map(c => c.company_name).filter(Boolean))].sort()
+  } catch {
+    // našeptávač je jen komfort — bez něj formulář funguje dál
+  }
+})
 
 function openCreate(kind: CashDocumentKind) {
   Object.assign(form, {
@@ -247,7 +259,11 @@ const yearOptions = computed(() => {
             <label class="block text-sm font-medium text-neutral-700 mb-1">
               {{ form.kind === 'income' ? t('cash.received_from') : t('cash.paid_to') }}
             </label>
-            <input v-model="form.counterparty" type="text" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+            <input v-model="form.counterparty" type="text" list="cash-counterparty-list"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+            <datalist id="cash-counterparty-list">
+              <option v-for="name in counterpartyOptions" :key="name" :value="name" />
+            </datalist>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.purpose') }}</label>

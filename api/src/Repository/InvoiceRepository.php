@@ -53,6 +53,21 @@ final class InvoiceRepository
         return $this->hasAutoSendReminders;
     }
 
+    /**
+     * FORK (beevee85): cache existence sloupce internal_note (migrace 0902). Stejná
+     * obrana jako výše — kód napřed před migrací nesmí shodit uložení faktury.
+     */
+    private ?bool $hasInternalNote = null;
+
+    private function supportsInternalNote(): bool
+    {
+        if ($this->hasInternalNote === null) {
+            $col = $this->db->pdo()->query("SHOW COLUMNS FROM invoices LIKE 'internal_note'")->fetch();
+            $this->hasInternalNote = $col !== false;
+        }
+        return $this->hasInternalNote;
+    }
+
     public function find(int $id): ?array
     {
         $pdo = $this->db->pdo();
@@ -737,6 +752,7 @@ final class InvoiceRepository
 
         $hasExempt = $this->supportsIncomeTaxExempt();
         $hasReminders = $this->supportsAutoSendReminders();
+        $hasInternalNote = $this->supportsInternalNote();
         $sql = 'INSERT INTO invoices
             (invoice_type, parent_invoice_id, client_id, project_id, supplier_id,
              issue_date, tax_date, due_date, currency_id, reverse_charge, prices_include_vat, language,
@@ -744,10 +760,12 @@ final class InvoiceRepository
              payment_method, status, vat_classification_code, revenue_category, revenue_category_id,'
             . ($hasExempt ? ' income_tax_exempt, income_tax_exempt_reason,' : '')
             . ($hasReminders ? ' auto_send_reminders,' : '')
+            . ($hasInternalNote ? ' internal_note,' : '')
             . ' created_by)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?,'
             . ($hasExempt ? ' ?, ?,' : '')
             . ($hasReminders ? ' ?,' : '')
+            . ($hasInternalNote ? ' ?,' : '')
             . ' ?)';
 
         $params = [
@@ -779,6 +797,9 @@ final class InvoiceRepository
         }
         if ($hasReminders) {
             $params[] = array_key_exists('auto_send_reminders', $data) ? ((int) (bool) $data['auto_send_reminders']) : 1;
+        }
+        if ($hasInternalNote) {
+            $params[] = $data['internal_note'] ?? null;
         }
         $params[] = $userId;
 
@@ -823,6 +844,7 @@ final class InvoiceRepository
 
         $hasExempt = $this->supportsIncomeTaxExempt();
         $hasReminders = $this->supportsAutoSendReminders();
+        $hasInternalNote = $this->supportsInternalNote();
 
         $sql = 'UPDATE invoices SET
                 client_id = ?, project_id = ?,
@@ -833,6 +855,7 @@ final class InvoiceRepository
                 vat_classification_code = ?, revenue_category = ?, revenue_category_id = ?'
               . ($hasExempt ? ', income_tax_exempt = ?, income_tax_exempt_reason = ?' : '')
               . ($hasReminders ? ', auto_send_reminders = ?' : '')
+              . ($hasInternalNote ? ', internal_note = ?' : '')
               . ($hasVarsymbol ? ', varsymbol = ?' : '')
               . ($hasPaymentMethod ? ', payment_method = ?' : '')
               . ($hasType ? ', invoice_type = ?' : '')
@@ -862,6 +885,9 @@ final class InvoiceRepository
         }
         if ($hasReminders) {
             $params[] = array_key_exists('auto_send_reminders', $data) ? ((int) (bool) $data['auto_send_reminders']) : 1;
+        }
+        if ($hasInternalNote) {
+            $params[] = $data['internal_note'] ?? null;
         }
         if ($hasVarsymbol) $params[] = $manualVarsymbol;
         if ($hasPaymentMethod) $params[] = $paymentMethod;

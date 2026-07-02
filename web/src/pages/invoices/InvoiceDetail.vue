@@ -1887,6 +1887,15 @@ const invoiceActions = computed<ActionItem[]>(() => {
       <p class="text-sm text-neutral-700 whitespace-pre-wrap">{{ invoice.note_below_items }}</p>
     </div>
 
+    <!-- FORK (beevee85): interní poznámka — vidí jen přihlášení, netiskne se na PDF -->
+    <div v-if="invoice.internal_note" class="bg-warning-50 border border-warning-500/30 rounded-lg p-5 shadow-sm">
+      <h3 class="text-sm font-semibold uppercase tracking-wide text-warning-600 mb-2">
+        {{ t('invoice.internal_note') }}
+        <span class="ml-2 font-normal normal-case text-xs text-warning-600/80">{{ t('invoice.internal_note_badge') }}</span>
+      </h3>
+      <p class="text-sm text-neutral-700 whitespace-pre-wrap">{{ invoice.internal_note }}</p>
+    </div>
+
     <div v-if="invoice.revenue_category_label" class="bg-surface border border-neutral-200 rounded-lg px-5 py-3 shadow-sm flex items-center justify-between text-sm">
       <span class="text-neutral-500">{{ t('invoice.classification.revenue_category') }}</span>
       <span class="font-medium text-neutral-900">

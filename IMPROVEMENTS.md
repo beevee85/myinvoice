@@ -22,7 +22,7 @@ Před implementací čehokoli VŽDY ověř v aktuální verzi upstreamu, že to 
   - **Zůstatek pokladny (pokladní kniha):** počáteční zůstatek + příjmy − výdaje =
     kolik má být fyzicky v kase; součty za měsíc/rok. Kontrola „sedí šuplík
     s evidencí?". Malé, bezpečné, lze udělat samostatně a rychle.
-  - Drobnost: výběr protistrany našeptávačem z klientů (dnes volný text).
+  - ~~Drobnost: výběr protistrany našeptávačem z klientů~~ — HOTOVO 2026-07-02 (FÁZE 6).
 
 ## Kandidáti na issue u autora (radekhulan/myinvoice) — velké funkce
 

@@ -5242,6 +5242,7 @@ components:
         note: { type: string, nullable: true, description: "Generická poznámka. Pro výstup viz note_above_items / note_below_items." }
         note_above_items: { type: string, nullable: true }
         note_below_items: { type: string, nullable: true }
+        internal_note: { type: string, nullable: true, description: "FORK (beevee85): interní poznámka — jen v aplikaci/API, netiskne se na PDF ani neposílá klientovi" }
         bank_account_number: { type: string, nullable: true, description: "Z currencies (per-měna bank účet supplier-a)" }
         bank_code: { type: string, nullable: true }
         bank_iban: { type: string, nullable: true }

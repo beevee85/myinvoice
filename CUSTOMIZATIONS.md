@@ -6,6 +6,17 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-02 — FÁZE 6: interní poznámka + layout editoru + našeptávač pokladny
+
+**Co se změnilo (3 nezávislé věci):**
+1. **Interní poznámka u faktury** (à la Vyfakturuj) — nové pole viditelné jen v aplikaci, NIKDY na PDF/e-mailu klientovi. V editoru pod „Poznámkou pod položkami" (s nápovědou), v detailu žlutě zvýrazněný box „(netiskne se)". Neklonuje se do odvozených dokladů (proforma→faktura, kopie, recurring) — záměr, poznámka patří konkrétnímu dokladu.
+2. **Layout editoru faktury** — „Poznámka pod položkami", „Interní poznámka" a „Sumace" jsou nyní boxy přes celou šířku (dřív grid 2/3+1/3); součty uvnitř Sumace drží vpravo v šířce sloupce (čitelnost dvojic popisek/částka).
+3. **Našeptávač protistrany v Pokladně** — nativní `<datalist>` plněný jmény klientů/dodavatelů (clientsApi, max 500, fail-safe).
+
+**Které soubory:** `db/migrations/0902_invoice_internal_note.sql` (**nová**, ADD COLUMN IF NOT EXISTS); `api/src/Repository/InvoiceRepository.php` (supportsInternalNote — SHOW COLUMNS obrana dle upstream vzoru + INSERT/UPDATE větve); `api/src/Action/Invoice/UpdateInvoiceAction.php` (audit sloupec); `api/openapi.yaml` (+1 property v Invoice schématu — dle AGENTS.md pravidla o sync); `web/src/api/invoices.ts` (typy); `web/src/pages/invoices/InvoiceEditor.vue` (pole + layout); `web/src/pages/invoices/InvoiceDetail.vue` (žlutý box); `web/src/pages/cash/CashDocuments.vue` (datalist); i18n (`invoice.internal_note*`); `manual/10_Faktura_editor.md` (sekce 10.10 Poznámky, přečíslování 10.11/10.12).
+
+**Jak ověřit po merge:** migrace 0902 aplikovaná; editor ukládá interní poznámku a po reloadu drží; PDF faktury ji NEOBSAHUJE (kritická kontrola!); detail ji ukazuje žlutě; pokladna našeptává jména klientů. Konfliktní místa: InvoiceRepository (INSERT/UPDATE bloky), InvoiceEditor (layout sekce sumace).
+
 ## 2026-07-02 — FÁZE 5: pokladní doklady (PPD/VPD)
 
 **Co se změnilo:** nová sekce **Finance → Pokladna** — příjmové a výdajové pokladní doklady pro hotovost. Číselné řady `PPD/VPD-rok-pořadí` per dodavatel, PDF s částkou slovy (A5 na šířku), u hotovostní faktury checkbox „Vystavit příjmový pokladní doklad" v dialogu Označit jako zaplacenou. Mazat jde jen poslední doklad řady. Koncept v1: doklad o pohybu hotovosti — **žádná vlastní DPH evidence** (daňovým dokladem zůstává faktura; VatLedgerService nedotčen — záměr, viz návrh schválený uživatelem).
