@@ -8,6 +8,7 @@ use MyInvoice\Action\AresVies\AresLookupAction;
 use MyInvoice\Action\AresVies\CrpDphLookupAction;
 use MyInvoice\Action\AresVies\ViesLookupAction;
 use MyInvoice\Action\Auth\ChangePasswordAction;
+use MyInvoice\Action\CashDocument\CashDocumentAction;
 use MyInvoice\Action\Client\ArchiveClientAction;
 use MyInvoice\Action\Client\CreateClientAction;
 use MyInvoice\Action\Client\DeleteClientAction;
@@ -361,6 +362,14 @@ final class Routes
         $app->post   ('/api/purchase-invoices/payment-orders/mark',                 [PaymentOrderAction::class, 'markOrdered']);
         $app->get    ('/api/purchase-invoices/payment-orders/{id:[0-9]+}/download', [PaymentOrderAction::class, 'download']);
         $app->get    ('/api/purchase-invoices/payment-orders/{id:[0-9]+}',          [PaymentOrderAction::class, 'show']);
+
+        // FORK (beevee85): pokladní doklady (PPD/VPD) — doklad o pohybu hotovosti
+        $app->get    ('/api/cash-documents',                  [CashDocumentAction::class, 'list']);
+        $app->post   ('/api/cash-documents',                  [CashDocumentAction::class, 'create']);
+        $app->get    ('/api/cash-documents/{id:[0-9]+}',      [CashDocumentAction::class, 'get']);
+        $app->put    ('/api/cash-documents/{id:[0-9]+}',      [CashDocumentAction::class, 'update']);
+        $app->delete ('/api/cash-documents/{id:[0-9]+}',      [CashDocumentAction::class, 'delete']);
+        $app->get    ('/api/cash-documents/{id:[0-9]+}/pdf',  [CashDocumentAction::class, 'pdf']);
 
         // Pravidelné fakturace (recurring templates)
         $app->get    ('/api/recurring',                       [RecurringTemplateAction::class, 'list']);

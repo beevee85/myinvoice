@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>{{ doc.number }}</title>
+<style>
+    /* mPDF kvirky: single class names, žádné nested selektory, padding v <td> ne v <div> */
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 9.5pt; color: #15131D; }
+    .doc-title { font-size: 14pt; font-weight: bold; }
+    .doc-number { font-family: jetbrainsmono, montserrat, monospace; font-size: 12pt; font-weight: bold; text-align: right; }
+    .head-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; border-bottom: 0.6pt solid #333; }
+    .head-table td { vertical-align: top; padding-bottom: 2mm; }
+    .supplier-label { color: #777; font-size: 7.5pt; }
+    .body-table { width: 100%; border-collapse: collapse; }
+    .body-table td { padding: 2mm 1.5mm; border-bottom: 0.2pt solid #ddd; vertical-align: top; }
+    .field-label { color: #777; font-size: 8pt; width: 40mm; }
+    .amount-cell { font-family: jetbrainsmono, montserrat, monospace; font-size: 13pt; font-weight: bold; }
+    .words { font-style: italic; }
+    .sign-table { width: 100%; border-collapse: collapse; margin-top: 12mm; }
+    .sign-table td { width: 50%; text-align: center; font-size: 8pt; color: #555; padding-top: 10mm; }
+    .sign-line { border-top: 0.4pt solid #999; margin: 0 10mm; padding-top: 1.5mm; }
+</style>
+</head>
+<body>
+    <table class="head-table">
+        <tr>
+            <td>
+                <div class="doc-title">{{ is_income ? 'Příjmový pokladní doklad' : 'Výdajový pokladní doklad' }}</div>
+                <div class="supplier-label">Vystavil</div>
+                <div>{{ supplier.company_name }}</div>
+                <div>{{ supplier.street }}, {{ supplier.zip }} {{ supplier.city }}</div>
+                <div>IČO: {{ supplier.ic }}{% if supplier.dic %} · DIČ: {{ supplier.dic }}{% endif %}</div>
+            </td>
+            <td>
+                <div class="doc-number">{{ doc.number }}</div>
+                <div style="text-align: right;">Datum: <strong>{{ doc.issue_date|cz_date }}</strong></div>
+            </td>
+        </tr>
+    </table>
+
+    <table class="body-table">
+        <tr>
+            <td class="field-label">{{ is_income ? 'Přijato od' : 'Vyplaceno komu' }}</td>
+            <td>{{ doc.counterparty ?: '—' }}</td>
+        </tr>
+        <tr>
+            <td class="field-label">Účel platby</td>
+            <td>{{ doc.description ?: '—' }}{% if doc.invoice_varsymbol %} (faktura VS {{ doc.invoice_varsymbol }}){% endif %}</td>
+        </tr>
+        <tr>
+            <td class="field-label">Částka</td>
+            <td class="amount-cell">{{ doc.amount|cz_money }} {{ doc.currency }}</td>
+        </tr>
+        <tr>
+            <td class="field-label">Slovy</td>
+            <td class="words">{{ amount_words }}</td>
+        </tr>
+    </table>
+
+    <table class="sign-table">
+        <tr>
+            <td><div class="sign-line">{{ is_income ? 'Podpis příjemce (pokladník)' : 'Podpis výplatce (pokladník)' }}</div></td>
+            <td><div class="sign-line">{{ is_income ? 'Podpis plátce' : 'Podpis příjemce' }}</div></td>
+        </tr>
+    </table>
+</body>
+</html>

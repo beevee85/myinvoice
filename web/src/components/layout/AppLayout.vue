@@ -168,6 +168,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/stats',          label: t('nav.stats'),          icon: ICONS.stats },
         { to: '/purchase-stats', label: t('nav.purchase_stats'), icon: ICONS.purchase },
         { to: '/bank',           label: t('nav.bank'),           icon: ICONS.bank },
+        { to: '/cash-documents', label: t('nav.cash'),           icon: ICONS.payment_orders },
       ],
     },
     {

@@ -77,6 +77,8 @@ final class RoleMiddleware implements MiddlewareInterface
         '* #^/api/document-folders(/|$)#',
         // Kniha jízd — účetní smí plnou CRUD (auta, jízdy, tankování, kategorie, import, sken faktur)
         '* #^/api/logbook(/|$)#',
+        // FORK (beevee85): pokladní doklady — účetní smí plnou CRUD
+        '* #^/api/cash-documents(/|$)#',
         // Codebooks read-only přes API (admin endpointy mají zvláštní cestu /api/admin/codebooks)
         'GET #^/api/codebooks(/|$)#',
         // Vlastní podpisové profily účetních; Action vrstva hlídá feature flag i owner_user_id.
@@ -118,6 +120,8 @@ final class RoleMiddleware implements MiddlewareInterface
         'GET #^/api/documents(/|$)#',
         'GET #^/api/document-folders(/|$)#',
         'GET #^/api/logbook(/|$)#',
+        // FORK (beevee85): pokladní doklady — čtení pro readonly
+        'GET #^/api/cash-documents(/|$)#',
         'GET #^/api/suppliers(/|$)#',
         'GET #^/api/search$#',
         // Dashboardy / CRM / reporty / daňový optimalizátor (čtení)

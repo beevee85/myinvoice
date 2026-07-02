@@ -191,7 +191,23 @@ Setup:
 2. Cron každých 30 min spustí `php api/bin/cron-bank-scan.php`
 3. Skript projde nové soubory, importuje, přesune do `private/bank-archive/`
 
-## 24.7 Tipy
+## 24.7 Pokladna (pokladní doklady)
+
+**Finance → Pokladna.** Příjmové (PPD) a výdajové (VPD) pokladní doklady pro
+platby v hotovosti.
+
+- Doklad má číslo řady **PPD/VPD-rok-pořadí** (přiděluje systém per firma
+  a rok), datum, částku, protistranu a účel; tiskne se jako **PDF s částkou
+  slovy** a podpisovými řádky.
+- U faktury se způsobem úhrady **Hotově** nabídne dialog „Označit jako
+  zaplacenou" checkbox **Vystavit příjmový pokladní doklad** — doklad se
+  vystaví automaticky s vazbou na fakturu.
+- Smazat lze jen **poslední doklad řady** (jinak by v číslování vznikla díra).
+- Pokladní doklad je **doklad o pohybu hotovosti** — daňovým dokladem zůstává
+  faktura. Samostatné doklady bez faktury se do výkazů DPH nepočítají.
+- Role: účetní vystavuje a upravuje, read-only jen čte.
+
+## 24.8 Tipy
 
 - **Nahraj výpis **denně/týdně** — čím čerstvější, tím dříve se ti vyfiltrují
   faktury po splatnosti správně.

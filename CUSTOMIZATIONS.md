@@ -6,6 +6,16 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-02 — FÁZE 5: pokladní doklady (PPD/VPD)
+
+**Co se změnilo:** nová sekce **Finance → Pokladna** — příjmové a výdajové pokladní doklady pro hotovost. Číselné řady `PPD/VPD-rok-pořadí` per dodavatel, PDF s částkou slovy (A5 na šířku), u hotovostní faktury checkbox „Vystavit příjmový pokladní doklad" v dialogu Označit jako zaplacenou. Mazat jde jen poslední doklad řady. Koncept v1: doklad o pohybu hotovosti — **žádná vlastní DPH evidence** (daňovým dokladem zůstává faktura; VatLedgerService nedotčen — záměr, viz návrh schválený uživatelem).
+
+**Které soubory (nové):** `db/migrations/0901_cash_documents.sql`, `api/src/Action/CashDocument/CashDocumentAction.php`, `api/src/Service/Pdf/CashDocumentPdfRenderer.php`, `api/src/Service/Text/AmountInWordsCz.php`, `api/templates/cash-document/cash-document.twig`, `api/tests/Integration/CashDocument/CashDocumentTest.php`, `web/src/api/cashDocuments.ts`, `web/src/pages/cash/CashDocuments.vue`.
+
+**Které soubory (malé edity):** `api/src/Routes.php` (+6 rout), `api/src/Middleware/RoleMiddleware.php` (+2 pravidla cash-documents), `web/src/router/index.ts` (+1 routa), `web/src/components/layout/AppLayout.vue` (+1 nav položka Finance), `web/src/pages/invoices/InvoiceDetail.vue` (checkbox + vystavení dokladu po mark-paid), `web/src/i18n/cs.json` + `en.json` (sekce `cash` + 3 klíče `invoice.*`, přidáno chirurgicky — POZOR: nikdy nepřeformátovat celý JSON, rozbije to merge), `manual/24_Banka.md` (sekce 24.7).
+
+**Jak ověřit po merge:** migrace 0901 aplikovaná; Finance → Pokladna vystaví PPD-…-0001 a PDF; hotovostní faktura po Označit jako zaplacenou vystaví PPD s vazbou (VS v účelu); smazání neposledního dokladu vrací 409; `php vendor/bin/phpunit --filter CashDocumentTest` v dev prostředí. Konfliktní místa: RoleMiddleware (pravidla), Routes, InvoiceDetail (mark-paid blok), i18n.
+
 ## 2026-07-02 — FÁZE 4: PWA (instalovatelná aplikace)
 
 **Co se změnilo:** aplikaci lze přidat na plochu mobilu (Android i iOS) jako samostatnou appku — web manifest + sada ikon. Bez service workeru (žádná offline cache, žádné riziko zaseknutých verzí); případné push notifikace by byly samostatná budoucí funkce.

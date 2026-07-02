@@ -4,6 +4,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { invoicesApi, type Invoice, type WorkReport, type ApprovalStatus, type InvoiceAttachment, type AdvanceCandidate, type InvoicePayment } from '@/api/invoices'
+import { cashDocumentsApi } from '@/api/cashDocuments'
 import {
   settingsApi,
   type PdfSignatureDocumentEntityType,
@@ -622,20 +623,41 @@ useHotkey('escape', () => {
 const sendThanks = ref(false)
 const thanksEnabled = computed(() => supplierStore.currentSupplier?.payment_thanks_enabled ?? false)
 const thanksHasRecipient = computed(() => !!invoice.value?.client_main_email)
+// FORK (beevee85): u hotovostní faktury nabídni vystavení příjmového pokladního dokladu
+const createCashDoc = ref(false)
+const isCashInvoice = computed(() => invoice.value?.payment_method === 'cash')
 function openMarkPaid() {
   paidAtInput.value = new Date().toISOString().slice(0, 10)
   sendThanks.value = thanksEnabled.value && thanksHasRecipient.value
     && (supplierStore.currentSupplier?.payment_thanks_default_checked ?? false)
+  createCashDoc.value = isCashInvoice.value
   markPaidOpen.value = true
 }
 
 async function markPaid() {
   if (!invoice.value) return
   busy.value = 'paid'
+  const cashAmount = invoice.value.amount_to_pay
   try {
     invoice.value = await invoicesApi.markPaid(invoice.value.id, paidAtInput.value, {
       sendThanks: thanksEnabled.value && sendThanks.value,
     })
+    if (createCashDoc.value && cashAmount > 0) {
+      try {
+        const doc = await cashDocumentsApi.create({
+          kind: 'income',
+          issue_date: paidAtInput.value,
+          amount: cashAmount,
+          currency: invoice.value.currency,
+          counterparty: invoice.value.client_company_name || '',
+          description: t('invoice.cash_doc_desc', { varsymbol: invoice.value.varsymbol || '' }),
+          invoice_id: invoice.value.id,
+        })
+        toast.success(t('invoice.cash_doc_created', { number: doc.number }))
+      } catch (e: any) {
+        toast.error(e?.response?.data?.error?.message || t('common.error'))
+      }
+    }
     loadPayments() // mark-paid vytváří platbu na zbytek (#89) — box Platby bez reloadu
     markPaidOpen.value = false
     toast.success( t('invoice.marked_paid_at', { date: paidAtInput.value }))
@@ -1287,6 +1309,10 @@ const invoiceActions = computed<ActionItem[]>(() => {
             {{ t('invoice.send_payment_thanks') }}
             <span v-if="!thanksHasRecipient" class="block text-xs text-warning-600">{{ t('invoice.send_payment_thanks_no_recipient') }}</span>
           </span>
+        </label>
+        <label v-if="isCashInvoice" class="flex items-start gap-2 text-sm text-neutral-700 mb-4 cursor-pointer">
+          <input v-model="createCashDoc" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+          <span>{{ t('invoice.create_cash_doc') }}</span>
         </label>
         <div class="flex justify-end gap-2">
           <button @click="markPaidOpen = false" class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50">{{ t('common.cancel') }}</button>
