@@ -6,6 +6,32 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-02 — FÁZE 2: omezení uživatele na vybrané dodavatele
+
+**Co se změnilo:** admin může uživateli (role `accountant`/`readonly`) přiřadit povolené dodavatele. Omezený uživatel vidí v přepínači firem jen povolené a k jiným se nedostane ani přímým API voláním (403). Žádný záznam = vidí vše (zpětná kompatibilita). Role `admin` vidí vždy vše.
+
+**Které soubory:**
+- `db/migrations/0900_user_supplier_access.sql` — **nová** tabulka `user_supplier_access` (user_id, supplier_id, FK cascade). Číslováno od **0900**, aby nekolidovalo s upstream migracemi (0120+); migrate.php řadí řetězcově, poběží vždy poslední.
+- `api/src/Service/Auth/UserSupplierAccess.php` — **nový** service (allowedIds / replaceForUser / idsByUser).
+- `api/src/Middleware/SupplierScopeMiddleware.php` — enforcement: header/query mimo povolený set → 403 (`supplier_forbidden`); chybějící header → fallback MIN(povolených); na cestách kde se scope ignoruje (`/api/auth/*`, `/api/codebooks*`, …) tichá korekce místo 403 (jinak by se FE zamknul na /auth/me); API token vázaný na nepovoleného supplier-a → 403.
+- `api/src/Action/Auth/MeAction.php` — switcher dostává jen povolené dodavatele.
+- `api/src/Action/Settings/SettingsAction.php` — `GET /api/suppliers` filtruje, `GET /api/suppliers/{id}` mimo set vrací 404.
+- `api/src/Action/Admin/UserAdminAction.php` — `supplier_ids` v list/create/update/fetchUser + validace.
+- `api/tests/Integration/Auth/UserSupplierAccessTest.php` — **nový** integrační test (2 useři, klon dodavatele, 403/fallback/filtr/admin bypass; soft-skip bez DB).
+- FE: `web/src/api/admin.ts`, `web/src/pages/admin/Users.vue` (checkboxy + sloupec), `web/src/i18n/cs.json` + `en.json` (klíče `users.suppliers_*`).
+- `manual/36_Nastaveni.md` — nová sekce 36.2.3 (HTML/PDF manuálu regeneruje Docker build).
+
+**Proč:** požadavek uživatele — externí účetní/klient má vidět jen svoji firmu.
+
+**Poznámka k openapi.yaml:** schéma odpovědí se nemění (jen se filtrují řádky dle oprávnění), admin mutace se dle AGENTS.md nedokumentují → openapi.yaml záměrně beze změny.
+
+**Jak ověřit po merge:**
+1. `php api/bin/migrate.php --status` — `0900_user_supplier_access` aplikovaná.
+2. Admin → Systém → Uživatelé: u non-admin uživatele vybrat dodavatele, uložit, znovu otevřít — výběr drží.
+3. Přihlásit se jako omezený uživatel: přepínač firem nabízí jen povolené; `curl -H "X-Supplier-Id: <nepovolené>" /api/invoices` → 403; bez headeru → data povoleného dodavatele.
+4. `php vendor/bin/phpunit --filter UserSupplierAccessTest` (dev prostředí s DB).
+5. Po upstream merge zkontrolovat: SupplierScopeMiddleware (nejrizikovější — upstream ho může měnit), MeAction select, UserAdminAction.
+
 ## 2026-07-02 — FÁZE 1: pole „Poznámka nad položkami" nad sekcí položek
 
 **Co se změnilo:** v editoru faktury je pole „Poznámka nad položkami" přesunuto ze spodního bloku „Sumace + poznámky" nahoru — jako samostatný box těsně **nad** sekci Položky. Editor tak odpovídá pořadí na tiskovém PDF. „Poznámka pod položkami" zůstává dole.
