@@ -6,6 +6,12 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-02 — UPDATE z upstreamu: v4.41.0 → v4.43.4
+
+Merge `v4.43.4` do větve `custom` proběhl **bez konfliktů** (69 souborů, mj. odesílací e-mailové profily + S/MIME, záložka Stavy na účtech, dělené úhrady UI, migrace 0120–0123 — aplikované při startu). Checklist úprav prošel kompletně: FÁZE 1 (pozice poznámky), FÁZE 2 (migrace 0900 + enforcement + data v `user_supplier_access`), FÁZE 3 (theme, grafy, import) — vše drží. Upstream nezměnil design tokeny ani nepřidal fialové hexy do grafů.
+
+Navíc: `fix(dashboard)` — gradient hlavičky widgetu „Akce pro tebe" používal `to-white` (zářil v dark modu) → `to-surface`. Je to bug i v upstreamu — kandidát na PR autorovi.
+
 ## 2026-07-02 — FÁZE 3: modernizace UI (indigo/slate theme)
 
 **Co se změnilo:** vizuální refresh aplikace — primární barva z tlumené fialové (#5C45A0) na moderní indigo (#4F46E5), neutrály z nafialovělé šedé na chladný slate, měkčí rádiusy (6–16 px), vrstvené stíny karet, sladěné barvy grafů. Light i dark mode.
