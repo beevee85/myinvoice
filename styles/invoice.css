@@ -16,8 +16,8 @@ body {
 .head {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 7mm;
-    border-bottom: 1.5pt solid #3B2D83;
+    margin-bottom: 8mm;
+    border-bottom: 0.8pt solid #3B2D83;
 }
 /* Dobropis — červený header pro vizuální odlišení */
 .head.credit-note {
@@ -63,15 +63,17 @@ td.meta { width: 45%; text-align: right; }
     letter-spacing: -0.2pt;
 }
 .doc-type {
-    font-size: 11pt;
+    font-size: 9pt;
     font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1pt;
     color: #3B2D83;
     margin-bottom: 1mm;
     line-height: 1.2;
     white-space: nowrap;
 }
 .varsymbol-big {
-    font-size: 22pt;
+    font-size: 24pt;
     font-weight: bold;
     color: #15131D;
     font-family: 'jetbrainsmono', 'DejaVu Sans Mono', monospace;
@@ -103,11 +105,11 @@ td.meta { width: 45%; text-align: right; }
     border-collapse: collapse;
     margin-bottom: 5mm;
 }
+/* Dodavatel bez výplně (vzdušnost) — zvýrazněný tintem zůstává jen odběratel. */
 .parties td {
     width: 50%;
     vertical-align: top;
     padding: 4mm;
-    background: #FBFAFD;
 }
 /* Odběratel zvýrazněn jen podbarvením (bez rámečku) — na dokladu „skočí do oka" víc
    než blok dodavatele. Default bg zrcadlí akcentovou plochu (ISDOC badge); při
@@ -185,22 +187,22 @@ table.items {
     margin-bottom: 5mm;
     font-size: 9pt;
 }
+/* Lehká hlavička místo plného barevného bloku — akcentový text + silná spodní linka. */
 table.items th {
-    background: #3B2D83;
-    color: #FFFFFF;
-    font-size: 8.5pt;
+    color: #3B2D83;
+    font-size: 8pt;
     text-transform: uppercase;
-    letter-spacing: 0.5pt;
-    padding: 2.8mm 2.5mm;
+    letter-spacing: 0.8pt;
+    padding: 2.2mm 2.5mm;
     text-align: left;
     font-weight: 700;
+    border-bottom: 1.2pt solid #3B2D83;
 }
 table.items td {
-    padding: 2.8mm 2.5mm;
+    padding: 3mm 2.5mm;
     border-bottom: 0.3pt solid #E7E3EE;
     vertical-align: top;
 }
-table.items tr:nth-child(even) td { background: #FBFAFD; }
 table.items .num { text-align: right; font-family: 'jetbrainsmono', 'DejaVu Sans Mono', monospace; }
 table.items .center { text-align: center; }
 /* DPH sloupec je užší (místo dostal Cena/j) — sazba „21 %" / „12,5 %" o stupínek
@@ -240,14 +242,15 @@ table.totals-table tr.subtotal td {
     border-top: 0.5pt solid #D2CCDF;
     font-weight: 600;
 }
+/* „Velké číslo" místo plného barevného bloku — silná horní linka + akcentový text. */
 table.totals-table tr.grand td {
-    background: #3B2D83;
-    color: #FFFFFF;
-    font-size: 13pt;
+    border-top: 1.2pt solid #3B2D83;
+    color: #3B2D83;
+    font-size: 14pt;
     font-weight: bold;
     padding: 3mm;
 }
-table.totals-table tr.grand td.tot-label { color: #FFFFFF; }
+table.totals-table tr.grand td.tot-label { color: #3B2D83; }
 table.totals-table tr.advance td { color: #5A5470; }
 table.totals-table tr.advance td.tot-label { font-style: italic; }
 table.totals-table tr.to-pay td {
@@ -315,35 +318,67 @@ table.czk-recap tr.grand td {
     padding: 2mm 3mm;
 }
 
-/* ─── Platební panel: QR + bankovní spojení v jednom podbarveném boxu ─── */
-.pay-panel {
+/* ─── FORK (beevee85): PLATEBNÍ PÁS přes celou šířku (nad položkami, vzor iDoklad) ─── */
+.pay-band {
     width: 100%;
-    height: 100%;                 /* roztáhne panel na výšku řádku → spodní hrana lícuje s „Celkem" vpravo */
     border-collapse: collapse;
     background: #EFEAFF;          /* bgSoft — branding ji přebarví tintem akcentu */
-    border: 0.5pt solid #C9C0E9;  /* lineMedium — sladěno s ostatními akcent. plochami */
-    border-radius: 2mm;
+    border: 0.5pt solid #C9C0E9;  /* lineMedium */
+    border-radius: 2.5mm;
+    margin-bottom: 6mm;
 }
-.pay-panel td {
-    padding: 3.5mm;
-    font-size: 10pt;
+.pay-band td {
+    padding: 4mm 4.5mm;
+    vertical-align: middle;
     line-height: 1.5;
-    vertical-align: middle;       /* obsah svisle na střed → vyrovná prázdné místo při roztažení */
 }
-/* Zaplacená faktura: platební panel dostane jemný zelený nádech (success), místo
-   brandového tintu. Vyšší specificita (2 třídy) přebije branding override `.pay-panel`
-   bez ohledu na pořadí — UHRAZENO tak vždy sedí na zeleném podkladu. */
-.pay-panel.pay-panel-paid {
+/* Zaplacená faktura: zelený nádech místo brandového tintu (vyšší specificita
+   přebije branding override .pay-band). */
+.pay-band.pay-band-paid {
     background: #EAF6EC;
     border-color: #BFE0C6;
 }
-/* QR uvnitř panelu — bez vlastního rámečku/paddingu, splývá s podbarvením. */
-.pay-panel td.pay-qr {
-    width: 40mm;
-    text-align: center;
+.pay-band td.pb-info { width: 52%; }
+.pay-band td.pb-amount { width: 28%; text-align: right; }
+.pay-band td.pb-qr { width: 20%; text-align: center; white-space: nowrap; padding: 3mm; }
+.pb-label {
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: 0.8pt;
+    color: #6753AE;
+    font-weight: bold;
+    margin-bottom: 1.5mm;
+    line-height: 1.2;
+}
+/* Dvě třídy = vyšší specificita, aby zelenou nepřebil per-supplier branding override. */
+.pay-band .pb-label-paid { color: #2E7D32; }
+.pay-band-paid .bank-value { color: #2E7D32; }
+.pb-amount-big {
+    font-size: 17pt;
+    font-weight: bold;
+    color: #3B2D83;
+    font-family: 'jetbrainsmono', 'DejaVu Sans Mono', monospace;
+    line-height: 1.2;
     white-space: nowrap;
 }
-.pay-panel td.pay-qr img { width: 33mm; height: 33mm; }
+.pay-band-paid .pb-amount-big { color: #2E7D32; }
+.pb-mono { font-family: 'jetbrainsmono', 'DejaVu Sans Mono', monospace; color: #15131D; font-weight: bold; }
+/* Bílý podklad QR = quiet zone pro spolehlivé skenování na tintovaném pásu. */
+.pb-qr-box {
+    display: inline-block;
+    background: #FFFFFF;
+    border: 0.4pt solid #D2CCDF;
+    border-radius: 1.5mm;
+    padding: 1.6mm;
+    line-height: 0;
+}
+.pb-qr-box img { width: 27mm; height: 27mm; }
+.pb-qr-caption {
+    font-size: 7pt;
+    color: #5A5470;
+    margin-top: 1mm;
+    letter-spacing: 0.3pt;
+}
 .bank-label {
     font-size: 9pt;
     text-transform: uppercase;

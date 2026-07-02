@@ -178,6 +178,70 @@
   {% endif %}
 </table>
 
+{# ─── FORK (beevee85): PLATEBNÍ PÁS — údaje k platbě + částka + QR přes celou šířku
+   nad položkami (vzor iDoklad). Nahrazuje pay-panel, který býval dole vedle sumace.
+   Obsahová logika (uhrazeno / karta / hotově / převod) zachována 1:1. #}
+{% set _has_pay = qr_data_uri or is_paid or payment_method == 'card' or payment_method == 'cash' or bank %}
+{% set _band_due = (invoice.status != 'paid' and (invoice.paid_total ?? 0) > 0)
+      ? invoice.amount_to_pay - invoice.paid_total : invoice.amount_to_pay %}
+{% if _has_pay %}
+<table class="pay-band{% if is_paid %} pay-band-paid{% endif %}">
+  <tr>
+    <td class="pb-info">
+      {% if is_paid %}
+        <div class="pb-label pb-label-paid">{{ t('UHRAZENO', 'PAID') }}</div>
+        <div class="bank-value">
+          {%- if payment_method == 'card' -%}{{ t('Platba kartou online', 'Paid online by card') }}
+          {%- elseif payment_method == 'cash' -%}{{ t('Hotově', 'Cash') }}
+          {%- else -%}{{ t('Neplaťte prosím znovu', 'Do not pay again') }}{%- endif -%}
+        </div>
+        {% if invoice.paid_at %}
+          <div class="bank-meta-line">{{ t('Datum úhrady', 'Paid on') }}: {{ invoice.paid_at|date(date_format) }}</div>
+        {% endif %}
+      {% elseif payment_method == 'card' %}
+        <div class="pb-label">{{ t('Způsob úhrady', 'Payment method') }}</div>
+        <div class="bank-value">{{ t('Platební karta', 'Card') }}</div>
+        <div class="bank-meta-line">{{ t('Bankovní převod ani QR se nepoužije.', 'Bank transfer and QR are not used.') }}</div>
+      {% elseif payment_method == 'cash' %}
+        <div class="pb-label">{{ t('Způsob úhrady', 'Payment method') }}</div>
+        <div class="bank-value">{{ t('Hotově', 'Cash') }}</div>
+      {% elseif bank %}
+        <div class="pb-label">{{ t('Údaje k platbě', 'Payment details') }}</div>
+        {% if bank.account_number %}
+          <div class="bank-value">{{ bank.account_number }}{% if bank.bank_code %} / {{ bank.bank_code }}{% endif %}</div>
+        {% endif %}
+        {% if bank.iban %}
+          <div class="bank-value">{{ bank.iban }}</div>
+        {% endif %}
+        {% set _vs = payment_varsymbol|default(invoice.varsymbol) %}
+        <div class="bank-meta-line">
+          {%- if _vs -%}{{ t('Var. symbol', 'Var. symbol') }}: <span class="pb-mono">{{ _vs }}</span>{%- endif -%}
+          {%- if bank.bic %} &nbsp;·&nbsp; BIC: {{ bank.bic }}{% endif -%}
+          {%- if bank.bank_name %} &nbsp;·&nbsp; {{ bank.bank_name }}{% endif -%}
+        </div>
+      {% endif %}
+    </td>
+    <td class="pb-amount">
+      {% if is_paid %}
+        <div class="pb-label">{{ t('Celkem', 'Total') }}</div>
+        <div class="pb-amount-big">{{ invoice.totals.with_vat|number_format(2, decimal_sep, thousand_sep) }}&nbsp;{{ invoice.currency }}</div>
+      {% else %}
+        <div class="pb-label">{{ t('K úhradě', 'Amount due') }}</div>
+        <div class="pb-amount-big">{{ _band_due|number_format(2, decimal_sep, thousand_sep) }}&nbsp;{{ invoice.currency }}</div>
+        <div class="bank-meta-line">{{ t('Splatnost', 'Due') }}: {{ invoice.due_date|date(date_format) }}</div>
+      {% endif %}
+    </td>
+    {% if qr_data_uri and not is_paid %}
+    <td class="pb-qr">
+      {# bílý podklad = quiet zone pro spolehlivé skenování na tintovaném pásu #}
+      <div class="pb-qr-box"><img src="{{ qr_data_uri }}" alt="QR" width="88" height="88"></div>
+      <div class="pb-qr-caption">{{ t('QR Platba', 'QR Payment') }}</div>
+    </td>
+    {% endif %}
+  </tr>
+</table>
+{% endif %}
+
 {% if invoice.note_above_items %}
 <div class="note">{{ invoice.note_above_items|nl2br }}</div>
 {% endif %}
@@ -272,66 +336,7 @@
 <table class="totals">
   <tr>
     <td class="left">
-      {# QR + bankovní spojení sloučené do jednoho podbarveného „platebního" panelu —
-         vizuální kotva dokladu. Renderuje se jen když je co platit/ukázat. #}
-      {% set _has_pay = qr_data_uri or is_paid or payment_method == 'card' or payment_method == 'cash' or bank %}
-      {% if _has_pay %}
-      <table class="pay-panel{% if is_paid %} pay-panel-paid{% endif %}">
-        <tr>
-          {% if qr_data_uri %}
-          <td class="pay-qr">
-            <img src="{{ qr_data_uri }}" alt="QR" width="105" height="105">
-          </td>
-          {% endif %}
-          <td class="pay-info">
-            {% if is_paid %}
-              <div class="bank-label" style="color:#2E7D32;margin-bottom:1.5mm;">{{ t('UHRAZENO', 'PAID') }}</div>
-              <div class="bank-value" style="color:#2E7D32;">
-                {%- if payment_method == 'card' -%}{{ t('Platba kartou online', 'Paid online by card') }}
-                {%- elseif payment_method == 'cash' -%}{{ t('Hotově', 'Cash') }}
-                {%- else -%}{{ t('Neplaťte prosím znovu', 'Do not pay again') }}{%- endif -%}
-              </div>
-              {% if invoice.paid_at %}
-                <div class="spacer-2">&nbsp;</div>
-                <div class="bank-meta-line">{{ t('Datum úhrady', 'Paid on') }}: {{ invoice.paid_at|date(date_format) }}</div>
-              {% endif %}
-            {% elseif payment_method == 'card' %}
-              <div class="bank-label">{{ t('Způsob úhrady', 'Payment method') }}</div>
-              <div class="spacer-3">&nbsp;</div>
-              <div class="bank-value">{{ t('Platební karta', 'Card') }}</div>
-              <div class="spacer-2">&nbsp;</div>
-              <div class="bank-meta-line">{{ t('Bankovní převod ani QR se nepoužije.', 'Bank transfer and QR are not used.') }}</div>
-            {% elseif payment_method == 'cash' %}
-              <div class="bank-label">{{ t('Způsob úhrady', 'Payment method') }}</div>
-              <div class="spacer-3">&nbsp;</div>
-              <div class="bank-value">{{ t('Hotově', 'Cash') }}</div>
-            {% elseif bank %}
-              <div class="bank-label">{{ t('Bankovní spojení', 'Bank account') }}</div>
-              <div class="spacer-3">&nbsp;</div>
-              {% if bank.account_number %}
-                <div class="bank-value">{{ bank.account_number }}{% if bank.bank_code %} / {{ bank.bank_code }}{% endif %}</div>
-              {% endif %}
-              {% if bank.iban %}
-                <div class="bank-value">{{ bank.iban }}</div>
-              {% endif %}
-              {% set _vs = payment_varsymbol|default(invoice.varsymbol) %}
-              {% if _vs %}
-                <div class="bank-meta-line">{{ t('Var. symbol', 'Var. symbol') }}: <span style="font-family:'jetbrainsmono','DejaVu Sans Mono',monospace;color:#15131D;">{{ _vs }}</span></div>
-              {% endif %}
-              {% if bank.bic or bank.bank_name %}
-                <div class="spacer-2">&nbsp;</div>
-              {% endif %}
-              {% if bank.bic %}
-                <div class="bank-meta-line">BIC: {{ bank.bic }}</div>
-              {% endif %}
-              {% if bank.bank_name %}
-                <div class="bank-meta-line">{{ t('Banka', 'Bank') }}: {{ bank.bank_name }}</div>
-              {% endif %}
-            {% endif %}
-          </td>
-        </tr>
-      </table>
-      {% endif %}
+      {# FORK (beevee85): pay-panel se přesunul do full-width .pay-band nad položky. #}
     </td>
     <td class="right">
       <table class="totals-table">
