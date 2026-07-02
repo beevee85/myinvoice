@@ -40,21 +40,21 @@ final class CashDocumentAction
     {
         $sid = $this->sid($request);
         $q = $request->getQueryParams();
-        $where = ['supplier_id = ?'];
+        $where = ['cd.supplier_id = ?'];
         $params = [$sid];
         if (ctype_digit((string) ($q['year'] ?? ''))) {
-            $where[] = 'YEAR(issue_date) = ?';
+            $where[] = 'YEAR(cd.issue_date) = ?';
             $params[] = (int) $q['year'];
         }
         if (in_array($q['kind'] ?? '', ['income', 'expense'], true)) {
-            $where[] = 'kind = ?';
+            $where[] = 'cd.kind = ?';
             $params[] = $q['kind'];
         }
         $stmt = $this->db->pdo()->prepare(
             'SELECT cd.*, i.varsymbol AS invoice_varsymbol
                FROM cash_documents cd
                LEFT JOIN invoices i ON i.id = cd.invoice_id
-              WHERE ' . implode(' AND ', array_map(static fn ($w) => 'cd.' . $w, $where)) . '
+              WHERE ' . implode(' AND ', $where) . '
               ORDER BY cd.issue_date DESC, cd.id DESC'
         );
         $stmt->execute($params);
