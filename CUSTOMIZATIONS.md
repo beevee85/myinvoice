@@ -12,6 +12,7 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 1. **Platební pás přes celou šířku nad položkami** (podpis iDokladu): účet + IBAN + VS + velká částka „K úhradě" + QR kód s bílou quiet-zone — platba nejde přehlédnout. Nahrazuje pay-panel, který byl dole vedle sumace. Všechny obsahové varianty (uhrazeno/karta/hotově/převod, částečné úhrady) zachovány 1:1.
 2. **Lehčí typografický vzhled**: hlavička položek bez plného barevného bloku (akcentový text + silná linka), zrušené zebra pruhy, „Celkem" jako velké číslo s linkou místo plného pruhu, dodavatel bez podbarvení (tint jen odběratel), tenčí hlavičková linka, doc-type kapitálkami.
 3. **PdfBranding::accentCss aktualizován** na nové selektory — per-supplier barvy (email_accent_color) dál fungují; UHRAZENO zůstává zelené i s brandingem (specificita).
+4. **Dodatek (iterace s uživatelem):** monospace (JetBrains Mono) nahrazen Montserratem na VŠECH dokladech (faktura, pokladní doklad, platební příkaz, výkaz) — pryč „strojový" výraz s tečkovanou nulou; sekční popisky v tiché šedé (akcent jen brand + platební pás + součty); bloky Dodavatel/Odběratel kompaktní (`div.party-label` místo `h2` — mPDF na h2 lepí vlastní výchozí styl a class CSS ignoruje!).
 
 **Které soubory:** `api/templates/invoice/invoice.twig` (pay-band blok + odstranění pay-panel — NEJVĚTŠÍ merge riziko, upstream šablonu často mění), `styles/invoice.css` (restyling, FORK bloky), `api/src/Service/Pdf/PdfBranding.php` (selektory). `work_report.twig` sdílí `.head`/`.items` → zdědí lehčí vzhled (záměr).
 
