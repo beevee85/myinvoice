@@ -38,6 +38,7 @@ final class SettingsAction
         private readonly InvoicePdfRenderer $pdf,
         private readonly Config $config,
         private readonly \MyInvoice\Service\Ares\SupplierRegistryEnricher $enricher,
+        private readonly \MyInvoice\Service\Auth\UserSupplierAccess $access,
     ) {}
 
     /** Aktuální supplier (z X-Supplier-Id middleware). */
@@ -72,13 +73,36 @@ final class SettingsAction
             $r['clients_count']  = (int) $r['clients_count'];
             $r['invoices_count'] = (int) $r['invoices_count'];
         }
+        unset($r);
+
+        // FORK (beevee85): omezený uživatel vidí jen povolené dodavatele.
+        $allowed = $this->allowedIdsFor($request);
+        if ($allowed !== null) {
+            $rows = array_values(array_filter(
+                $rows,
+                static fn (array $r): bool => in_array($r['id'], $allowed, true),
+            ));
+        }
         return Json::ok($response, $rows);
     }
 
     /** GET /api/suppliers/{id}. */
     public function getSupplierById(Request $request, Response $response, array $args): Response
     {
-        return $this->respondSupplier($response, (int) ($args['id'] ?? 0));
+        $id = (int) ($args['id'] ?? 0);
+        // FORK (beevee85): dodavatel mimo povolený set = jako by neexistoval (404, neleakovat existenci).
+        $allowed = $this->allowedIdsFor($request);
+        if ($allowed !== null && !in_array($id, $allowed, true)) {
+            return Json::error($response, 'not_found', 'Supplier nenalezen.', 404);
+        }
+        return $this->respondSupplier($response, $id);
+    }
+
+    /** FORK (beevee85): povolené supplier_id přihlášeného usera; null = bez omezení. */
+    private function allowedIdsFor(Request $request): ?array
+    {
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        return $user === [] ? null : $this->access->allowedIdsForUser($user);
     }
 
     /** POST /api/suppliers — nový supplier (admin). */
