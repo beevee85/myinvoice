@@ -6,6 +6,19 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-02 — FÁZE 4: PWA (instalovatelná aplikace)
+
+**Co se změnilo:** aplikaci lze přidat na plochu mobilu (Android i iOS) jako samostatnou appku — web manifest + sada ikon. Bez service workeru (žádná offline cache, žádné riziko zaseknutých verzí); případné push notifikace by byly samostatná budoucí funkce.
+
+**Které soubory:**
+- `styles/manifest.json` — **nový** web manifest (start_url/scope `/`, standalone, theme #4F46E5). Leží ve `styles/`, protože nginx servíruje z `/` jen reálné soubory od kořene repa (web/public → dist root se neservíruje, jen `/assets/`).
+- `styles/icon-{192,512}.png`, `styles/icon-maskable-512.png`, `styles/apple-touch-icon.png` — **nové** ikony, generované z tvarů `styles/logo.svg`.
+- `tools/generatePwaIcons.php` — **nový** GD generátor ikon (logo = jednoduché tvary, kreslí se 1:1 se 4× supersamplingem; při změně loga přegenerovat: `php tools/generatePwaIcons.php <size> <plain|apple|maskable> > styles/….png`).
+- `web/index.html` — +2 řádky (manifest, apple-touch-icon) a theme-color #3B2D83 → #4F46E5 (sladění s FÁZÍ 3).
+- `manual/05_Po_instalaci.md` — sekce 5.3.1 s postupem přidání na plochu.
+
+**Jak ověřit po merge:** `/styles/manifest.json` vrací 200 a JSON; Chrome DevTools → Application → Manifest bez chyb; na mobilu jde přidat na plochu a otevře se standalone s ikonou.
+
 ## 2026-07-02 — UPDATE z upstreamu: v4.41.0 → v4.43.4
 
 Merge `v4.43.4` do větve `custom` proběhl **bez konfliktů** (69 souborů, mj. odesílací e-mailové profily + S/MIME, záložka Stavy na účtech, dělené úhrady UI, migrace 0120–0123 — aplikované při startu). Checklist úprav prošel kompletně: FÁZE 1 (pozice poznámky), FÁZE 2 (migrace 0900 + enforcement + data v `user_supplier_access`), FÁZE 3 (theme, grafy, import) — vše drží. Upstream nezměnil design tokeny ani nepřidal fialové hexy do grafů.

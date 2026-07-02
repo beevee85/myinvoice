@@ -30,6 +30,19 @@ Detailní popis: [První spuštění (setup wizard)](06_Setup_wizard.md).
 - Zapni **zálohy** a ověř, že běží (Systém → Plánované úlohy).
 - Pinuj konkrétní verzi image a sleduj [Aktualizace](40_Aktualizace.md).
 
+### 5.3.1 Aplikace na ploše mobilu (PWA)
+
+MyInvoice lze přidat na plochu telefonu jako aplikaci — otevře se pak v
+samostatném okně bez adresního řádku, s vlastní ikonou:
+
+- **iPhone / iPad:** otevři web v Safari → tlačítko **Sdílet** → **Přidat na
+  plochu**.
+- **Android:** otevři web v Chrome → menu ⋮ → **Přidat na plochu** (případně
+  „Instalovat aplikaci").
+
+Vyžaduje HTTPS. Po prvním otevření z plochy se přihlas — přihlášení pak drží
+stejně jako v prohlížeči.
+
 ## 5.4 CLI nástroje
 
 ```bash

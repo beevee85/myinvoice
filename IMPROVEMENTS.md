@@ -6,10 +6,10 @@ Před implementací čehokoli VŽDY ověř v aktuální verzi upstreamu, že to 
 
 ## K implementaci ve forku (malé, aditivní)
 
-- [ ] **PWA** — manifest + ikony + apple-touch-icon; instalovatelná appka na plochu
-  (Android i iPhone — na iOS přes Safari → Sdílet → Přidat na plochu; od iOS 16.4 umí
-  home-screen PWA i push notifikace, to by ale byla samostatná větší funkce).
-  Rozsah: nové soubory + pár řádků v `web/index.html`. STAV: rozpracováno 2026-07-02.
+- [x] **PWA** — manifest + ikony + apple-touch-icon; instalovatelná appka na plochu.
+  HOTOVO 2026-07-02 (FÁZE 4, viz CUSTOMIZATIONS.md). Navazující nápad do budoucna:
+  push notifikace (přišla platba / faktura po splatnosti) — vyžaduje service worker
+  + Web Push na serveru; od iOS 16.4 funguje i na iPhonu.
 - [ ] **Pokladní doklady** — příjmový/výdajový pokladní doklad pro hotovostní platby
   (à la POHODA/Vyfakturuj). Větší feature: nový typ dokladu, číselná řada, PDF šablona,
   vazba na úhradu faktury hotově. Před realizací udělat návrh (DB + API + UI).
