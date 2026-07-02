@@ -10,9 +10,9 @@ Před implementací čehokoli VŽDY ověř v aktuální verzi upstreamu, že to 
   HOTOVO 2026-07-02 (FÁZE 4, viz CUSTOMIZATIONS.md). Navazující nápad do budoucna:
   push notifikace (přišla platba / faktura po splatnosti) — vyžaduje service worker
   + Web Push na serveru; od iOS 16.4 funguje i na iPhonu.
-- [ ] **Pokladní doklady** — příjmový/výdajový pokladní doklad pro hotovostní platby
-  (à la POHODA/Vyfakturuj). Větší feature: nový typ dokladu, číselná řada, PDF šablona,
-  vazba na úhradu faktury hotově. Před realizací udělat návrh (DB + API + UI).
+- [x] **Pokladní doklady** — HOTOVO 2026-07-02 (FÁZE 5, viz CUSTOMIZATIONS.md).
+  Nápady pro v2: DPH režim „zjednodušený daňový doklad" (přes VatLedgerService),
+  výběr protistrany z klientů, souhrn stavu pokladny (zůstatek za období).
 
 ## Kandidáti na issue u autora (radekhulan/myinvoice) — velké funkce
 
