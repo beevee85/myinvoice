@@ -6,6 +6,10 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-03 — UPDATE z upstreamu: v4.44.0 → v4.49.2
+
+Merge 99 commitů (mj. ceník položek, OSS základ — migrace 0137, iDoklad bank transakce, volitelný e-mail klienta; migrace 0126–0139). Dva konflikty: `InvoiceRepository.php` (naše supportsInternalNote vs. upstream supportsOssItemColumns na stejném místě — ponechány oba helpery) a `InvoiceDetail.vue` (import řádek — sloučeny typy + cashDocumentsApi). `invoice.twig` se zmergoval automaticky (FORK bloky drží). Checklist FÁZE 1–7 prošel; migrace 0126–0139 + naše 0900–0902 aplikované, log čistý.
+
 ## 2026-07-02 — UPDATE z upstreamu: v4.43.4 → v4.44.0
 
 Merge 22 commitů (mj. e-mailové profily — migrace 0124, stavy transakcí — 0125, sjednocená stránka Banka se záložkami, Dodavatelé přesunuti do Číselníků). Jediný konflikt: `AppLayout.vue` — upstream přejmenoval nav položku Banka (sjednocená stránka) a náš řádek Pokladna byl hned pod ní; řešení = upstream položka + naše Pokladna pod ní. Checklist všech úprav (FÁZE 1–7) prošel; tokeny, grafy i invoice.css upstream neměnil. Migrace 0124–0125 + naše 0900–0902 aplikované.
