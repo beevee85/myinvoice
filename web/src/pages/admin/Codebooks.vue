@@ -461,6 +461,8 @@ const vatClsDraft = reactive({
   kh_section: '',
   vat_rate: null as number | null,
   is_reverse_charge: false,
+  kh_regime_code: '' as '' | '0' | '1' | '2',
+  kh_bad_debt: '' as '' | 'N' | 'P',
   display_order: 100,
   archived: false,
 })
@@ -474,6 +476,7 @@ async function loadVatClassifications() {
 function newVatCls() {
   Object.assign(vatClsDraft, { id: 0, code: '', label: '', direction: 'both',
     dphdp3_line: '', kh_section: '', vat_rate: null, is_reverse_charge: false,
+    kh_regime_code: '', kh_bad_debt: '',
     display_order: 100, archived: false })
   vatClsEditMode.value = 'create'
   vatClsOpen.value = true
@@ -484,6 +487,7 @@ function editVatCls(c: VatClassification) {
     id: c.id, code: c.code, label: c.label, direction: c.direction,
     dphdp3_line: c.dphdp3_line || '', kh_section: c.kh_section || '',
     vat_rate: c.vat_rate, is_reverse_charge: c.is_reverse_charge,
+    kh_regime_code: c.kh_regime_code || '', kh_bad_debt: c.kh_bad_debt || '',
     display_order: c.display_order, archived: c.archived,
   })
   vatClsEditMode.value = 'edit'
@@ -500,6 +504,8 @@ async function saveVatCls() {
         kh_section: vatClsDraft.kh_section || null,
         vat_rate: vatClsDraft.vat_rate,
         is_reverse_charge: vatClsDraft.is_reverse_charge,
+        kh_regime_code: vatClsDraft.kh_regime_code || null,
+        kh_bad_debt: vatClsDraft.kh_bad_debt || null,
         display_order: vatClsDraft.display_order,
         archived: vatClsDraft.archived,
       })
@@ -512,6 +518,8 @@ async function saveVatCls() {
         kh_section: vatClsDraft.kh_section || null,
         vat_rate: vatClsDraft.vat_rate,
         is_reverse_charge: vatClsDraft.is_reverse_charge,
+        kh_regime_code: vatClsDraft.kh_regime_code || null,
+        kh_bad_debt: vatClsDraft.kh_bad_debt || null,
         display_order: vatClsDraft.display_order,
       })
     }
@@ -1338,6 +1346,25 @@ watch(tab, (newTab) => {
             <input v-model="vatClsDraft.is_reverse_charge" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
             {{ t('vat_classifications.is_reverse_charge') }}
           </label>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('vat_classifications.kh_regime_code') }}</label>
+              <select v-model="vatClsDraft.kh_regime_code" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                <option value="">{{ t('vat_classifications.kh_default') }}</option>
+                <option value="0">0 — {{ t('vat_classifications.kh_regime_standard') }}</option>
+                <option value="1">1 — {{ t('vat_classifications.kh_regime_travel') }}</option>
+                <option value="2">2 — {{ t('vat_classifications.kh_regime_used_goods') }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('vat_classifications.kh_bad_debt') }}</label>
+              <select v-model="vatClsDraft.kh_bad_debt" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                <option value="">{{ t('vat_classifications.kh_default') }}</option>
+                <option value="N">N — {{ t('vat_classifications.kh_bad_debt_no') }}</option>
+                <option value="P">P — {{ t('vat_classifications.kh_bad_debt_yes') }}</option>
+              </select>
+            </div>
+          </div>
           <label v-if="vatClsEditMode === 'edit'" class="flex items-center gap-2 text-sm">
             <input v-model="vatClsDraft.archived" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
             {{ t('vat_classifications.archive') }}

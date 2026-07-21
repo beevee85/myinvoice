@@ -12,6 +12,8 @@ export interface VatClassification {
   kh_section: string | null
   vat_rate: number | null
   is_reverse_charge: boolean
+  kh_regime_code: '0' | '1' | '2' | null
+  kh_bad_debt: 'N' | 'P' | null
   display_order: number
   archived: boolean
   created_at: string

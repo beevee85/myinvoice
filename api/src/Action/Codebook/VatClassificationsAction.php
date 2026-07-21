@@ -113,6 +113,16 @@ final class VatClassificationsAction
         if (!in_array($body['direction'] ?? 'both', ['sale', 'purchase', 'both'], true)) {
             return 'direction musí být sale|purchase|both.';
         }
+        if (array_key_exists('kh_regime_code', $body)
+            && $body['kh_regime_code'] !== null
+            && !in_array($body['kh_regime_code'], ['0', '1', '2'], true)) {
+            return 'kh_regime_code musí být 0|1|2 nebo null.';
+        }
+        if (array_key_exists('kh_bad_debt', $body)
+            && $body['kh_bad_debt'] !== null
+            && !in_array($body['kh_bad_debt'], ['N', 'P'], true)) {
+            return 'kh_bad_debt musí být N|P nebo null.';
+        }
         return null;
     }
 }

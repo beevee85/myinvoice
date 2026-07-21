@@ -8,10 +8,13 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Pdf\PdfSigner;
 use MyInvoice\Service\Pdf\SigningConfig;
+use MyInvoice\Tests\Support\OpensslConfigTrait;
 use PHPUnit\Framework\TestCase;
 
 final class PdfSignerTest extends TestCase
 {
+    use OpensslConfigTrait;
+
     private static string $p12Path = '';
     private static string $certPemPath = '';
     private static ?string $skipReason = null;
@@ -20,13 +23,14 @@ final class PdfSignerTest extends TestCase
     public static function setUpBeforeClass(): void
     {
         // self-signed cert + RSA klíč → P12 (+ samostatný cert PEM pro verify).
-        // openssl ext potřebuje openssl.cnf — když ho prostředí nemá (typicky holý
-        // Windows bez OPENSSL_CONF), gen vrátí false → celá třída se skipne místo
-        // tvrdé chyby (reálnou verifikaci pokrývá Linux CI).
-        $pkey = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+        // openssl ext potřebuje openssl.cnf — dohledáme ho (OpensslConfigTrait) a
+        // předáme přes ['config'=>…], ať to běží i na holém Windows. Kdyby se přesto
+        // nepodařilo klíč vygenerovat, celá třída se skipne místo tvrdé chyby.
+        $ssl = self::opensslConfigArgs();
+        $pkey = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA] + $ssl);
         $dn = ['commonName' => 'Test Signer', 'countryName' => 'CZ'];
-        $csr = $pkey ? openssl_csr_new($dn, $pkey) : false;
-        $x509 = $csr ? openssl_csr_sign($csr, null, $pkey, 365) : false;
+        $csr = $pkey ? openssl_csr_new($dn, $pkey, $ssl ?: null) : false;
+        $x509 = $csr ? openssl_csr_sign($csr, null, $pkey, 365, $ssl ?: null) : false;
         if ($x509 === false) {
             self::$skipReason = 'openssl ext neumí vygenerovat test cert (chybí openssl.cnf).';
             return;

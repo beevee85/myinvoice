@@ -549,7 +549,14 @@ const purchaseActions = computed<ActionItem[]>(() => {
     <!-- ═══ Vendor + číslo dokladu (řádek pod headerem, paralel s vystavenou InvoiceDetail) ═══ -->
     <div class="flex items-start justify-between gap-4">
       <div class="flex-1 min-w-0 space-y-1">
-        <div class="text-lg font-semibold text-neutral-900">{{ invoice.vendor_company_name }}</div>
+        <div class="text-lg font-semibold text-neutral-900">
+          <RouterLink v-if="invoice.vendor_id" :to="`/purchase-invoices?vendor=${invoice.vendor_id}`"
+            class="text-primary-700 hover:text-primary-800 hover:underline"
+            :title="t('purchase_invoice.show_invoices_for_vendor')">
+            {{ invoice.vendor_company_name }}
+          </RouterLink>
+          <template v-else>{{ invoice.vendor_company_name }}</template>
+        </div>
         <div class="text-sm text-neutral-600 font-mono">
           {{ t('purchase_invoice.fields.vendor_invoice_number') }}: {{ invoice.vendor_invoice_number }}
         </div>

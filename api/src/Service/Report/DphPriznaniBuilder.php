@@ -71,6 +71,7 @@ final class DphPriznaniBuilder
         }
 
         $lines = $this->mapper->aggregateForDphPriznani($supplierId, $year, $month, $period);
+        $this->appendSalesDataWarnings($supplierId, $year, $month, $period, $warnings);
         if ($isIdentified) {
             $lines = $this->filterLinesForIdentified($lines, $warnings);
         }
@@ -145,12 +146,15 @@ final class DphPriznaniBuilder
         //   ř.40 pln23/odp_tuz23_nar     = tuzemsko 21 %
         //   ř.41 pln5/odp_tuz5_nar       = tuzemsko 12 %
         //   ř.42 dov_cu/odp_cu_nar       = dovoz CÚ
-        //   ř.43 nar_zdp23/od_zdp23      = odpočet ze samovyměřených plnění (ř. 3-13)
-        //                                  ve sloupci „V plné výši", sazba 21 %.
+        //   ř.43 nar_zdp23/od_zdp23      = odpočet ze samovyměřených plnění (ř. 3-13),
+        //                                  sloupec „V plné výši", ZÁKLADNÍ sazba (21 %).
+        //   ř.44 nar_zdp5/od_zdp5        = totéž ve SNÍŽENÉ sazbě (12 %) — RC řádek s 12%
+        //                                  sazbou se sem remapuje ve VatLedgerService (S3).
         //                                  POZOR: odp_rezim/odp_rez_nar je ř.45 (korekce
         //                                  odpočtu dle §75/§77/§79 — registrace, vyrovnání),
-        //                                  NE ř.43. Číselník nemá 12% RC kód (kódy 5/23/24/25
-        //                                  nesou 21 %), takže 21% sloupec pokryje celý mirror.
+        //                                  NE ř.44. Ř.45 se negeneruje automaticky (mimo
+        //                                  rozsah, řeší účetní) — případný custom kód mířící
+        //                                  na ř.45 se nevykreslí ani nezapočte (viz guard níže).
         //   ř.46 odp_sum_nar             = součtový řádek odpočtu (ř.40-45, „V plné výši")
         //   ř.47 nar_maj/—               = hodnota pořízeného majetku
         //                                  (doplňující údaj, jen základ; XSD má
@@ -185,11 +189,18 @@ final class DphPriznaniBuilder
             //   (třístranný obchod § 17). Hodnota z ř.31 jde do souhrnného hlášení s kódem 2.
             '30' => ['veta' => 3, 'base' => 'tri_pozb',   'vat' => null],
             '31' => ['veta' => 3, 'base' => 'tri_dozb',   'vat' => null],
+            // Veta5 (oddíl B — krácení nároku na odpočet §76):
+            //   ř.50 plnosv_kf = plnění osvobozená od daně bez nároku na odpočet (§51),
+            //   sloupec „S nárokem na odpočet" vstupující do koeficientu §76. Jen základ,
+            //   bez daně (osvobozené plnění daň nenese). Plný koeficient (koef_p20_*,
+            //   ř.52/53) se needituje — mimo rozsah, řeší účetní.
+            '50' => ['veta' => 5, 'base' => 'plnosv_kf',  'vat' => null],
             // Veta4 (odpočet)
             '40' => ['veta' => 4, 'base' => 'pln23',      'vat' => 'odp_tuz23_nar'],
             '41' => ['veta' => 4, 'base' => 'pln5',       'vat' => 'odp_tuz5_nar'],
             '42' => ['veta' => 4, 'base' => 'dov_cu',     'vat' => 'odp_cu_nar'],
             '43' => ['veta' => 4, 'base' => 'nar_zdp23',  'vat' => 'od_zdp23'],
+            '44' => ['veta' => 4, 'base' => 'nar_zdp5',   'vat' => 'od_zdp5'],
             '47' => ['veta' => 4, 'base' => 'nar_maj',    'vat' => null],
         ];
 
@@ -199,27 +210,35 @@ final class DphPriznaniBuilder
         $veta2Attrs = [];
         $veta3Attrs = [];
         $veta4Attrs = [];
+        $veta5Attrs = [];
 
         foreach ($lines as $lineNum => $data) {
             $lineKey = (string) $lineNum;
-            if (isset($lineMap[$lineKey])) {
-                $m = $lineMap[$lineKey];
-                $target = &${'veta' . $m['veta'] . 'Attrs'};
-                $target[$m['base']] = $this->formatAmount($data['base']);
-                if ($m['vat'] !== null) {
-                    $target[$m['vat']] = $this->formatAmount($data['vat']);
-                }
-                unset($target);
+            // Řádek mimo lineMap (builder ho neumí vykreslit — např. custom kód na ř.45)
+            // se NEvykreslí ANI nezapočítá do rekapitulace. Dřív se tiše přičítal do
+            // ř.46/62/63, aniž by byl v detailu → EPO hlásilo nekonzistenci (audit 2026-07).
+            if (!isset($lineMap[$lineKey])) {
+                continue;
             }
-            // Rekapitulaci sčítáme ze zaokrouhlených řádků (na celé Kč, jak se vykazují),
-            // aby ř.62/63 přesně seděly se součtem vystavených řádků — EPO jinak hlásí
-            // nekonzistenci mezi detailem a rekapitulací.
+            $m = $lineMap[$lineKey];
+            $target = &${'veta' . $m['veta'] . 'Attrs'};
+            $target[$m['base']] = $this->formatAmount($data['base']);
+            if ($m['vat'] !== null) {
+                $target[$m['vat']] = $this->formatAmount($data['vat']);
+            }
+            unset($target);
+
+            // Rekapitulace jen z řádků, které NESOU daň (mají vat atribut). Řádky jen se
+            // základem — oddíl C (ř.20-31), osvobozené (ř.50), majetek (ř.47) — do ř.62/63
+            // nepatří; jinak by zbloudilá daň na základovém řádku nafoukla ř.62. Sčítáme
+            // zaokrouhleně na celé Kč (jak se vykazují), aby ř.62/63 seděly se součtem detailu.
+            if ($m['vat'] === null) {
+                continue;
+            }
             $lineVat = round($data['vat']);
             if ($this->isOutputLine($lineKey)) {
                 $totalDanZdanitelne += $lineVat;
-            } elseif ((int) $lineKey !== 47) {
-                // ř.47 je doplňující údaj k ř.40-45, jeho daň se NEzapočítává
-                // (jinak by se daň majetku duplikovala s odpočtem z ř.40).
+            } else {
                 $totalDanOdpocitatelne += $lineVat;
             }
         }
@@ -250,6 +269,13 @@ final class DphPriznaniBuilder
             $veta4 = $dom->createElement('Veta4');
             foreach ($veta4Attrs as $k => $v) $veta4->setAttribute($k, $v);
             $dphdp3->appendChild($veta4);
+        }
+        // Veta5 — oddíl B, ř.50 (osvobozená plnění bez nároku na odpočet, §76 koeficient).
+        // XSD pořadí Veta4 → Veta5 → Veta6; emit jen když je co vykázat (jako Veta2/3/4).
+        if (!empty($veta5Attrs)) {
+            $veta5 = $dom->createElement('Veta5');
+            foreach ($veta5Attrs as $k => $v) $veta5->setAttribute($k, $v);
+            $dphdp3->appendChild($veta5);
         }
 
         $vlastniDan = $totalDanZdanitelne - $totalDanOdpocitatelne;
@@ -306,6 +332,69 @@ final class DphPriznaniBuilder
             'summary'  => $summary,
             'warnings' => $warnings,
         ];
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    private function appendSalesDataWarnings(int $supplierId, int $year, int $month, string $period, array &$warnings): void
+    {
+        if ($period === 'quarterly') {
+            $quarter = (int) ceil($month / 3);
+            $startMonth = ($quarter - 1) * 3 + 1;
+            $endMonth = $quarter * 3;
+        } else {
+            $startMonth = $endMonth = $month;
+        }
+        $start = sprintf('%04d-%02d-01', $year, $startMonth);
+        $end = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $endMonth)))
+            ->modify('last day of this month')->format('Y-m-d');
+
+        // Čistě OSS dobropis nesnižuje tuzemskou daň na výstupu (jeho záporná DPH je zahraniční),
+        // takže by § 42 varování jen mátlo. Vyžadujeme aspoň jeden ne-OSS řádek.
+        $creditNoteOssFilter = $this->db->hasColumn('invoice_items', 'oss_applicable')
+            ? "AND EXISTS (SELECT 1 FROM invoice_items cii
+                            WHERE cii.invoice_id = invoices.id
+                              AND COALESCE(cii.oss_applicable, 0) = 0)"
+            : '';
+        $creditNotes = $this->db->pdo()->prepare(
+            "SELECT varsymbol
+               FROM invoices
+              WHERE supplier_id = ?
+                AND status NOT IN ('draft', 'cancelled')
+                AND invoice_type = 'credit_note'
+                AND (total_without_vat < 0 OR total_vat < 0)
+                AND COALESCE(tax_date, issue_date) BETWEEN ? AND ?
+                {$creditNoteOssFilter}
+           ORDER BY COALESCE(tax_date, issue_date), id"
+        );
+        $creditNotes->execute([$supplierId, $start, $end]);
+        foreach ($creditNotes->fetchAll(\PDO::FETCH_COLUMN) as $number) {
+            $warnings[] = "Dobropis {$number} snižuje daň na výstupu. Ověřte, že datum zařazení odpovídá doručení opravného daňového dokladu nebo vynaložení rozumného úsilí o jeho doručení (§ 42 ZDPH).";
+        }
+
+        $ossFilter = $this->db->hasColumn('invoice_items', 'oss_applicable')
+            ? 'AND COALESCE(ii.oss_applicable, 0) = 0'
+            : '';
+        $unclassifiedZero = $this->db->pdo()->prepare(
+            "SELECT DISTINCT i.varsymbol
+               FROM invoices i
+               JOIN invoice_items ii ON ii.invoice_id = i.id
+              WHERE i.supplier_id = ?
+                AND i.status NOT IN ('draft', 'cancelled')
+                AND i.invoice_type <> 'proforma'
+                AND COALESCE(i.tax_date, i.issue_date) BETWEEN ? AND ?
+                AND COALESCE(i.reverse_charge, 0) = 0
+                AND ii.vat_rate_snapshot = 0
+                {$ossFilter}
+                AND ii.vat_classification_code IS NULL
+                AND i.vat_classification_code IS NULL
+           ORDER BY i.varsymbol"
+        );
+        $unclassifiedZero->execute([$supplierId, $start, $end]);
+        foreach ($unclassifiedZero->fetchAll(\PDO::FETCH_COLUMN) as $number) {
+            $warnings[] = "Doklad {$number} obsahuje neklasifikovaný řádek se sazbou 0 %. Řádek nebyl zahrnut na ř. 50; zvolte výslovnou klasifikaci DPH.";
+        }
     }
 
     /**

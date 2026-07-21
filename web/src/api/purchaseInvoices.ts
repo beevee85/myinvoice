@@ -128,6 +128,11 @@ export interface PurchaseInvoice {
   reverse_charge: boolean
   prices_include_vat?: boolean
   is_fixed_asset: boolean
+  /**
+   * Plátcovství dodavatele k datu plnění (snapshot na dokladu, migrace 0133). U legacy
+   * dokladů (snapshot NULL) backend fallbackuje na živý příznak klienta. Řídí nárok na odpočet.
+   */
+  vendor_is_vat_payer: boolean
   /** Nárok na odpočet DPH (full=plný, none=bez nároku → mimo DPH evidenci, proportional=krácený §75). */
   vat_deduction: VatDeduction
   /** Procento odpočtu při vat_deduction='proportional' (§75 poměrný; 0–100, default 100). */
@@ -284,6 +289,8 @@ export interface PurchaseInvoicePayload {
   reverse_charge?: boolean
   prices_include_vat?: boolean
   is_fixed_asset?: boolean
+  /** Snapshot plátcovství dodavatele k datu plnění (migrace 0133). */
+  vendor_is_vat_payer?: boolean
   vat_deduction?: VatDeduction
   vat_deduction_percent?: number
   tax_deductible?: boolean

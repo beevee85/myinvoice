@@ -38,11 +38,18 @@ const filteredTransactions = computed<BankTransaction[]>(() => {
   const txs = statement.value?.transactions ?? []
   return statusFilter.value === '' ? txs : txs.filter(tx => tx.match_status === statusFilter.value)
 })
-// Souhrn pro měsíční avízo-výpis: disponibilní zůstatek z nejnovějšího avíza,
-// které ho neslo (Creditas/Fio/RB), + součty příjmů/výdajů měsíce z transakcí.
+// Virtuální (sekundární) zdroj — měsíční agregát, ne nahraný soubor z banky.
+// Takový výpis nemá počáteční/koncový zůstatek ani originál ke stažení.
+const isVirtual = computed(() =>
+  statement.value?.source === 'email_notice' || statement.value?.source === 'idoklad'
+)
+
+// Souhrn pro měsíční virtuální výpis: disponibilní zůstatek z nejnovější položky,
+// která ho nesla (avíza Creditas/Fio/RB; u iDokladu zůstatek není), + součty
+// příjmů/výdajů měsíce z transakcí.
 const noticeSummary = computed(() => {
   const s = statement.value
-  if (!s || s.source !== 'email_notice') return null
+  if (!s || !isVirtual.value) return null
   let last: BankTransaction | null = null
   let credit = 0
   let debit = 0
@@ -65,6 +72,8 @@ const matchError = ref<string>('')
 // Návrhy ke spárování dle částky ±14 dní (vydané i přijaté faktury).
 const matchCandidates = ref<MatchCandidate[]>([])
 const loadingCandidates = ref(false)
+// true = v ±14 dnech nic nesedělo, matchCandidates obsahuje širší (±90 dní) a/nebo cross-currency návrhy.
+const candidatesFallback = ref(false)
 // Návrhy sloučené úhrady: kombinace faktur jednoho klienta, jejichž součet = platba.
 const splitSuggestions = ref<SplitSuggestion[]>([])
 const loadingSplit = ref(false)
@@ -193,9 +202,14 @@ function startMatch(tx: BankTransaction) {
   matchError.value = ''
   // Návrhy dle částky ±14 dní (best-effort — když selže, ruční VS pořád funguje)
   matchCandidates.value = []
+  candidatesFallback.value = false
   loadingCandidates.value = true
   bankApi.matchCandidates(tx.id)
-    .then(list => { if (matchingTx.value === tx.id) matchCandidates.value = list })
+    .then(r => {
+      if (matchingTx.value !== tx.id) return
+      matchCandidates.value = r.candidates
+      candidatesFallback.value = r.fallback
+    })
     .catch(() => {})
     .finally(() => { loadingCandidates.value = false })
   // Návrhy sloučené úhrady (jen příchozí platba — klient zaplatil víc faktur naráz)
@@ -343,7 +357,12 @@ async function rematchStatement() {
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
         {{ t('bank.email_notice_badge') }}
       </span>
+      <span v-if="statement.source === 'idoklad'" :title="t('bank.idoklad_source_hint')"
+        class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
+        {{ t('bank.idoklad_source_badge') }}
+      </span>
       <span v-if="statement.source === 'email_notice'">{{ t('bank.email_notice_statement_title', { month: monthLabel(statement.statement_date) }) }}</span>
+      <span v-else-if="statement.source === 'idoklad'">{{ t('bank.idoklad_statement_title', { month: monthLabel(statement.statement_date) }) }}</span>
       <span v-else>{{ t('bank.statement_title', { number: statement.statement_number, date: formatDate(statement.statement_date) }) }}</span>
     </h1>
     <p class="text-sm text-neutral-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
@@ -356,7 +375,7 @@ async function rematchStatement() {
 
     <!-- Měsíční avízo-výpis: disponibilní zůstatek z nejnovějšího avíza (nesou ho
          Creditas/Fio/RB) + součty příjmů/výdajů měsíce spočtené z transakcí. -->
-    <div v-if="statement.source === 'email_notice' && noticeSummary" class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 mb-4">
+    <div v-if="isVirtual && noticeSummary" class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 mb-4">
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.available_balance') }}</div>
         <div class="text-lg font-mono font-semibold">
@@ -379,7 +398,7 @@ async function rematchStatement() {
       </div>
     </div>
 
-    <div v-else-if="statement.source !== 'email_notice'" class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 mb-4">
+    <div v-else-if="!isVirtual" class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 mb-4">
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.prev_balance') }}</div>
         <div class="text-lg font-mono">{{ formatMoney(statement.prev_balance, statement.currency ?? 'CZK') }}</div>
@@ -394,7 +413,7 @@ async function rematchStatement() {
       </div>
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.debit_total') }}</div>
-        <div class="text-lg font-mono text-danger-500">−{{ formatMoney(statement.debit_total, statement.currency ?? 'CZK') }}</div>
+        <div class="text-lg font-mono text-danger-500">−{{ formatMoney(Math.abs(statement.debit_total), statement.currency ?? 'CZK') }}</div>
       </div>
     </div>
 
@@ -423,7 +442,7 @@ async function rematchStatement() {
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
             PDF
           </a>
-          <label v-if="auth.canWrite && !statement.has_pdf && statement.source !== 'email_notice'"
+          <label v-if="auth.canWrite && !statement.has_pdf && !isVirtual"
              :title="t('bank.pdf_upload_hint')"
              class="cursor-pointer h-8 px-3 text-xs border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md font-medium inline-flex items-center gap-1.5">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
@@ -443,7 +462,7 @@ async function rematchStatement() {
             </svg>
             {{ rematching ? t('bank.rematch_running') : t('bank.rematch') }}
           </button>
-          <button v-if="auth.isAdmin && statement.source === 'email_notice' && statement.matched_count === 0"
+          <button v-if="auth.isAdmin && isVirtual && statement.matched_count === 0"
             type="button" @click="onDeleteStatement" :disabled="deletingStatement"
             :title="t('bank.statement_delete_hint')"
             class="cursor-pointer h-8 px-3 text-xs border border-danger-500/40 text-danger-600 hover:bg-danger-50 disabled:opacity-50 rounded-md font-medium inline-flex items-center gap-1.5">
@@ -625,9 +644,13 @@ async function rematchStatement() {
           <span v-if="matchCtx.counterparty_name" class="text-neutral-400"> · {{ matchCtx.counterparty_name }}</span>
         </p>
 
-        <!-- Návrhy ke spárování dle částky (±14 dní) -->
+        <!-- Návrhy ke spárování dle částky (±14 dní, fallback ±90 dní) -->
         <div class="mb-4">
           <div class="text-sm font-medium text-neutral-700 mb-1.5">{{ t('bank.candidates_title') }}</div>
+          <p v-if="!loadingCandidates && candidatesFallback && matchCandidates.length > 0"
+            class="text-xs text-warning-600 bg-warning-50 border border-warning-500/30 rounded-md px-2 py-1.5 mb-1.5">
+            {{ t('bank.candidates_fallback_hint') }}
+          </p>
           <div v-if="loadingCandidates" class="text-xs text-neutral-500 py-2">{{ t('common.loading') }}</div>
           <div v-else-if="matchCandidates.length === 0" class="text-xs text-neutral-400 py-2">{{ t('bank.no_candidates') }}</div>
           <ul v-else class="border border-neutral-200 rounded-md divide-y divide-neutral-100 max-h-56 overflow-auto">
@@ -641,6 +664,10 @@ async function rematchStatement() {
                   </span>
                   <span v-if="c.paid" class="text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold bg-neutral-200 text-neutral-600 ml-1">
                     {{ t('bank.candidate_paid') }}
+                  </span>
+                  <span v-if="c.currency_mismatch" :title="t('bank.candidate_currency_mismatch_hint')"
+                    class="text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold bg-danger-50 text-danger-600 ml-1">
+                    {{ t('bank.candidate_currency_mismatch') }}
                   </span>
                   <span class="font-mono text-sm ml-1">{{ c.ref || `#${c.id}` }}</span>
                   <span v-if="c.party" class="text-xs text-neutral-500 block truncate">{{ c.party }}</span>

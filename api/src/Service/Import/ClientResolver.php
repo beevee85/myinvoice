@@ -149,10 +149,9 @@ final class ClientResolver
         }
 
         // 3. Sestavení dat klienta — ARES → VIES → AI/XML extracted data (priority)
-        $email = trim((string) ($parsedClient['email'] ?? ''));
-        if ($email === '') {
-            $email = 'unknown@import.local'; // placeholder — main_email je NOT NULL
-        }
+        // main_email je od #221 nullable — neznámý e-mail necháváme prázdný,
+        // dřívější placeholder 'unknown@import.local' vypadal jako reálná adresa.
+        $email = trim((string) ($parsedClient['email'] ?? '')) ?: null;
 
         $data = [
             'company_name' => $aresData['company_name']

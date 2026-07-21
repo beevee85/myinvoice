@@ -7,6 +7,13 @@ MyInvoice.cz generuje XML pro EPO portál MFČR:
 Související výkazy a exporty mají v manuálu vlastní kapitoly: [Kniha DPH](30_Kniha_DPH.md)
 (interní žurnál), [Souhrnné hlášení](31_Souhrnne_hlaseni.md) (EU dodání B2B) a
 [Hromadný export](34_Hromadny_export.md) (ZIP balíček pro účetní). Všechny najdeš v menu **Daně**.
+OSS najdeš samostatně jako **Daně → OSS přiznání**; jde o kvartální podklad
+z ručně označených řádků a XML export pro EPO formulář **OSSEI1** (EU režim).
+Režim je ve výchozím stavu vypnutý — dokud ho v **Nastavení → firma** nezapneš,
+nenabízí se ani v menu, ani na řádcích faktury.
+Export obsahuje běžná plnění (`VetaR`) i opravy minulých období (`VetaO`).
+Opravy se v editoru položky označují původním čtvrtletím a ve výkazu se
+zobrazují odděleně včetně celkového dopadu na DPH.
 
 > [!WARNING]
 > **⚠️ Vygenerovaný XML je pouze pomůcka.** Před odesláním na EPO portál MFČR VŽDY ověř s účetní nebo daňovým poradcem. Aplikace nezaručuje regulatorní správnost — testováno na omezené sadě dat.
@@ -21,6 +28,7 @@ V **Nastavení → Daňové nastavení** vyplň:
 4. **Kód územního pracoviště (ÚzP)** — pokud existuje
 5. **DIČ** v Identifikaci firmy (povinné)
 6. Volitelně: CZ-NACE, datová schránka, sestavitel přiznání
+7. Volitelně pro OSS: OSS režim, země identifikace a měna podání
 
 Detailní mapping všech polí v UI na XML atributy najdeš v sekci [Pole EPO / VetaP](#pole-epo-vetap) níže.
 
@@ -299,6 +307,11 @@ Pokud na fakturu/řádek manuálně nevybereš kód, systém **automaticky při�
 
 Mapování čte z databáze `vat_classifications` table. Pokud admin v Codebooks tabu **Klasifikace DPH** upraví sazbu (např. 21% → 20% k 1.1.2027), defaulter automaticky chytne novou hodnotu.
 
+U vystavených řádků se sazbou **0 %** se klasifikace záměrně nedoplňuje automaticky.
+Nulová sazba sama nerozlišuje osvobození bez nároku, vývoz, plnění mimo předmět
+daně ani přeúčtování. Přiznání zobrazí warning a řádek zahrne až po výslovném
+výběru správné klasifikace.
+
 ### Override per řádek nebo header
 
 V editoru faktury (vystavené i přijaté) je sekce **Klasifikace** s VAT picker dropdown. Můžeš:
@@ -381,8 +394,8 @@ Aby v reálně podaném KH seděly sekce, řídí se zařazení dokladů těmito
   které patří do A.2 / B.1 / reverse charge (aby se neduplikovaly).
 
 > [!NOTE]
-> **Rekapitulace (VetaC)** sčítá obraty napříč sekcemi. `rez_pren5` (RC ve snížené
-> sazbě) je vždy `0` — tuzemský reverse charge je v ČR vždy v základní sazbě 21 %.
+> **Rekapitulace (VetaC)** sčítá obraty napříč sekcemi. `pln_rez_pren` odpovídá
+> A.1, `rez_pren23` a `rez_pren5` odpovídají B.1 v základní a snížené sazbě.
 
 #### Atributy A.2 (pořízení z JČS)
 
@@ -390,6 +403,21 @@ Aby v reálně podaném KH seděly sekce, řídí se zařazení dokladů těmito
 dokladu dodavatele), `dppd` (datum povinnosti přiznat daň), `zakl_dane1/dan1` (21 %),
 `zakl_dane2/dan2` (12 %). Daň se dopočítá ze základu × sazba/100, protože vendor
 fakturuje bez DPH.
+
+Oddíl A.2 zahrnuje také přijaté služby od osoby neusazené v tuzemsku ze třetí
+země (kód `24`, ř. 12/13 přiznání). U takového dodavatele může zůstat VAT ID
+i kód členského státu prázdný.
+
+### Zvláštní režimy a opravy nedobytných pohledávek
+
+V `Systém → Číselníky → Klasifikace DPH` lze u vlastního kódu nastavit:
+
+- režim KH `0` (běžný), `1` (cestovní služba § 89) nebo `2` (použité zboží § 90),
+- příznak `P` pro opravu nedobytné pohledávky dle § 46 / § 74b.
+
+Hodnoty se přenesou do `VetaA4.kod_rezim_pl` a `VetaA4/VetaB2.zdph_44`.
+U vystaveného dobropisu, který snižuje daň, přiznání zároveň připomene ověření
+data doručení opravného daňového dokladu podle § 42 ZDPH.
 
 ## Změna VAT sazby v budoucnu (např. 21% → 20% v 2027)
 

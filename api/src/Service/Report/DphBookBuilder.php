@@ -105,8 +105,10 @@ final class DphBookBuilder
             $row = $this->toBookRow($g);
             $this->addToSection($sections, $scope, $cls, $row);
 
-            // Secondary (ř.43 mirror odpočet u RC / dovozu služby).
-            if (!empty($cls['dphdp3_line_secondary'])) {
+            // Secondary (ř.43/44 mirror odpočet u RC / dovozu služby). U plnění bez nároku
+            // na odpočet ('none', § 72/4) se mirror POTLAČÍ — konzistentně s DPHDP3
+            // (VatClassificationMapper) a KH: výstupní samovyměření zůstává, odpočet ne.
+            if (!empty($cls['dphdp3_line_secondary']) && empty($g['vat_deduction_none'])) {
                 $this->addToSection($sections, $scope, array_merge($cls, [
                     'dphdp3_line'           => $cls['dphdp3_line_secondary'],
                     'dphdp3_line_secondary' => null,
@@ -385,8 +387,10 @@ final class DphBookBuilder
         if (!in_array($kh, ['A.4', 'A.5', 'B.2', 'B.3'], true)) {
             return $kh;
         }
+        // § 101e: „nad 10 000 Kč" = OSTŘE více → přesně 10 000 jde do sumace (A.5/B.3),
+        // ne jednotlivě (A.4/B.2). Proto '>' (ne '>='), shodně s KontrolniHlaseniBuilder.
         $itemized = KontrolniHlaseniBuilder::cleanDic($g['counterparty_dic'] ?? null) !== ''
-            && abs((float) $g['total_with_vat_czk']) >= $itemThreshold;
+            && abs((float) $g['total_with_vat_czk']) > $itemThreshold;
         return str_starts_with($kh, 'A.')
             ? ($itemized ? 'A.4' : 'A.5')
             : ($itemized ? 'B.2' : 'B.3');

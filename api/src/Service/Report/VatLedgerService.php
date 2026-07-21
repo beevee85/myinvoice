@@ -58,12 +58,14 @@ final class VatLedgerService
     public function rows(int $supplierId, string $start, string $end, bool $includeDrafts = false): array
     {
         $map = $this->classificationMap($supplierId);
+        // Práh základní/snížená sazba (per rok období) pro remapování 12% RC řádků (S3).
+        $bucket = $this->taxConstants->vatBucketThreshold((int) substr($start, 0, 4));
         $rows = [];
         foreach ($this->fetchSales($supplierId, $start, $end, $includeDrafts) as $r) {
-            $rows[] = $this->normalize($r, 'sale', $map);
+            $rows[] = $this->normalize($r, 'sale', $map, $bucket);
         }
         foreach ($this->fetchPurchases($supplierId, $start, $end, $includeDrafts) as $r) {
-            $rows[] = $this->normalize($r, 'purchase', $map);
+            $rows[] = $this->normalize($r, 'purchase', $map, $bucket);
         }
         return $rows;
     }
@@ -79,7 +81,8 @@ final class VatLedgerService
         // ORDER BY supplier_id IS NULL DESC → globální (NULL) řádky první, per-tenant
         // override poslední → v loopu přepíše globální seed (per-tenant override VYHRAJE).
         $stmt = $this->db->pdo()->prepare(
-            'SELECT code, label, dphdp3_line, dphdp3_line_secondary, kh_section, vat_rate, is_reverse_charge
+            'SELECT code, label, dphdp3_line, dphdp3_line_secondary, kh_section, vat_rate,
+                    is_reverse_charge, kod_pred_pl, kh_regime_code, kh_bad_debt
                FROM vat_classifications
               WHERE (supplier_id IS NULL OR supplier_id = ?)
                 AND archived = 0
@@ -95,6 +98,9 @@ final class VatLedgerService
                 'kh_section'            => $r['kh_section'] !== null ? (string) $r['kh_section'] : null,
                 'vat_rate'              => $r['vat_rate'] !== null ? (float) $r['vat_rate'] : null,
                 'is_reverse_charge'     => (bool) $r['is_reverse_charge'],
+                'kod_pred_pl'           => isset($r['kod_pred_pl']) && $r['kod_pred_pl'] !== null ? (string) $r['kod_pred_pl'] : null,
+                'kh_regime_code'         => isset($r['kh_regime_code']) && $r['kh_regime_code'] !== null ? (string) $r['kh_regime_code'] : null,
+                'kh_bad_debt'            => isset($r['kh_bad_debt']) && $r['kh_bad_debt'] !== null ? (string) $r['kh_bad_debt'] : null,
             ];
         }
         return $map;
@@ -104,6 +110,9 @@ final class VatLedgerService
     private function fetchSales(int $supplierId, string $start, string $end, bool $includeDrafts): array
     {
         $statusFilter = $includeDrafts ? "i.status != 'cancelled'" : "i.status NOT IN ('draft', 'cancelled')";
+        $ossFilter = $this->db->hasColumn('invoice_items', 'oss_applicable')
+            ? 'AND COALESCE(ii.oss_applicable, 0) = 0'
+            : '';
         // Práh základní/snížená sazba pro fallback klasifikaci — per rok období
         // (číselník daňových konstant, ne natvrdo 20.5).
         $bucket = $this->taxConstants->vatBucketThreshold((int) substr($start, 0, 4));
@@ -120,13 +129,18 @@ final class VatLedgerService
                        ii.vat_classification_code, i.vat_classification_code,
                        CASE
                            -- Zahraniční EU odběratel + RC = dodání do JČS → ř.20 (dod_zb).
+                           -- (Fallback nerozliší zboží vs službu; služba do JČS je kód 22/ř.21 —
+                           -- pokud jde o službu, uživatel má zvolit kód ručně.)
                            WHEN i.reverse_charge = 1
                                 AND COALESCE(co.is_eu, 0) = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ' THEN '20'
+                           -- Odběratel ze 3. země + RC = plnění s místem plnění mimo EU (bez české
+                           -- DPH) → kód '26' (ř.22, MIMO KH). NESMÍ spadnout na '25s' (to je tuzemský
+                           -- §92 → KH A.1 + ř.25) — jinak zahraniční plnění chybně leakuje do KH.
+                           WHEN i.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ' THEN '26'
                            -- Tuzemský odběratel + RC = přenesená daň. povinnost §92 → ř.25 (pln_rez_pren), KH A.1.
                            WHEN i.reverse_charge = 1 THEN '25s'
                            WHEN ii.vat_rate_snapshot >= ?    THEN '1'
                            WHEN ii.vat_rate_snapshot > 0     THEN '2'
-                           WHEN ii.vat_rate_snapshot = 0     THEN '3'
                            ELSE NULL
                        END
                    ) AS code,
@@ -142,6 +156,7 @@ final class VatLedgerService
              WHERE i.supplier_id = ?
                AND {$statusFilter}
                AND i.invoice_type != 'proforma'
+               {$ossFilter}
                AND COALESCE(i.tax_date, i.issue_date) BETWEEN ? AND ?
           ORDER BY COALESCE(i.tax_date, i.issue_date), i.id, ii.id
         ");
@@ -202,7 +217,21 @@ final class VatLedgerService
                -- COALESCE: NULL document_kind (legacy / neimportované doklady) = běžný
                -- doklad → ponechat (NULL <> 'advance' by jinak řádek vyřadilo).
                AND COALESCE(pi.document_kind, '') <> 'advance'
-               AND pi.vat_deduction <> 'none'
+               -- Bez nároku na odpočet ('none') = běžně mimo DPH evidenci (reprezentace,
+               -- osobní spotřeba — dodavatel už DPH naúčtoval). VÝJIMKA: reverse charge —
+               -- povinnost přiznat daň příjemcem (§ 108, samovyměření ř.3/5/10/12) je
+               -- NEZÁVISLÁ na nároku na odpočet (§ 72/4). Reprezentace/plnění bez nároku
+               -- pořízené ze zahraničí (RC) tedy MUSÍ na výstup, jen odpočet (ř.43) se
+               -- odepře (řeší normalize()+mapper přes příznak vat_deduction_none).
+               -- Podmínka pii.total_vat = 0: pustíme jen SKUTEČNÉ samovyměření (dodavatel
+               -- fakturoval BEZ DPH). Doklad s už naúčtovaným DPH + kódem RC (typicky B2C
+               -- spotřebitelský nákup ze zahraničí přes OSS, chybně oklasifikovaný jako RC —
+               -- Google One apod.) do evidence NEPATŘÍ: nejde o reverse charge (jinak by
+               -- se zahraniční DPH omylem přiznalo na výstup). Tuzemské non-RC 'none' venku.
+               AND (pi.vat_deduction <> 'none'
+                    OR (COALESCE(pii.total_vat, 0) = 0
+                        AND (pi.reverse_charge = 1
+                             OR COALESCE(pii.vat_classification_code, pi.vat_classification_code) IN ('5','23','24','24e','25'))))
                -- Období odpočtu (tuzemská plnění) = pozdější z (DUZP, vystavení). Nárok
                -- na odpočet nelze uplatnit dřív, než plátce drží daňový doklad (§ 73
                -- odst. 1 písm. a ZDPH), takže faktura se zpětným DUZP, ale vystavená
@@ -226,6 +255,11 @@ final class VatLedgerService
                -- § 73/1/b, ale dodavatel musí doklad vystavit do 15 dnů od DUZP, takže
                -- rozdíl je vzácný; ponecháno konzervativně (viz issue #117 diskuse).
                --
+               -- RC se pozná flagem `reverse_charge` NEBO klasifikačním kódem (23/24/24e/25) —
+               -- konzistentně s normalize() (isRc = clsf.is_reverse_charge OR rc_flag). Import
+               -- (defaultClassificationCode) přiřadí kód 24/24e i bez flagu; bez této shody by se
+               -- takový doklad zařadil přes GREATEST místo DUZP a samovyměření by uteklo do jiného
+               -- období (riziko doměrku, issue #117). Kód 5 (tuzemský RC) vědomě mimo — zůstává GREATEST.
                -- Pozn.: striktně dle § 73/1/a je rozhodující datum, kdy plátce doklad
                -- fyzicky DRŽÍ (= received_at). Záměrně používáme issue_date jako proxy,
                -- protože received_at importy (iDoklad/Fakturoid/ISDOC/AI) plní na den
@@ -235,7 +269,9 @@ final class VatLedgerService
                -- důvěryhodné datum přijetí, lze přejít na GREATEST(DUZP, received_at).
                -- CASE místo GREATEST kvůli přenositelnosti (SQLite v testech GREATEST nemá).
                AND CASE
-                       WHEN pi.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ'
+                       WHEN (pi.reverse_charge = 1
+                             OR COALESCE(pii.vat_classification_code, pi.vat_classification_code) IN ('23','24','24e','25'))
+                            AND COALESCE(co.iso2, 'CZ') <> 'CZ'
                            THEN COALESCE(pi.tax_date, pi.issue_date)
                        WHEN pi.tax_date IS NULL THEN pi.issue_date
                        WHEN pi.issue_date IS NULL THEN pi.tax_date
@@ -243,7 +279,9 @@ final class VatLedgerService
                        ELSE pi.issue_date
                    END BETWEEN ? AND ?
           ORDER BY CASE
-                       WHEN pi.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ'
+                       WHEN (pi.reverse_charge = 1
+                             OR COALESCE(pii.vat_classification_code, pi.vat_classification_code) IN ('23','24','24e','25'))
+                            AND COALESCE(co.iso2, 'CZ') <> 'CZ'
                            THEN COALESCE(pi.tax_date, pi.issue_date)
                        WHEN pi.tax_date IS NULL THEN pi.issue_date
                        WHEN pi.issue_date IS NULL THEN pi.tax_date
@@ -258,9 +296,10 @@ final class VatLedgerService
     /**
      * @param array<string,mixed> $r
      * @param array<string, array<string,mixed>> $map
+     * @param float $bucket práh základní/snížené sazby (remapování 12% RC řádků)
      * @return array<string,mixed>
      */
-    private function normalize(array $r, string $source, array $map): array
+    private function normalize(array $r, string $source, array $map, float $bucket): array
     {
         $rate = ($r['currency'] === 'CZK' || !$r['exchange_rate']) ? 1.0 : (float) $r['exchange_rate'];
         $vatRate = (float) $r['vat_rate'];
@@ -285,16 +324,24 @@ final class VatLedgerService
         // přepočteného na CZK (vat_czk) — viz komentář tam. Tady jen příznak.
         $rcSelfAssess = $source === 'purchase' && $vatRaw == 0.0 && $isRc && $vatRate > 0;
 
-        // §75 poměrný odpočet — u přijatých s 'proportional' se odpočet (základ i daň)
-        // uplatní jen v poměrné výši (vat_deduction_percent). Zbytek je nedaňová část
-        // mimo DPH přiznání. 'full'/'none' se sem nedostanou (none je odfiltrováno v SQL).
+        // §75 poměrný odpočet — u běžného přijatého plnění krátíme řádek odpočtu přímo.
+        // U reverse charge musí primární samovyměření zůstat v plné výši (§108); procento
+        // se použije až na zrcadlový odpočet (ř.43/44) v mapperu.
         $isPartialDeduction = false;
+        $deductionRatio = 1.0;
         if ($source === 'purchase' && ($r['vat_deduction'] ?? 'full') === 'proportional') {
-            $pct = max(0.0, min(100.0, (float) ($r['vat_deduction_percent'] ?? 100))) / 100.0;
-            $baseRaw = round($baseRaw * $pct, 2);
-            $vatRaw  = round($vatRaw * $pct, 2);
+            $deductionRatio = max(0.0, min(100.0, (float) ($r['vat_deduction_percent'] ?? 100))) / 100.0;
+            if (!$rcSelfAssess) {
+                $baseRaw = round($baseRaw * $deductionRatio, 2);
+                $vatRaw  = round($vatRaw * $deductionRatio, 2);
+            }
             $isPartialDeduction = true;
         }
+        // 'none' bez nároku na odpočet: do evidence teče POUZE reverse charge (SQL už
+        // tuzemské non-RC 'none' vyloučil). U RC zůstává výstupní samovyměření (ř.3/5/10/12
+        // + KH A.2/B.1), ale zrcadlový odpočet ř.43 se v mapperu potlačí (§ 72/4). Základ
+        // ani daň se tu NEkrátí — samovyměřená daň na výstupu je v plné výši.
+        $isDeductionNone = $source === 'purchase' && ($r['vat_deduction'] ?? 'full') === 'none';
 
         $baseCzk = round($baseRaw * $rate, 2);
         // Daň u RC samovyměření = ZÁKLAD přepočtený na CZK × sazba (§ 37 odst. 1:
@@ -306,6 +353,29 @@ final class VatLedgerService
         $vatCzk = $rcSelfAssess
             ? round($baseCzk * $vatRate / 100, 2)
             : round($vatRaw * $rate, 2);
+        $deductionBaseCzk = $rcSelfAssess && $isPartialDeduction
+            ? round($baseCzk * $deductionRatio, 2)
+            : $baseCzk;
+        $deductionVatCzk = $rcSelfAssess && $isPartialDeduction
+            ? round($vatCzk * $deductionRatio, 2)
+            : $vatCzk;
+
+        // S3 — snížená sazba (12 %) u samovyměřeného pořízení/služby: klasifikační kód
+        // nese primární řádek pro 21 % (3/5/7/10/12) a mirror ř.43. Při skutečné snížené
+        // sazbě (kladná pod prahem $bucket) přemapovat na 12% dvojče (4/6/8/11/13) a mirror
+        // ř.44 — jinak by 12% pořízení z JČS vykázalo daň v 21% sloupci (ř.3) a KH oddíl A.2
+        // (bucketuje přímo dle vat_rate) by se rozešel s přiznáním.
+        $primaryLine   = $clsf['dphdp3_line'] ?? null;
+        $secondaryLine = $clsf['dphdp3_line_secondary'] ?? null;
+        if ($source === 'purchase' && $isRc && $vatRate > 0 && $vatRate < $bucket) {
+            $reduced = ['3' => '4', '5' => '6', '7' => '8', '10' => '11', '12' => '13'];
+            if ($primaryLine !== null && isset($reduced[$primaryLine])) {
+                $primaryLine = $reduced[$primaryLine];
+            }
+            if ($secondaryLine === '43') {
+                $secondaryLine = '44';
+            }
+        }
 
         return [
             'source'                => $source,
@@ -324,15 +394,21 @@ final class VatLedgerService
             'description'           => (string) ($r['description'] ?? ''),
             'label'                 => $clsf['label'] ?? '',
             'code'                  => $code,
-            'dphdp3_line'           => $clsf['dphdp3_line'] ?? null,
-            'dphdp3_line_secondary' => $clsf['dphdp3_line_secondary'] ?? null,
+            'dphdp3_line'           => $primaryLine,
+            'dphdp3_line_secondary' => $secondaryLine,
             'kh_section'            => $clsf['kh_section'] ?? null,
+            'kod_pred_pl'           => $clsf['kod_pred_pl'] ?? null,
+            'kh_regime_code'         => $clsf['kh_regime_code'] ?? null,
+            'kh_bad_debt'            => $clsf['kh_bad_debt'] ?? null,
             'is_reverse_charge'     => $isRc,
             'vat_deduction_partial' => $isPartialDeduction,
+            'vat_deduction_none'    => $isDeductionNone,
             'vat_rate'              => $vatRate,
             'currency'              => (string) $r['currency'],
             'base_czk'              => $baseCzk,
             'vat_czk'               => $vatCzk,
+            'deduction_base_czk'    => $deductionBaseCzk,
+            'deduction_vat_czk'     => $deductionVatCzk,
             'total_with_vat_czk'    => round((float) $r['inv_total'] * $rate, 2),
             'is_fixed_asset'        => (bool) $r['is_fixed_asset'],
             'exchange_rate'         => $rate,

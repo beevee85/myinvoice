@@ -83,7 +83,13 @@ final class UpdatePurchaseInvoiceAction
 
         // Dodavatel neplátce DPH → bez nároku na odpočet. Default 'none' když neposláno;
         // explicitní volbu respektujeme (vědomý override), ale níže přidáme varování.
-        $vendorNonPayer = isset($vendor['is_vat_payer']) && !$vendor['is_vat_payer'];
+        // Plátcovství bereme ze snapshotu k datu plnění (`vendor_is_vat_payer` z těla, migrace
+        // 0133) — ne z živého flagu klienta, aby u historické faktury šlo dodavatele označit
+        // za plátce, i když dnes plátce není. Fallback na živý flag jen když snapshot chybí.
+        $vendorIsPayer = array_key_exists('vendor_is_vat_payer', $body)
+            ? (bool) $body['vendor_is_vat_payer']
+            : (isset($vendor['is_vat_payer']) ? (bool) $vendor['is_vat_payer'] : true);
+        $vendorNonPayer = !$vendorIsPayer;
         if ($vendorNonPayer && !array_key_exists('vat_deduction', $body)) {
             $body['vat_deduction'] = 'none';
         }
@@ -125,7 +131,10 @@ final class UpdatePurchaseInvoiceAction
         // Non-blocking varování (např. dobropis s kladným součtem — viz issue #35).
         $warnings = PurchaseInvoiceValidation::warnings($invoice ?? []);
         // Neplátce + přesto uplatněn odpočet → upozorni (uživatel vědomě přepsal).
-        if ($vendorNonPayer && ($invoice['vat_deduction'] ?? 'full') !== 'none') {
+        // VÝJIMKA reverse charge (zahraniční služba/zboží): dodavatel je z pohledu české
+        // DPH neplátce ZE SVÉ PODSTATY (nefakturuje českou DPH), ale příjemce si daň
+        // samovyměří a smí ji odečíst (§ 72/73) — varování by tu bylo false positive.
+        if ($vendorNonPayer && !PurchaseInvoiceValidation::isReverseCharge($invoice) && ($invoice['vat_deduction'] ?? 'full') !== 'none') {
             $warnings[] = 'vendor_non_payer_deduction';
         }
         if (!empty($warnings)) {

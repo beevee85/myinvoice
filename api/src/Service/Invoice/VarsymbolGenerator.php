@@ -168,6 +168,64 @@ final class VarsymbolGenerator
         return $this->liftCounterTo($supplierId, $counterClientId, $invoiceType, $periodKey, $highest);
     }
 
+    /**
+     * Explicitně nastaví counter supplier-wide řady tak, aby PŘÍŠTÍ vystavený doklad
+     * dostal číslo $nextNumber (uloží last_number = $nextNumber - 1). Na rozdíl od
+     * syncCounter()/liftCounterTo() umí counter i snížit — kolize s už vystavenými
+     * čísly řeší samoopravná logika v next() (přeskočí na první volné číslo).
+     *
+     * Scope je vždy supplier-wide (client_id = 0); per-client řady se nastavují
+     * přes template na klientovi a jejich counter se dorovnává automaticky.
+     *
+     * @return array{counter:int, period:string, preview:string}
+     * @throws \InvalidArgumentException neplatný vstup, chybějící template
+     *                                   nebo template bez counter placeholderu
+     */
+    public function setCounter(int $supplierId, string $invoiceType, int $nextNumber, ?\DateTimeInterface $for = null): array
+    {
+        if ($supplierId <= 0) {
+            throw new \InvalidArgumentException("Neplatný supplier_id: {$supplierId}");
+        }
+        if ($invoiceType === 'tax_document') {
+            $invoiceType = 'invoice'; // sdílená řada s fakturami (viz next())
+        }
+        if (!in_array($invoiceType, self::SUPPORTED_TYPES, true)) {
+            throw new \InvalidArgumentException("Nepodporovaný typ pro varsymbol: {$invoiceType}");
+        }
+        if ($nextNumber < 1) {
+            throw new \InvalidArgumentException('next_number musí být >= 1.');
+        }
+
+        [$template, $period] = $this->resolveTemplateAndPeriod($supplierId, $invoiceType, 0);
+        if ($template === '') {
+            throw new \InvalidArgumentException(
+                "Chybí template pro {$invoiceType}: nastav v Systém → Dodavatelé → Číslování faktur,"
+                . " nebo doplň cfg.varsymbol.templates.{$invoiceType}."
+            );
+        }
+        if (!$this->hasCounterPlaceholder($template)) {
+            throw new \InvalidArgumentException(
+                "Template '{$template}' neobsahuje counter placeholder ({C+}) — číslo je fixní, counter nemá smysl."
+            );
+        }
+
+        $for       = $for ?? new \DateTimeImmutable('today');
+        $periodKey = $this->makePeriodKey($period, $for);
+
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO invoice_counters (supplier_id, client_id, invoice_type, period, last_number)
+             VALUES (?, 0, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE last_number = VALUES(last_number)'
+        );
+        $stmt->execute([$supplierId, $invoiceType, $periodKey, $nextNumber - 1]);
+
+        return [
+            'counter' => $nextNumber - 1,
+            'period'  => $periodKey,
+            'preview' => $this->render($template, $for, $nextNumber),
+        ];
+    }
+
     private function hasCounterPlaceholder(string $template): bool
     {
         return (bool) preg_match('/\{C+\}/', $template);

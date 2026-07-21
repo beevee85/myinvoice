@@ -34,8 +34,10 @@ final class ExchangeRateApplier
      */
     public function applyToInvoice(int $invoiceId): ?array
     {
+        // Kurz se váže k DUZP (§ 4 odst. 5 / § 8 ZDPH — den vzniku daňové povinnosti),
+        // ne k datu vystavení. Fallback na issue_date, když DUZP chybí.
         $stmt = $this->db->pdo()->prepare(
-            'SELECT i.issue_date, cur.code AS currency
+            'SELECT COALESCE(i.tax_date, i.issue_date) AS rate_date, cur.code AS currency
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.id = ?'
@@ -52,12 +54,12 @@ final class ExchangeRateApplier
         }
 
         try {
-            $issue = new DateTimeImmutable((string) $row['issue_date']);
+            $rateDate = new DateTimeImmutable((string) $row['rate_date']);
         } catch (\Exception) {
             return null;
         }
 
-        $result = $this->cnb->getRate($code, $issue);
+        $result = $this->cnb->getRate($code, $rateDate);
         if ($result === null) {
             $this->invoices->setExchangeRate($invoiceId, null, null);
             return null;

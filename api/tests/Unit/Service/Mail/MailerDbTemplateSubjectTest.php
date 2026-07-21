@@ -10,6 +10,7 @@ use MyInvoice\Repository\EmailProfileRepository;
 use MyInvoice\Repository\EmailTemplateRepository;
 use MyInvoice\Service\Mail\Mailer;
 use MyInvoice\Service\Mail\SentMailAppenderInterface;
+use MyInvoice\Tests\Support\OpensslConfigTrait;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mime\Address;
@@ -24,6 +25,8 @@ use Symfony\Component\Mime\RawMessage;
 
 final class MailerDbTemplateSubjectTest extends TestCase
 {
+    use OpensslConfigTrait;
+
     public function testDbTemplateSubjectIsRenderedWithTemplateVariables(): void
     {
         $templates = $this->createStub(EmailTemplateRepository::class);
@@ -373,13 +376,14 @@ final class MailerDbTemplateSubjectTest extends TestCase
         self::assertIsString($attachmentPath);
 
         try {
+            $sslConfig = self::opensslConfigArgs();
             $privateKey = openssl_pkey_new([
                 'private_key_type' => OPENSSL_KEYTYPE_RSA,
                 'private_key_bits' => 2048,
-            ]);
-            self::assertNotFalse($privateKey);
+            ] + $sslConfig);
+            self::assertNotFalse($privateKey, 'openssl_pkey_new selhal — chybí openssl.cnf? ' . self::opensslErrors());
             $pem = '';
-            self::assertTrue(openssl_pkey_export($privateKey, $pem));
+            self::assertTrue(openssl_pkey_export($privateKey, $pem, null, $sslConfig ?: null));
             self::assertNotFalse(file_put_contents($keyPath, $pem));
             self::assertNotFalse(file_put_contents($attachmentPath, 'attachment-body'));
 

@@ -35,9 +35,11 @@ Generuje DPHSHV verze 06.01. Per řádek VetaA1:
 - `k_stat` = ISO2 kódu země (SK, DE, FR, …)
 - `vatid_pod` = VAT ID s prefixem
 - `kod_plneni` = 0/1/2/3
-- `pln_hodnota` = celé Kč (zaokrouhleno)
+- `pln_hodnota` = celé Kč (vždy zaokrouhleno nahoru)
 - `pln_pocet` = počet faktur agregovaných pod tento řádek
 
 ### Termín podání
 
-**Vždy 25. den následujícího měsíce** (stejně jako [kontrolní hlášení](29_Vykazy_DPH.md#kontrolni-hlaseni-dphkh1)).
+U měsíčního podání je termín **25. den následujícího měsíce**. U povoleného
+kvartálního podání je termín 25. den měsíce následujícího po konci kvartálu
+(např. za Q2 dne 25. července).

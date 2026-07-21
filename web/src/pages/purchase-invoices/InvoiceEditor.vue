@@ -407,10 +407,12 @@ function populate(inv: PurchaseInvoice) {
   for (const o of inv.vat_overrides ?? []) {
     vatOverrides.value[String(o.rate)] = { base: o.base, vat: o.vat }
   }
-  // Existující faktura: zobraz plátcovství dodavatele (jen příznak, NEpřepisuj uloženou
-  // volbu vat_deduction). Při ruční změně dodavatele/checkboxu se enforce zapne.
-  form.value.vendor_is_vat_payer = (inv as { vendor_is_vat_payer?: boolean }).vendor_is_vat_payer ?? true
-  if (inv.vendor_id) void fetchVendorVatStatus(inv.vendor_id, false)
+  // Existující faktura: plátcovství čteme ze SNAPSHOTU dokladu (migrace 0133), který si
+  // fakturu drží k datu plnění. ZÁMĚRNĚ NEvoláme online ARES/VIES lookup — ten se ptá na
+  // dnešní stav a persistoval by ho na klienta, čímž by u historické faktury příznak
+  // „odškrtl" (dodavatel dnes nemusí být plátce, ačkoli v době plnění byl). Uživatel může
+  // snapshot ručně upravit checkboxem; uloží se zpět na doklad.
+  form.value.vendor_is_vat_payer = inv.vendor_is_vat_payer ?? true
 
   if (inv.pdf_path) {
     existingPdf.value = {
@@ -654,6 +656,9 @@ async function submit() {
       reverse_charge: form.value.reverse_charge,
       prices_include_vat: form.value.prices_include_vat,
       is_fixed_asset: form.value.is_fixed_asset,
+      // Snapshot plátcovství dodavatele k datu plnění (migrace 0133) — zmrazí se na doklad,
+      // aby historickou fakturu šlo označit za plátce i když dodavatel dnes plátce není.
+      vendor_is_vat_payer: form.value.vendor_is_vat_payer,
       vat_deduction: form.value.vat_deduction,
       vat_deduction_percent: form.value.vat_deduction_percent,
       tax_deductible: form.value.tax_deductible,

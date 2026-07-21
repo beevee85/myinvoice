@@ -84,6 +84,63 @@ final class ApiScopeMiddlewareTest extends TestCase
         }
     }
 
+    public function testBearerReadWriteCanSetInvoiceCounter(): void
+    {
+        $r = $this->middleware()->process(
+            $this->bearer('PUT', '/api/settings/supplier/invoice-counter', 'read_write'),
+            $this->okHandler(),
+        );
+        self::assertSame(204, $r->getStatusCode());
+    }
+
+    public function testBearerReadCannotSetInvoiceCounter(): void
+    {
+        // Path je povolená, ale read scope nesmí PUT → insufficient_scope.
+        $r = $this->middleware()->process(
+            $this->bearer('PUT', '/api/settings/supplier/invoice-counter', 'read'),
+            $this->okHandler(),
+        );
+        self::assertSame(403, $r->getStatusCode());
+        self::assertSame('insufficient_scope', $this->errorCode($r));
+    }
+
+    public function testBearerReadWriteCanUploadSupplierLogo(): void
+    {
+        $r = $this->middleware()->process(
+            $this->bearer('POST', '/api/settings/supplier/logo', 'read_write'),
+            $this->okHandler(),
+        );
+        self::assertSame(204, $r->getStatusCode());
+    }
+
+    public function testBearerBlockedFromEmailBrandingLogoDespiteLogoAlias(): void
+    {
+        // Alias /api/settings/supplier/logo je povolený, ale původní interní
+        // cesta email-branding zůstává pro tokeny zavřená (preview = čtení disku).
+        $r = $this->middleware()->process(
+            $this->bearer('POST', '/api/settings/email-branding/logo', 'read_write'),
+            $this->okHandler(),
+        );
+        self::assertSame(403, $r->getStatusCode());
+        self::assertSame('token_endpoint_forbidden', $this->errorCode($r));
+    }
+
+    public function testBearerReadCanUseInvoiceExports(): void
+    {
+        // Hromadný export + per-faktura ISDOC jsou verejné GETy pod /api/invoices —
+        // bearer token se scope `read` na ně dosáhne (na rozdíl od /api/admin/export).
+        foreach ([
+            '/api/invoices/export',
+            '/api/invoices/42/isdoc',
+        ] as $path) {
+            $r = $this->middleware()->process(
+                $this->bearer('GET', $path, 'read'),
+                $this->okHandler(),
+            );
+            self::assertSame(204, $r->getStatusCode(), "bearer GET $path");
+        }
+    }
+
     public function testBearerReadCannotWriteAllowedResource(): void
     {
         // Path je povolená, ale read scope nesmí POST → insufficient_scope (NE path).

@@ -707,7 +707,10 @@ final class AiPdfExtractor
         // (např. NC Auto BMW Service → 4977 reálně vs 22442 jako duplicitní subtotaly).
         $this->maybeFlagTotalsMismatch($id, $supplierId, $data, $items, $pricesIncludeVat);
         // Dodavatel neplátce → vysvětlující varování (má přednost před mismatch hláškou).
-        if ($vendorNonPayer) {
+        // U reverse charge se NEuvádí: dodavatel je sice neplátce české DPH, ale příjemce
+        // si daň samovyměří a odpočet ('full') NÁLEŽÍ — hláška „odpočet zakázán" by byla
+        // zavádějící (a věcně nesprávná, viz vat_deduction výše).
+        if ($vendorNonPayer && !$reverseCharge) {
             try {
                 $this->repo->setExtractionWarning(
                     $id,

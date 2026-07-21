@@ -40,6 +40,7 @@ final class PurchaseInvoiceRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT pi.*,
                     c.company_name AS vendor_company_name, c.ic AS vendor_ic, c.dic AS vendor_dic,
+                    c.is_vat_payer AS vendor_current_is_vat_payer,
                     c.main_email AS vendor_main_email, c.language AS vendor_language,
                     cur.code AS currency, cur.symbol AS currency_symbol, cur.decimals AS currency_decimals,
                     pcur.code AS payment_currency, pcur.symbol AS payment_currency_symbol,
@@ -55,7 +56,17 @@ final class PurchaseInvoiceRepository
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) return null;
 
+        // Efektivní plátcovství dodavatele pro tento doklad: primárně zmrazený snapshot
+        // (migrace 0133), u legacy dokladů (NULL) fallback na živý příznak klienta. Editor
+        // i daňová logika pracují s touto konkrétní bool hodnotou.
+        $snapshot = $row['vendor_is_vat_payer'] ?? null;
+        $vendorCurrent = $row['vendor_current_is_vat_payer'] ?? null;
+        unset($row['vendor_current_is_vat_payer']);
+
         $row = $this->castInvoice($row);
+        $row['vendor_is_vat_payer'] = $snapshot !== null
+            ? (bool) (int) $snapshot
+            : ($vendorCurrent !== null ? (bool) (int) $vendorCurrent : true);
         $row['items'] = $this->itemsFor($id);
         $row['vat_breakdown'] = $this->buildVatBreakdown($row['items']);
         $row['totals'] = [
@@ -397,13 +408,23 @@ final class PurchaseInvoiceRepository
         }
 
         // Sanity check: vendor existuje a patří tenantovi
-        $stmt = $pdo->prepare('SELECT supplier_id, default_expense_category_id FROM clients WHERE id = ?');
+        $stmt = $pdo->prepare('SELECT supplier_id, default_expense_category_id, is_vat_payer FROM clients WHERE id = ?');
         $stmt->execute([$vendorId]);
         $vendorRow = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
         $vendorSupplier = (int) ($vendorRow['supplier_id'] ?? 0);
         if ($vendorSupplier !== $supplierId) {
             throw new \InvalidArgumentException("Vendor #$vendorId nepatří tomuto tenantovi.");
         }
+
+        // Snapshot plátcovství dodavatele k datu plnění (migrace 0133). Volající může poslat
+        // explicitní `vendor_is_vat_payer` (editor / import, který stav zná); jinak zmrazíme
+        // AKTUÁLNÍ živý příznak klienta. Doklad si pak drží vlastní stav nezávisle na tom,
+        // jak se plátcovství dodavatele později změní v registru.
+        $vendorIsVatPayer = array_key_exists('vendor_is_vat_payer', $data)
+            ? ($data['vendor_is_vat_payer'] === null ? null : ((bool) $data['vendor_is_vat_payer'] ? 1 : 0))
+            : (array_key_exists('is_vat_payer', $vendorRow) && $vendorRow['is_vat_payer'] !== null
+                ? ((bool) $vendorRow['is_vat_payer'] ? 1 : 0)
+                : null);
 
         // Výchozí kategorie nákladu dodavatele — aplikuje se, pokud volající kategorii
         // explicitně neurčil. Platí pro manuální zadání i pro všechny importy
@@ -443,7 +464,7 @@ final class PurchaseInvoiceRepository
         }
 
         $sql = 'INSERT INTO purchase_invoices
-            (supplier_id, vendor_id, varsymbol, vendor_invoice_number, document_kind,
+            (supplier_id, vendor_id, vendor_is_vat_payer, varsymbol, vendor_invoice_number, document_kind,
              issue_date, tax_date, due_date, received_at,
              currency_id, exchange_rate, exchange_rate_date, exchange_rate_source,
              reverse_charge, prices_include_vat, language, note_above_items, note_below_items,
@@ -454,12 +475,13 @@ final class PurchaseInvoiceRepository
              payment_account_number, payment_bank_code, payment_iban, payment_bic,
              payment_variable_symbol, payment_account_source, payment_account_checked_at,
              status, vat_classification_code, vat_deduction, vat_deduction_percent, tax_deductible, is_fixed_asset, expense_category_id, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?, ?, ?, ?, ?)';
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?, ?, ?, ?, ?)';
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
             $supplierId,
             $vendorId,
+            $vendorIsVatPayer,
             $manualVarsymbol,
             $vendorInvoiceNumber,
             $documentKind,
@@ -651,6 +673,17 @@ final class PurchaseInvoiceRepository
             throw new \InvalidArgumentException('vendor_invoice_number má max 50 znaků');
         }
 
+        // Snapshot plátcovství dodavatele (migrace 0133) přepisujeme jen když ho volající
+        // explicitně poslal (editor faktury / import, který stav zná). Ostatní update cesty
+        // ho neposílají → zmrazený stav dokladu zůstává nedotčený (klíč pro historické doklady).
+        $hasVendorVatPayer = array_key_exists('vendor_is_vat_payer', $data);
+        $vendorIsVatPayer = null;
+        if ($hasVendorVatPayer) {
+            $vendorIsVatPayer = $data['vendor_is_vat_payer'] === null
+                ? null
+                : ((bool) $data['vendor_is_vat_payer'] ? 1 : 0);
+        }
+
         // Platební účet pro QR platbu měníme jen když ho volající explicitně poslal
         // (editor faktury). Ostatní update cesty `payment` neposílají → účet zůstává.
         $hasPayment = array_key_exists('payment', $data);
@@ -672,6 +705,7 @@ final class PurchaseInvoiceRepository
                 payment_currency_id = ?, payment_exchange_rate = ?,
                 paid_amount_payment_ccy = ?, paid_amount_invoice_ccy = ?, exchange_diff_base = ?,
                 vat_classification_code = ?, vat_deduction = ?, vat_deduction_percent = ?, tax_deductible = ?, is_fixed_asset = ?, expense_category_id = ?'
+              . ($hasVendorVatPayer ? ', vendor_is_vat_payer = ?' : '')
               . $paymentSet
               . ($hasVarsymbol ? ', varsymbol = ?' : '')
               . ' WHERE id = ? AND supplier_id = ?';
@@ -706,6 +740,7 @@ final class PurchaseInvoiceRepository
             !empty($data['is_fixed_asset']) ? 1 : 0,
             isset($data['expense_category_id']) && $data['expense_category_id'] ? (int) $data['expense_category_id'] : null,
         ];
+        if ($hasVendorVatPayer) $params[] = $vendorIsVatPayer;
         if ($hasPayment) {
             array_push($params, ...$paymentParams);
         }

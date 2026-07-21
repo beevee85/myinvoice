@@ -24,6 +24,10 @@ use Twig\Loader\FilesystemLoader;
  *   DELETE /api/settings/email-branding/logo   — odebrat logo soubor
  *   GET    /api/settings/email-branding/preview?locale=cs  — vyrenderovaný email layout
  *
+ * Upload/delete mají navíc veřejné API aliasy POST/DELETE /api/settings/supplier/logo
+ * (bearer allowlist, viz ApiScopeMiddleware) — stejné metody, jiná cesta. Preview
+ * zůstává session-only (čte soubory z disku, viz guard níže).
+ *
  * Toggle (`email_branding_enabled`), brand name (`display_name`), tagline
  * a accent barva (`email_accent_color`) se ukládají přes existující PUT /api/settings/supplier.
  */

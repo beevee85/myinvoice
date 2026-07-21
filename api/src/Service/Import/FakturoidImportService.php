@@ -159,7 +159,7 @@ final class FakturoidImportService
                     'city'         => (string) ($subj['city'] ?? '—'),
                     'zip'          => (string) ($subj['zip'] ?? '00000'),
                     'country_iso2' => strtoupper((string) ($subj['country'] ?? 'CZ')),
-                    'main_email'   => (string) ($subj['email'] ?? '') ?: 'unknown@import.local',
+                    'main_email'   => (string) ($subj['email'] ?? '') ?: null,
                     'phone'        => (string) ($subj['phone'] ?? '') ?: null,
                     'language'     => 'cs',
                     'is_customer'  => $isCustomer,

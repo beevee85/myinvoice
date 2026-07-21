@@ -298,7 +298,7 @@
       {% if item.item_kind == 'discount' %}
       <td></td><td></td><td></td>
       {% else %}
-      <td class="num nowrap">{{ item.quantity|number_format(item.quantity == item.quantity|round(0) ? 0 : 3, decimal_sep, thousand_sep) }}</td>
+      <td class="num nowrap">{{ item.quantity|number_format(item.quantity == item.quantity|round(0) ? 0 : (item.quantity == item.quantity|round(1) ? 1 : (item.quantity == item.quantity|round(2) ? 2 : 3)), decimal_sep, thousand_sep) }}</td>
       <td>{{ item.unit }}</td>
       {# V režimu „ceny s DPH" nese unit_price_without_vat brutto; pro zobrazení dopočítáme
          skutečné netto z řádkového základu (total_without_vat / množství). #}

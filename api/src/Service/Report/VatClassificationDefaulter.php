@@ -14,8 +14,8 @@ use MyInvoice\Infrastructure\Database\Connection;
  * vat_classifications.vat_rate a defaulter automaticky chytne novou hodnotu.
  *
  * Pravidla per MF ČR (DPHDP3, aktuální seed):
- *   - Vystavená (sale, tuzemsko):    21% → 1,  12% → 2,  0% → 3
- *   - Vystavená (sale, reverse):     20 (EU dodání zboží)
+ *   - Vystavená (sale, tuzemsko):    21% → 1,  12% → 2,  0% → bez defaultu
+ *   - Vystavená (sale, reverse):     22 (EU služba §9/1; dodání zboží '20' se volí ručně)
  *   - Přijatá (purchase, tuzemsko):  21% → 40, 12% → 41, 0% → 42
  *   - Přijatá (purchase, reverse):   5  (tuzemský reverse charge)
  *
@@ -28,14 +28,39 @@ use MyInvoice\Infrastructure\Database\Connection;
 final class VatClassificationDefaulter
 {
     /** Hard-coded fallback (matchne seed v migrace 0037 pro CZ 2025-2026 sazby) */
-    private const FALLBACK_SALE_TUZEMSKO    = ['21.0' => '1',  '12.0' => '2',  '0.0' => '3'];
+    private const FALLBACK_SALE_TUZEMSKO    = ['21.0' => '1',  '12.0' => '2'];
     private const FALLBACK_PURCHASE_TUZEMSKO = ['21.0' => '40', '12.0' => '41', '0.0' => '42'];
-    private const FALLBACK_SALE_REVERSE_EU       = '20';   // RC + EU odběratel = dodání do JČS → ř.20 (dod_zb)
+    // RC + EU odběratel: statistický default SLUŽBA '22' (§ 9 odst. 1, ř.21) — použije se
+    // až když ani jednotky položek, ani CZ-NACE dodavatele nedají signál „zboží" (viz
+    // classifyEuReverseChargeSale). Dodání zboží do JČS = '20' (ř.20). Sjednoceno s
+    // InvoiceRepository::defaultSaleClassificationCode (sdílený classifyUnitsGoodsVsServices).
+    private const FALLBACK_SALE_REVERSE_EU       = '22';
     private const FALLBACK_SALE_REVERSE_DOMESTIC = '25s';  // RC + tuzemský odběratel = §92a dodavatel → ř.25 (pln_rez_pren), KH A.1
     private const FALLBACK_PURCHASE_REVERSE  = '5';
 
+    /**
+     * Signál ZBOŽÍ vs SLUŽBA pro RC prodej do EU z měrné jednotky položky.
+     * `UNIT_SERVICE` = časové/výkonové jednotky (silně služba, § 9 odst. 1, ř.21).
+     * `UNIT_GOODS`   = fyzikální míra / balení (silně dodání zboží, ř.20).
+     * 'ks'/'kus' (defaultní hodnota sloupce) a neznámé jsou NEUTRÁLNÍ — nenesou signál,
+     * rozhodne až CZ-NACE nebo statistický default.
+     */
+    private const UNIT_SERVICE = [
+        'h','hod','hodina','hodiny','hodin','den','dny','dní','dni',
+        'měsíc','mesic','měsíce','mesice','měs','mes','rok','roky','roků','roku',
+        'min','minuta','minut',
+    ];
+    private const UNIT_GOODS = [
+        'kg','g','dkg','mg','t','q','l','ml','dl','hl','cl',
+        'm','cm','mm','km','bm','m2','m3','ha','ar',
+        'pár','par','bal','balení','baleni','sada','paleta','karton',
+    ];
+
     /** @var array<string, string>|null In-memory cache code→cache key (per request) */
     private ?array $cache = null;
+
+    /** @var array<int, bool>|null cache supplier_id → obchoduje se zbožím (dle CZ-NACE) */
+    private ?array $naceGoodsCache = null;
 
     public function __construct(private readonly Connection $db) {}
 
@@ -50,15 +75,48 @@ final class VatClassificationDefaulter
      * `$supplierId` (volitelné, default 0 = jen globální) — multi-tenant scope.
      * Volej s tenant ID aby tenant viděl své custom kódy ELL.GLOBÁLNÍ; ne kódy jiných tenantů.
      */
-    public function defaultForSale(float $vatRate, bool $reverseCharge = false, ?string $taxDate = null, int $supplierId = 0, bool $customerEuForeign = false): string
+    public function defaultForSale(float $vatRate, bool $reverseCharge = false, ?string $taxDate = null, int $supplierId = 0, bool $customerEuForeign = false, array $units = []): ?string
     {
         if ($reverseCharge) {
-            // Tuzemský §92a dodavatel → '25s' (ř.25); dodání do JČS (zahraniční EU odběratel) → '20' (ř.20).
-            return $this->lookup('sale', $vatRate, true, $taxDate, $supplierId)
-                ?? ($customerEuForeign ? self::FALLBACK_SALE_REVERSE_EU : self::FALLBACK_SALE_REVERSE_DOMESTIC);
+            $db = $this->lookup('sale', $vatRate, true, $taxDate, $supplierId);
+            if ($db !== null) return $db;
+            // Tuzemský §92a dodavatel → '25s' (ř.25). Zahraniční EU odběratel → rozliš
+            // dodání zboží ('20', ř.20) od služby ('22', ř.21) podle reálného signálu.
+            return $customerEuForeign
+                ? $this->classifyEuReverseChargeSale($units, $supplierId)
+                : self::FALLBACK_SALE_REVERSE_DOMESTIC;
+        }
+        if ($vatRate <= 0.0) {
+            return null;
         }
         return $this->lookup('sale', $vatRate, false, $taxDate, $supplierId)
             ?? $this->byRateFallback($vatRate, self::FALLBACK_SALE_TUZEMSKO);
+    }
+
+    /**
+     * RC prodej do EU: rozliš dodání ZBOŽÍ do JČS ('20', ř.20 dod_zb) od poskytnutí
+     * SLUŽBY dle § 9 odst. 1 ('22', ř.21) podle nejlepšího dostupného signálu.
+     * Nahrazuje slepý default z commitu 88794465 (audit follow-up):
+     *
+     *   1. **Měrné jednotky položek** (nejpřesnější) — časové (h/den/měsíc) → služba;
+     *      fyzikální míra / balení (kg/l/m/m²/paleta) → zboží; 'ks'/neznámé = neutrální.
+     *   2. **CZ-NACE dodavatele** (hrubší default) — oddíly 01–33 (zemědělství/těžba/
+     *      výroba) a 45–47 (velko/maloobchod) obchodují se zbožím → '20'.
+     *   3. **Statistický default '22'** — u typického uživatele (OSVČ / IT / poradenství)
+     *      jsou přeshraniční služby častější než dodání zboží.
+     *
+     * @param list<string> $units měrné jednotky položek faktury
+     */
+    private function classifyEuReverseChargeSale(array $units, int $supplierId): string
+    {
+        $signal = self::classifyUnitsGoodsVsServices($units);
+        if ($signal !== null) {
+            return $signal === 'goods' ? '20' : self::FALLBACK_SALE_REVERSE_EU;
+        }
+        if ($supplierId > 0 && $this->supplierDealsInGoods($supplierId)) {
+            return '20';
+        }
+        return self::FALLBACK_SALE_REVERSE_EU;
     }
 
     /**
@@ -137,22 +195,74 @@ final class VatClassificationDefaulter
     }
 
     /**
+     * Rozliš „zboží" od „služby" z měrných jednotek položek (čistá funkce, bez DB).
+     * Sdíleno mezi VatClassificationDefaulter a InvoiceRepository::defaultSaleClassificationCode.
+     *
+     * @param list<string> $units
+     * @return 'goods'|'services'|null null = žádný jednoznačný signál (jen 'ks'/neznámé)
+     */
+    public static function classifyUnitsGoodsVsServices(array $units): ?string
+    {
+        $goods = 0;
+        $service = 0;
+        foreach ($units as $u) {
+            $u = mb_strtolower(trim((string) $u));
+            if ($u === '') continue;
+            if (in_array($u, self::UNIT_SERVICE, true)) { $service++; continue; }
+            if (in_array($u, self::UNIT_GOODS, true))   { $goods++;   continue; }
+            // 'ks'/'kus'/neznámé = neutrální (defaultní hodnota sloupce, nenese signál)
+        }
+        if ($goods === 0 && $service === 0) return null;
+        if ($goods > 0 && $service === 0)  return 'goods';
+        if ($service > 0 && $goods === 0)  return 'services';
+        // Smíšené — rozhodne převaha; při remíze opatrněji služba (ř.21).
+        return $goods > $service ? 'goods' : 'services';
+    }
+
+    /**
+     * Obchoduje dodavatel podle převažující CZ-NACE se zbožím? Oddíly (první 2 číslice)
+     * 01–33 (sekce A/B/C — zemědělství, těžba, zpracovatelský průmysl) nebo 45–47
+     * (sekce G — velko/maloobchod). Ostatní (služby, stavebnictví, doprava, IT) → false.
+     */
+    public static function naceIsGoods(string $nace): bool
+    {
+        $digits = preg_replace('/\D/', '', $nace) ?? '';
+        if (strlen($digits) < 2) return false;
+        $division = (int) substr($digits, 0, 2);
+        return ($division >= 1 && $division <= 33) || ($division >= 45 && $division <= 47);
+    }
+
+    /** Obchoduje dodavatel převážně se zbožím (dle CZ-NACE)? Cache per request. */
+    private function supplierDealsInGoods(int $supplierId): bool
+    {
+        if ($supplierId <= 0) return false;
+        if (isset($this->naceGoodsCache[$supplierId])) return $this->naceGoodsCache[$supplierId];
+        $stmt = $this->db->pdo()->prepare('SELECT cz_nace_code FROM supplier WHERE id = ? LIMIT 1');
+        $stmt->execute([$supplierId]);
+        $nace = (string) ($stmt->fetchColumn() ?: '');
+        return $this->naceGoodsCache[$supplierId] = self::naceIsGoods($nace);
+    }
+
+    /**
      * Aplikuje default na header faktury (pokud chybí).
      * Většinou se aplikuje při uložení (CreateAction / UpdateAction).
      *
      * Pro header zvolíme dominantní sazbu z items (max(total) za sazbu).
      *
-     * @param list<array{vat_rate?:float, total_with_vat?:float}> $items
+     * @param list<array{vat_rate?:float, total_with_vat?:float, unit?:string}> $items
      */
-    public function suggestHeaderForInvoice(array $items, bool $reverseCharge, string $direction, ?string $taxDate = null, int $supplierId = 0, bool $customerEuForeign = false): string
+    public function suggestHeaderForInvoice(array $items, bool $reverseCharge, string $direction, ?string $taxDate = null, int $supplierId = 0, bool $customerEuForeign = false): ?string
     {
-        // Najdi dominantní sazbu (s největší totální částkou)
+        // Najdi dominantní sazbu (s největší totální částkou) a sesbírej měrné jednotky
+        // (signál zboží/služba pro RC prodej do EU).
         $byRate = [];
+        $units = [];
         foreach ($items as $it) {
             $rate = (float) ($it['vat_rate'] ?? 0);
             $total = abs((float) ($it['total_with_vat'] ?? 0));
             if (!isset($byRate[(string) $rate])) $byRate[(string) $rate] = 0.0;
             $byRate[(string) $rate] += $total;
+            if (isset($it['unit']) && (string) $it['unit'] !== '') $units[] = (string) $it['unit'];
         }
         $dominantRate = 21.0;
         if (!empty($byRate)) {
@@ -160,7 +270,7 @@ final class VatClassificationDefaulter
             $dominantRate = (float) array_key_first($byRate);
         }
         return $direction === 'sale'
-            ? $this->defaultForSale($dominantRate, $reverseCharge, $taxDate, $supplierId, $customerEuForeign)
+            ? $this->defaultForSale($dominantRate, $reverseCharge, $taxDate, $supplierId, $customerEuForeign, $units)
             : $this->defaultForPurchase($dominantRate, $reverseCharge, $taxDate, $supplierId);
     }
 }

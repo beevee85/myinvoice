@@ -348,16 +348,18 @@ final class IdokladClient
      * List attachments pro přijatou fakturu (PDF originály od dodavatele).
      *
      * iDoklad v3 endpoint: GET /v3/Attachments/{documentId}/{documentType}/{compressed}
-     * documentType = `ReceivedInvoice` (enum 5). Odpověď nese bajty inline jako
+     * documentType = `ReceivedInvoice` (enum 5) pro přijaté faktury, `ReceivedReceipt`
+     * (enum 11) pro přijaté účtenky — přílohy žijí v odděleném scope per typ dokladu.
+     * Odpověď nese bajty inline jako
      * base64 `FileBytes` — žádný separátní download request.
      * (Starý endpoint /ReceivedInvoices/{id}/Attachments vracel 404 → žádné PDF, viz #80.)
      *
      * @return list<array<string,mixed>>  [{Id, FileName, FileBytes(base64)}]
      */
-    public function listReceivedAttachments(int $supplierId, int $idokladInvoiceId): array
+    public function listReceivedAttachments(int $supplierId, int $idokladInvoiceId, string $documentType = 'ReceivedInvoice'): array
     {
         try {
-            $r = $this->get($supplierId, 'Attachments/' . $idokladInvoiceId . '/ReceivedInvoice/false', 1, 100);
+            $r = $this->get($supplierId, 'Attachments/' . $idokladInvoiceId . '/' . $documentType . '/false', 1, 100);
             return $r['Items'];
         } catch (\Throwable $e) {
             $this->logger->info('iDoklad listReceivedAttachments failed', ['invoice_id' => $idokladInvoiceId, 'error' => $e->getMessage()]);

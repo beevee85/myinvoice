@@ -265,7 +265,7 @@ async function downloadExport(format: 'xlsx' | 'pdf') {
   } finally { exporting.value = false }
 }
 
-function fmtKm(n: number): string { return n.toLocaleString('cs-CZ', { maximumFractionDigits: 1 }) }
+function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocaleString('cs-CZ', { maximumFractionDigits: 1 }) }
 </script>
 
 <template>
@@ -322,7 +322,7 @@ function fmtKm(n: number): string { return n.toLocaleString('cs-CZ', { maximumFr
         <div class="hidden md:block bg-surface border border-t-0 border-neutral-200 rounded-b-lg overflow-hidden">
           <table class="w-full text-sm table-fixed">
             <colgroup>
-              <col class="w-32" /><col class="w-20" /><col /><col /><col class="w-24" /><col class="w-20" /><col class="w-52" />
+              <col class="w-32" /><col class="w-20" /><col /><col /><col class="w-24" /><col class="w-20" /><col class="w-20" /><col class="w-52" />
             </colgroup>
             <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
               <tr>
@@ -331,6 +331,7 @@ function fmtKm(n: number): string { return n.toLocaleString('cs-CZ', { maximumFr
                 <th class="px-3 py-2 text-left font-medium">{{ t('logbook.route') }}</th>
                 <th class="px-3 py-2 text-left font-medium">{{ t('logbook.purpose') }}</th>
                 <th class="px-3 py-2 text-left font-medium">{{ t('logbook.category') }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ t('logbook.odometer_start_short') }}</th>
                 <th class="px-3 py-2 text-right font-medium">{{ t('logbook.distance_km') }}</th>
                 <th class="px-3 py-2 w-px"></th>
               </tr>
@@ -345,6 +346,7 @@ function fmtKm(n: number): string { return n.toLocaleString('cs-CZ', { maximumFr
                   <span v-if="tr.category_label" class="text-xs px-1.5 py-0.5 rounded" :class="tr.category_is_private ? 'bg-warning-50 text-warning-600' : 'bg-success-50 text-success-600'">{{ tr.category_label }}</span>
                   <span v-else class="text-neutral-400">—</span>
                 </td>
+                <td class="px-3 py-2 text-right font-mono">{{ fmtKm(tr.odometer_start) }}</td>
                 <td class="px-3 py-2 text-right font-mono">{{ fmtKm(tr.distance_km) }}</td>
                 <td class="px-3 py-2">
                   <div v-if="auth.canWrite" class="flex justify-end gap-1.5">

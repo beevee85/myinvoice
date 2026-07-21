@@ -65,12 +65,17 @@ final class SouhrnneHlaseniBuilder
         if ($period === 'quarterly') {
             $quarter = (int) ceil($month / 3);
             $startMonth = ($quarter - 1) * 3 + 1;
+            // Konec kvartálu = poslední den měsíce quarter*3, NEZÁVISLE na předaném
+            // $month (jinak build(..., 4, 'quarterly') utne období na duben a zahodí
+            // květen+červen). Stejná logika jako DphBookBuilder::build().
+            $endMonth = $quarter * 3;
             $start = sprintf('%04d-%02d-01', $year, $startMonth);
         } else {
             $quarter = null;
+            $endMonth = $month;
             $start = sprintf('%04d-%02d-01', $year, $month);
         }
-        $end = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month)))->modify('last day of this month')->format('Y-m-d');
+        $end = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $endMonth)))->modify('last day of this month')->format('Y-m-d');
 
         $rows = $this->collectEuSupplies($supplierId, $start, $end);
 
@@ -79,6 +84,20 @@ final class SouhrnneHlaseniBuilder
             : "tomto měsíci";
         if (empty($rows)) {
             $warnings[] = "V {$periodLabel} nejsou žádné EU dodávky — SH se nepodává.";
+        }
+
+        // § 102 odst. 6 ZDPH: kvartální podání SH je přípustné JEN u výhradně
+        // poskytovaných služeb (kód plnění 3). Jakmile je v období dodání zboží do JČS
+        // (sh_type '0' nebo třístranný obchod '2'), musí se podávat MĚSÍČNĚ.
+        if ($period === 'quarterly') {
+            foreach ($rows as $r) {
+                if (in_array((string) $r['sh_type'], ['0', '2'], true)) {
+                    $warnings[] = 'Dodání zboží do JČS vyžaduje měsíční podání souhrnného '
+                        . 'hlášení (§ 102 odst. 6 ZDPH) — kvartální podání je přípustné jen '
+                        . 'u výhradně poskytovaných služeb. Toto kvartální podání obsahuje zboží.';
+                    break;
+                }
+            }
         }
 
         $dom = new \DOMDocument('1.0', 'UTF-8');
@@ -117,7 +136,8 @@ final class SouhrnneHlaseniBuilder
         $cleanDic = preg_replace('/^CZ/i', '', $dic) ?? $dic;
         $cleanDic = preg_replace('/[^0-9]/', '', $cleanDic) ?? '';
         $vetaP->setAttribute('dic', $cleanDic);
-        $vetaP->setAttribute('typ_ds', $supplier['data_box_type'] ?: 'F');
+        // typ_ds = typ daňového subjektu (F/P), ne typ datové schránky — viz EpoSupplierBlockBuilder.
+        $vetaP->setAttribute('typ_ds', ($supplier['taxpayer_type'] ?? null) === 'po' ? 'P' : 'F');
         if ($supplier['taxpayer_type'] === 'po') {
             $vetaP->setAttribute('zkrobchjm', (string) $supplier['company_name']);
         } else {
@@ -128,7 +148,11 @@ final class SouhrnneHlaseniBuilder
         $vetaP->setAttribute('ulice', (string) ($supplier['street'] ?? ''));
         $vetaP->setAttribute('naz_obce', (string) ($supplier['city'] ?? ''));
         $vetaP->setAttribute('psc', preg_replace('/\s/', '', (string) ($supplier['zip'] ?? '')) ?? '');
-        $vetaP->setAttribute('stat', (string) ($supplier['country_iso2'] ?? 'CZ'));
+        // `stat` = NÁZEV státu z číselníku Země (naz_zeme_c25), NE ISO2 kód (#201).
+        $statName = EpoSupplierBlockBuilder::countryName((string) ($supplier['country_iso2'] ?? 'CZ'));
+        if ($statName !== null) {
+            $vetaP->setAttribute('stat', $statName);
+        }
         $shv->appendChild($vetaP);
 
         // VetaR — jednotlivé řádky souhrnného hlášení (per VAT_ID + typ plnění).
@@ -144,7 +168,8 @@ final class SouhrnneHlaseniBuilder
             $v = $dom->createElement('VetaR');
             $v->setAttribute('c_rad', (string) $rowNum);
             $v->setAttribute('k_storno', 'N'); // N = řádné, není to oprava
-            $v->setAttribute('k_stat', $r['country_iso2']);
+            // k_stat = kód státu pro DPH/VIES (Řecko má ISO "GR", ale DPH kód "EL").
+            $v->setAttribute('k_stat', KontrolniHlaseniBuilder::khCountryCode($r['country_iso2']));
             $v->setAttribute('c_vat', $r['vat_id']);
             $v->setAttribute('k_pln_eu', $r['sh_type']);
             $v->setAttribute('pln_hodnota', $this->formatAmount($r['amount']));
@@ -155,7 +180,7 @@ final class SouhrnneHlaseniBuilder
         }
 
         // Termín podání: 25. dne měsíce následujícího po konci období
-        $deadlineMonth = $month + 1;
+        $deadlineMonth = $endMonth + 1;
         $deadlineYear = $year;
         if ($deadlineMonth > 12) { $deadlineMonth -= 12; $deadlineYear++; }
         $deadline = sprintf('%04d-%02d-25', $deadlineYear, $deadlineMonth);
@@ -230,9 +255,13 @@ final class SouhrnneHlaseniBuilder
     {
         $dic = preg_replace('/\s+/', '', strtoupper(trim($dic))) ?? '';
         if ($dic === '') return '';
-        // Pokud začíná country code (2 písmena), je OK. Jinak prepend.
-        if (preg_match('/^[A-Z]{2}/', $dic)) return $dic;
-        return $countryIso2 . $dic;
+        // Kód státu pro DPH/VIES (Řecko: ISO "GR" → DPH "EL").
+        $code = KontrolniHlaseniBuilder::khCountryCode($countryIso2);
+        // Pokud už začíná kódem země (2 písmena), ponech — jen GR převeď na EL.
+        if (preg_match('/^[A-Z]{2}/', $dic)) {
+            return str_starts_with($dic, 'GR') ? 'EL' . substr($dic, 2) : $dic;
+        }
+        return $code . $dic;
     }
 
     /**
@@ -277,6 +306,6 @@ final class SouhrnneHlaseniBuilder
 
     private function formatAmount(float $amount): string
     {
-        return (string) (int) round($amount);
+        return (string) (int) ceil($amount);
     }
 }

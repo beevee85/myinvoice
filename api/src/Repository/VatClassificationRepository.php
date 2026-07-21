@@ -34,7 +34,8 @@ final class VatClassificationRepository
             $params[] = $direction;
         }
         $sql = 'SELECT id, supplier_id, code, label, direction, dphdp3_line, kh_section,
-                       vat_rate, is_reverse_charge, display_order, archived, created_at
+                       vat_rate, is_reverse_charge, kod_pred_pl, kh_regime_code, kh_bad_debt,
+                       display_order, archived, created_at
                   FROM vat_classifications
                  WHERE ' . implode(' AND ', $where) .
                ' ORDER BY supplier_id IS NULL DESC, display_order ASC, code ASC';
@@ -59,8 +60,8 @@ final class VatClassificationRepository
         $pdo->prepare(
             'INSERT INTO vat_classifications
                 (supplier_id, code, label, direction, dphdp3_line, kh_section,
-                 vat_rate, is_reverse_charge, display_order)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 vat_rate, is_reverse_charge, kh_regime_code, kh_bad_debt, display_order)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             (string) $data['code'],
@@ -71,6 +72,8 @@ final class VatClassificationRepository
             !empty($data['kh_section']) ? (string) $data['kh_section'] : null,
             isset($data['vat_rate']) ? (float) $data['vat_rate'] : null,
             !empty($data['is_reverse_charge']) ? 1 : 0,
+            in_array($data['kh_regime_code'] ?? null, ['0', '1', '2'], true) ? $data['kh_regime_code'] : null,
+            in_array($data['kh_bad_debt'] ?? null, ['N', 'P'], true) ? $data['kh_bad_debt'] : null,
             (int) ($data['display_order'] ?? 100),
         ]);
         return (int) $pdo->lastInsertId();
@@ -87,7 +90,8 @@ final class VatClassificationRepository
         $stmt = $this->db->pdo()->prepare(
             'UPDATE vat_classifications
                 SET label = ?, direction = ?, dphdp3_line = ?, kh_section = ?,
-                    vat_rate = ?, is_reverse_charge = ?, display_order = ?, archived = ?
+                    vat_rate = ?, is_reverse_charge = ?, kh_regime_code = ?, kh_bad_debt = ?,
+                    display_order = ?, archived = ?
               WHERE id = ? AND supplier_id = ?'
         );
         $stmt->execute([
@@ -98,6 +102,8 @@ final class VatClassificationRepository
             !empty($data['kh_section']) ? (string) $data['kh_section'] : null,
             isset($data['vat_rate']) ? (float) $data['vat_rate'] : null,
             !empty($data['is_reverse_charge']) ? 1 : 0,
+            in_array($data['kh_regime_code'] ?? null, ['0', '1', '2'], true) ? $data['kh_regime_code'] : null,
+            in_array($data['kh_bad_debt'] ?? null, ['N', 'P'], true) ? $data['kh_bad_debt'] : null,
             (int) ($data['display_order'] ?? 100),
             !empty($data['archived']) ? 1 : 0,
             $id,

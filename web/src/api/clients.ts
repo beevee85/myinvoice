@@ -33,7 +33,7 @@ export interface Client {
   country_iso2: string
   /** Země klienta je členský stát EU — řídí auto-RC u identifikované osoby (#94). */
   country_is_eu?: boolean
-  main_email: string
+  main_email: string | null
   phone?: string | null
   language: 'cs' | 'en'
   currency_default_id: number
@@ -184,7 +184,7 @@ export interface ClientPayload {
   city: string
   zip: string
   country_iso2: string
-  main_email: string
+  main_email?: string | null
   phone?: string | null
   language: 'cs' | 'en'
   currency_default_id: number

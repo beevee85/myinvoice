@@ -49,17 +49,38 @@ final class RecurringTemplateRepository
 
     public function itemsFor(int $templateId): array
     {
+        return $this->itemsForTemplates([$templateId])[$templateId] ?? [];
+    }
+
+    /** @param list<int> $templateIds @return array<int,list<array<string,mixed>>> */
+    public function itemsForTemplates(array $templateIds): array
+    {
+        if ($templateIds === []) return [];
+        $ids = array_values(array_unique(array_map('intval', $templateIds)));
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $stmt = $this->db->pdo()->prepare(
-            'SELECT i.id, i.template_id, i.description, i.quantity, i.unit,
+            'SELECT i.id, i.template_id, i.price_list_item_id, i.catalog_policy,
+                    i.description_source, i.catalog_price_source,
+                    i.catalog_source_currency_code, i.catalog_source_unit_price,
+                    i.catalog_exchange_rate, i.catalog_exchange_rate_date,
+                    i.description, i.quantity, i.unit,
                     i.unit_price_without_vat, i.vat_rate_id, i.order_index,
-                    vr.code AS vat_code, vr.rate_percent AS vat_rate_percent
+                    vr.code AS vat_code, vr.rate_percent AS vat_rate_percent,
+                    pli.code AS price_list_item_code, pli.name AS price_list_item_name,
+                    pli.archived AS price_list_item_archived
                FROM recurring_invoice_template_items i
                JOIN vat_rates vr ON vr.id = i.vat_rate_id
-              WHERE i.template_id = ?
+          LEFT JOIN price_list_items pli ON pli.id = i.price_list_item_id
+              WHERE i.template_id IN (' . $placeholders . ')
               ORDER BY i.order_index, i.id'
         );
-        $stmt->execute([$templateId]);
-        return array_map([$this, 'castItem'], $stmt->fetchAll(PDO::FETCH_ASSOC));
+        $stmt->execute($ids);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $item = $this->castItem($row);
+            $out[$item['template_id']][] = $item;
+        }
+        return $out;
     }
 
     /**
@@ -128,7 +149,7 @@ final class RecurringTemplateRepository
                        t.frequency, t.day_of_month, t.end_of_month,
                        t.anchor_date, t.end_date, t.next_run_date, t.last_run_date,
                        t.invoice_type, t.currency_id, t.language, t.payment_method,
-                       t.reverse_charge, t.discount_percent, t.revenue_category_id,
+                       t.reverse_charge, t.prices_include_vat, t.discount_percent, t.revenue_category_id,
                        t.payment_due_days, t.draft_open_mode, t.reminder_days_before,
                        t.auto_issue, t.auto_send_email, t.status,
                        t.last_run_date, t.last_error, t.last_error_at,
@@ -413,6 +434,21 @@ final class RecurringTemplateRepository
         return (int) $pdo->lastInsertId();
     }
 
+    public function createWithItems(array $data, int $userId, array $items): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $id = $this->create($data, $userId);
+            $this->replaceItems($id, $items);
+            $pdo->commit();
+            return $id;
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+    }
+
     public function update(int $id, array $data): void
     {
         $endOfMonth = !empty($data['end_of_month']);
@@ -484,6 +520,20 @@ final class RecurringTemplateRepository
         ]);
     }
 
+    public function updateWithItems(int $id, array $data, array $items): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $this->update($id, $data);
+            $this->replaceItems($id, $items);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+    }
+
     private static function clampDiscountPercent(mixed $value): float
     {
         $v = is_numeric($value) ? (float) $value : 0.0;
@@ -541,13 +591,24 @@ final class RecurringTemplateRepository
 
         $stmt = $pdo->prepare(
             'INSERT INTO recurring_invoice_template_items
-                (template_id, description, quantity, unit, unit_price_without_vat,
-                 vat_rate_id, order_index)
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
+                (template_id, price_list_item_id, catalog_policy, description_source,
+                 catalog_price_source, catalog_source_currency_code,
+                 catalog_source_unit_price, catalog_exchange_rate,
+                 catalog_exchange_rate_date, description, quantity, unit,
+                 unit_price_without_vat, vat_rate_id, order_index)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach (array_values($items) as $i => $item) {
             $stmt->execute([
                 $templateId,
+                !empty($item['price_list_item_id']) ? (int) $item['price_list_item_id'] : null,
+                (string) ($item['catalog_policy'] ?? 'fixed'),
+                (string) ($item['description_source'] ?? 'template'),
+                $item['catalog_price_source'] ?? null,
+                $item['catalog_source_currency_code'] ?? null,
+                isset($item['catalog_source_unit_price']) ? (float) $item['catalog_source_unit_price'] : null,
+                isset($item['catalog_exchange_rate']) ? (float) $item['catalog_exchange_rate'] : null,
+                $item['catalog_exchange_rate_date'] ?? null,
                 (string) ($item['description'] ?? ''),
                 (float) ($item['quantity'] ?? 1),
                 (string) ($item['unit'] ?? 'ks'),
@@ -621,12 +682,23 @@ final class RecurringTemplateRepository
     {
         $row['id']                     = (int) $row['id'];
         $row['template_id']            = (int) $row['template_id'];
+        $row['price_list_item_id']     = $row['price_list_item_id'] !== null ? (int) $row['price_list_item_id'] : null;
         $row['vat_rate_id']            = (int) $row['vat_rate_id'];
         $row['order_index']            = (int) $row['order_index'];
         $row['quantity']               = (float) $row['quantity'];
         $row['unit_price_without_vat'] = (float) $row['unit_price_without_vat'];
         if (isset($row['vat_rate_percent'])) {
             $row['vat_rate_percent'] = (float) $row['vat_rate_percent'];
+        }
+        foreach (['catalog_source_unit_price', 'catalog_exchange_rate'] as $key) {
+            if (array_key_exists($key, $row)) {
+                $row[$key] = $row[$key] !== null ? (float) $row[$key] : null;
+            }
+        }
+        if (array_key_exists('price_list_item_archived', $row)) {
+            $row['price_list_item_archived'] = $row['price_list_item_archived'] !== null
+                ? (bool) $row['price_list_item_archived']
+                : null;
         }
         return $row;
     }

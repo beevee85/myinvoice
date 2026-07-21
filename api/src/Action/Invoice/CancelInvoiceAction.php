@@ -11,6 +11,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
+use MyInvoice\Service\Oss\OssPeriod;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -132,6 +133,12 @@ final class CancelInvoiceAction
         $pdo = $this->db->pdo();
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
+        $supportsOss = $this->db->hasColumn('invoice_items', 'oss_applicable');
+        $sourcePeriod = OssPeriod::quarterCode((string) ($invoice['tax_date'] ?? $invoice['issue_date'] ?? ''));
+        $creditPeriod = OssPeriod::quarterCode(date('Y-m-d'));
+        $defaultOriginalPeriod = $sourcePeriod !== null && $creditPeriod !== null && $sourcePeriod < $creditPeriod
+            ? $sourcePeriod
+            : null;
 
         $pdo->beginTransaction();
         try {
@@ -162,20 +169,31 @@ final class CancelInvoiceAction
 
             // Zkopíruj položky se zápornými quantities — zachovává vat_classification_code
             // (dobropis má jít na stejné DPH řádky jako originální faktura, ale se zápornými hodnotami)
-            $itemStmt = $pdo->prepare(
-                'INSERT INTO invoice_items
-                   (invoice_id, description, quantity, unit, unit_price_without_vat,
-                    vat_rate_id, vat_rate_snapshot,
-                    total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)'
-            );
+            $itemStmt = $supportsOss
+                ? $pdo->prepare(
+                    'INSERT INTO invoice_items
+                       (invoice_id, description, quantity, unit, unit_price_without_vat,
+                        vat_rate_id, vat_rate_snapshot,
+                        total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code,
+                        oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type,
+                        oss_exchange_rate, oss_exchange_rate_date, oss_taxable_amount_return,
+                        oss_vat_amount_return, oss_original_period)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                )
+                : $pdo->prepare(
+                    'INSERT INTO invoice_items
+                       (invoice_id, description, quantity, unit, unit_price_without_vat,
+                        vat_rate_id, vat_rate_snapshot,
+                        total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)'
+                );
             foreach ($invoice['items'] as $item) {
                 $code = $item['vat_classification_code']
                     ?? \MyInvoice\Repository\InvoiceRepository::defaultSaleClassificationCode(
                         (float) $item['vat_rate_snapshot'],
                         (bool) ($invoice['reverse_charge'] ?? false),
                     );
-                $itemStmt->execute([
+                $params = [
                     $creditNoteId,
                     $item['description'],
                     -1 * (float) $item['quantity'],   // záporné množství
@@ -185,7 +203,31 @@ final class CancelInvoiceAction
                     $item['vat_rate_snapshot'],
                     $item['order_index'],
                     $code !== null ? (string) $code : null,
-                ]);
+                ];
+                if ($supportsOss) {
+                    $ossApplicable = !empty($item['oss_applicable']);
+                    $originalPeriod = trim((string) ($item['oss_original_period'] ?? '')) ?: $defaultOriginalPeriod;
+                    if ($originalPeriod !== null && $creditPeriod !== null && $originalPeriod >= $creditPeriod) {
+                        $originalPeriod = $defaultOriginalPeriod;
+                    }
+                    array_push(
+                        $params,
+                        $ossApplicable ? 1 : 0,
+                        $ossApplicable ? ($item['oss_consumer_country'] ?? null) : null,
+                        $ossApplicable ? ($item['oss_rate_type'] ?? null) : null,
+                        $ossApplicable ? ($item['oss_supply_type'] ?? null) : null,
+                        $ossApplicable ? ($item['oss_exchange_rate'] ?? null) : null,
+                        $ossApplicable ? ($item['oss_exchange_rate_date'] ?? null) : null,
+                        $ossApplicable && ($item['oss_taxable_amount_return'] ?? null) !== null
+                            ? -1 * (float) $item['oss_taxable_amount_return']
+                            : null,
+                        $ossApplicable && ($item['oss_vat_amount_return'] ?? null) !== null
+                            ? -1 * (float) $item['oss_vat_amount_return']
+                            : null,
+                        $ossApplicable ? $originalPeriod : null,
+                    );
+                }
+                $itemStmt->execute($params);
             }
 
             $pdo->commit();
@@ -209,4 +251,5 @@ final class CancelInvoiceAction
             'edit_url'       => "/invoices/$creditNoteId/edit",
         ], 201);
     }
+
 }

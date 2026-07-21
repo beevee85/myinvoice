@@ -6,8 +6,8 @@ declare(strict_types=1);
  * Jednoduchý migrator: spustí SQL soubory z db/migrations/ v abecedním pořadí
  * a sleduje, co už proběhlo, v tabulce `migrations`.
  *
- * Po migracích automaticky detekuje "stale" data (chybějící exchange_rate,
- * varsymbol, vat_classification_code) a spustí příslušné backfill skripty
+ * Po migracích automaticky detekuje "stale" data (chybějící exchange_rate
+ * nebo varsymbol) a spustí příslušné backfill skripty
  * s --apply. Detekční queries jsou rychlé (COUNT s indexem), reálný backfill
  * se rozjede jen pokud něco chybí. Idempotentní — opakovaný běh = no-op.
  *
@@ -122,7 +122,7 @@ if (!in_array('--no-backfills', $argv, true)) {
 }
 
 /**
- * Detekuje 4 kategorie chybějících dat a spouští odpovídající backfill skripty.
+ * Detekuje 2 kategorie chybějících dat a spouští odpovídající backfill skripty.
  * Idempotentní: prázdné COUNT → skip skript. Výstup skriptu se streamuje na
  * stdout/stderr (passthru), aby uživatel viděl pokrok per řádek.
  */
@@ -146,25 +146,6 @@ function runAutoBackfills(\PDO $db, string $binDir): void
                            WHERE varsymbol IS NULL
                              AND status != 'cancelled'",
             'script'  => 'backfill-purchase-varsymbols.php',
-        ],
-        [
-            'name'    => 'vat-classification (purchase)',
-            'reason'  => 'položky přijatých faktur bez vat_classification_code',
-            'count'   => "SELECT COUNT(*) FROM purchase_invoice_items pii
-                            JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
-                           WHERE pii.vat_classification_code IS NULL
-                             AND pi.status != 'cancelled'",
-            'script'  => 'backfill-vat-classification.php',
-        ],
-        [
-            'name'    => 'vat-classification (sale)',
-            'reason'  => 'položky vystavených faktur bez vat_classification_code',
-            'count'   => "SELECT COUNT(*) FROM invoice_items ii
-                            JOIN invoices i ON i.id = ii.invoice_id
-                           WHERE ii.vat_classification_code IS NULL
-                             AND i.status NOT IN ('draft', 'cancelled')
-                             AND i.invoice_type != 'proforma'",
-            'script'  => 'backfill-vat-classification-invoices.php',
         ],
     ];
 

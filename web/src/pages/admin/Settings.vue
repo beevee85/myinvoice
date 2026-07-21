@@ -20,6 +20,7 @@ function syncSupplierStore(s: Supplier) {
     ic: s.ic,
     is_vat_payer: s.is_vat_payer,
     is_identified: s.is_identified ?? false,
+    oss_enabled: s.oss_enabled ?? false,
     taxpayer_type: s.taxpayer_type ?? null,
     default_payment_due_days: s.default_payment_due_days,
     default_payment_due_unit: s.default_payment_due_unit,
@@ -263,6 +264,11 @@ async function saveSupplier() {
       taxpayer_type: (supplier.value as any).taxpayer_type ?? null,
       vat_period: (supplier.value as any).vat_period ?? null,
       flat_tax_band: (supplier.value as any).flat_tax_band ?? 'none',
+      oss_enabled: (supplier.value as any).oss_enabled ?? false,
+      oss_valid_from: (supplier.value as any).oss_valid_from ?? null,
+      oss_valid_to: (supplier.value as any).oss_valid_to ?? null,
+      oss_identification_country: (supplier.value as any).oss_identification_country ?? null,
+      oss_return_currency: (supplier.value as any).oss_return_currency ?? 'EUR',
       financial_office_code: (supplier.value as any).financial_office_code ?? null,
       workplace_code: (supplier.value as any).workplace_code ?? null,
       cz_nace_code: (supplier.value as any).cz_nace_code ?? null,
@@ -708,6 +714,35 @@ async function removeLogo() {
                 <option value="band3">{{ t('settings.flat_tax_band3') }}</option>
               </select>
               <p class="text-xs text-neutral-500 mt-1">{{ t('settings.flat_tax_hint') }}</p>
+            </div>
+            <div class="md:col-span-2 border border-neutral-200 rounded-md p-3">
+              <label class="flex items-center gap-2 text-sm">
+                <input v-model="(supplier as any).oss_enabled" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+                <span>{{ t('settings.oss_enabled') }}</span>
+              </label>
+              <p class="text-xs text-neutral-500 mt-1">{{ t('settings.oss_hint') }}</p>
+              <div v-if="(supplier as any).oss_enabled" class="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
+                <div>
+                  <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.oss_identification_country') }}</label>
+                  <input v-model="(supplier as any).oss_identification_country" type="text" maxlength="2" placeholder="CZ"
+                    class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono uppercase" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.oss_return_currency') }}</label>
+                  <input v-model="(supplier as any).oss_return_currency" type="text" maxlength="3" placeholder="EUR"
+                    class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono uppercase" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.oss_valid_from') }}</label>
+                  <input v-model="(supplier as any).oss_valid_from" type="date"
+                    class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.oss_valid_to') }}</label>
+                  <input v-model="(supplier as any).oss_valid_to" type="date"
+                    class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+                </div>
+              </div>
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.financial_office_code') }}</label>

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Mail;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Branding\AccentColor;
+use MyInvoice\Service\Invoice\InvoicePublicLinkService;
 use MyInvoice\Service\Qr\QrPaymentGenerator;
 
 /**
@@ -17,6 +18,7 @@ final class InvoiceEmailVarsBuilder
     public function __construct(
         private readonly Connection $db,
         private readonly QrPaymentGenerator $qr,
+        private readonly InvoicePublicLinkService $publicLinks,
     ) {}
 
     /**
@@ -54,7 +56,7 @@ final class InvoiceEmailVarsBuilder
             ),
             'days_overdue'   => $daysOverdue,
             'subject'        => $subject,
-            'qr_data_uri'    => $this->generateQr($invoice),
+            'qr_data_uri'    => $this->paymentQrDataUri($invoice),
             'supplier'       => $this->loadSupplierFooter($invoice),
             'is_test'        => false,
             'is_paid'        => ($invoice['status'] ?? '') === 'paid',
@@ -111,14 +113,22 @@ final class InvoiceEmailVarsBuilder
             'amount_to_pay'  => $amount,
             'is_test'        => $isTest,
             'subject'        => $this->buildSubject($invoice, $isTest, $locale),
-            'qr_data_uri'    => $this->generateQr($invoice),
+            'qr_data_uri'    => $this->paymentQrDataUri($invoice),
             'supplier'       => $this->loadSupplierFooter($invoice),
             'is_paid'        => ($invoice['status'] ?? '') === 'paid',
             'payment_method' => (string) ($invoice['payment_method'] ?? 'bank_transfer'),
+            // Trvalý odkaz na web fakturu do e-mailu; token vzniká lazy při
+            // prvním odeslání. Null pro draft (test e-mail) a bez app.url.
+            'public_url'     => $this->publicLinks->ensureUrl($invoice),
         ];
     }
 
-    private function generateQr(array $invoice): ?string
+    /**
+     * QR platba pro zbývající částku — public: kromě e-mailů ho používá i veřejná
+     * web faktura (PublicInvoiceGetAction). Bank z snapshot (issued+) nebo live
+     * z currencies; null když není co platit / jiná platební metoda.
+     */
+    public function paymentQrDataUri(array $invoice): ?string
     {
         // QR na zbývající částku — po částečné úhradě (#89) se platí jen zbytek.
         $remaining = round((float) ($invoice['amount_to_pay'] ?? 0) - (float) ($invoice['paid_total'] ?? 0), 2);

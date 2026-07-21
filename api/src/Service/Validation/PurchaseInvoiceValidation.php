@@ -14,6 +14,27 @@ final class PurchaseInvoiceValidation
     public const ALLOWED_DOC_KINDS = ['invoice', 'receipt', 'credit_note', 'advance'];
     public const ALLOWED_STATUSES  = ['draft', 'received', 'booked', 'paid', 'cancelled'];
 
+    /** Klasifikační kódy v režimu samovyměření příjemcem: tuzemský §92 (5), pořízení
+     *  zboží z JČS (23), služba z EU/3. země (24, 24e), dovoz zboží ze 3. země (25). */
+    public const REVERSE_CHARGE_CODES = ['5', '23', '24', '24e', '25'];
+
+    /**
+     * Je doklad v režimu přenesení daňové povinnosti / samovyměření? Rozpozná se
+     * příznakem `reverse_charge` nebo klasifikačním kódem hlavičky. U reverse charge
+     * je dodavatel z pohledu české DPH neplátce ze své podstaty (nefakturuje českou
+     * DPH), ale příjemce si daň samovyměří a smí ji odečíst (§ 72/73) — proto se u něj
+     * nesmí hlásit „od neplátce nelze odpočíst".
+     *
+     * @param array<string,mixed> $invoice
+     */
+    public static function isReverseCharge(array $invoice): bool
+    {
+        if (!empty($invoice['reverse_charge'])) {
+            return true;
+        }
+        return in_array((string) ($invoice['vat_classification_code'] ?? ''), self::REVERSE_CHARGE_CODES, true);
+    }
+
     /**
      * @param array<int, float>|null $vatRates
      * @return array<string, string[]>

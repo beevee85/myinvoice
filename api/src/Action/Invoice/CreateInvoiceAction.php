@@ -43,7 +43,7 @@ final class CreateInvoiceAction
             return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
         }
 
-        $errors = InvoiceValidation::invoice($body, $this->repo->vatRateMap());
+        $errors = InvoiceValidation::invoice($body, $this->repo->vatRateMap(), $this->repo->vatRateCountryMap());
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
@@ -103,7 +103,9 @@ final class CreateInvoiceAction
                 $rateId = (int) ($item['vat_rate_id'] ?? 0);
                 $rate = (float) ($vatRates[$rateId] ?? 0);
                 $taxDate = $body['tax_date'] ?? $body['issue_date'] ?? null;
-                $item['vat_classification_code'] = $this->vatDefaulter->defaultForSale($rate, $reverseCharge, $taxDate, $supplierId, $customerEuForeign);
+                // Měrná jednotka řádku je signál zboží/služba pro RC prodej do EU (ř.20 vs ř.21).
+                $units = ((string) ($item['unit'] ?? '') !== '') ? [(string) $item['unit']] : [];
+                $item['vat_classification_code'] = $this->vatDefaulter->defaultForSale($rate, $reverseCharge, $taxDate, $supplierId, $customerEuForeign, $units);
             }
             unset($item);
         }
@@ -114,7 +116,7 @@ final class CreateInvoiceAction
                 $rate = (float) ($vatRates[$rateId] ?? 0);
                 $qty = (float) ($it['quantity'] ?? 1);
                 $price = (float) ($it['unit_price_without_vat'] ?? 0);
-                return ['vat_rate' => $rate, 'total_with_vat' => $qty * $price * (1 + $rate / 100)];
+                return ['vat_rate' => $rate, 'total_with_vat' => $qty * $price * (1 + $rate / 100), 'unit' => (string) ($it['unit'] ?? '')];
             }, (array) $body['items']);
             $body['vat_classification_code'] = $this->vatDefaulter->suggestHeaderForInvoice(
                 $itemsWithTotals,
