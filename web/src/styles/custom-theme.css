@@ -79,3 +79,28 @@
 .shadow-lg {
   box-shadow: 0 8px 30px -6px rgb(15 23 42 / 0.18), 0 2px 8px -2px rgb(15 23 42 / 0.08);
 }
+
+/* ─── FÁZE 8: odstrojení UI (2026-07-03) ───
+ * 1) Čísla v UI proporcionálním písmem s tabulkovými číslicemi (konec mono/tečkované nuly)
+ * 2) Lehčí karty: bez stínů, světlejší rámečky (jen light — dark má vlastní token)
+ * 3) Výraznější nadpisy stránek
+ * 4) Nativní selecty s vlastní šipkou místo systémové */
+.font-mono {
+  font-family: var(--font-sans) !important;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+:root { --color-neutral-200: #E9EEF5; }
+.shadow-sm { box-shadow: none; }
+h1 { letter-spacing: -0.02em; }
+h1.text-2xl { font-size: 1.75rem; }
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='%2364748B' stroke-width='2' stroke-linecap='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.65rem center;
+  padding-right: 2rem !important;
+}
+.dark select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='%238E9AB3' stroke-width='2' stroke-linecap='round'/></svg>");
+}
