@@ -24,6 +24,8 @@ Před implementací čehokoli VŽDY ověř v aktuální verzi upstreamu, že to 
     s evidencí?". Malé, bezpečné, lze udělat samostatně a rychle.
   - ~~Drobnost: výběr protistrany našeptávačem z klientů~~ — HOTOVO 2026-07-02 (FÁZE 6).
 
+- [ ] **KPI dlaždice s trendy** — dashboard: srovnání s předchozím obdobím (↑/↓ %, barva dle směru, příp. sparkline). Zásah: dashboard API (data minulého období) + Dashboard.vue dlaždice. Střední náročnost.
+
 ## Kandidáti na issue u autora (radekhulan/myinvoice) — velké funkce
 
 Levnější než vlastní implementace ve forku: když je autor přijme, získáme je updatem.
