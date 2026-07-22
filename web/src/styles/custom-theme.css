@@ -104,3 +104,19 @@ select {
 .dark select {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='%238E9AB3' stroke-width='2' stroke-linecap='round'/></svg>");
 }
+
+/* ─── FÁZE 8b: interakční polish (2026-07-03) ───
+ * Moderní „pocit" = mikrointerakce: akcentový focus ring na všech polích,
+ * plynulé přechody, hover zvýraznění řádků tabulek, akcentová selekce textu. */
+button, a, input, select, textarea {
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--color-primary-500) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary-500) 18%, transparent);
+}
+:where(table tbody tr) { transition: background-color .12s ease; }
+:where(table tbody tr):hover { background-color: var(--color-neutral-100); }
+button:active { transform: translateY(0.5px); }
+::selection { background: var(--color-primary-100); }
