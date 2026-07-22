@@ -6,6 +6,10 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-03 — ROZHODNUTÍ: update watcher (§ 19.4 manuálu) NEnasazovat
+
+Watcher = jednoklikový upgrade z UI (Systém → Aktualizace → tlačítko), určený pro standardní GHCR instalace. Tato instalace jede fork s buildem ze zdrojáku — update vyžaduje řízený proces (záloha → merge tagu → checklist úprav → řešení konfliktů → rebuild → verifikace). Watcher by proces obešel a mohl přepsat customizovaný build čistým upstream image (ztráta všech FÁZÍ do rebuildu). Denní kontrola verzí (cron-version-check) běží a stačí — o nových verzích informuje badge ve footeru; upgrade se provádí vědomě přes Claude. Watcher nasadit JEN pokud by se instalace někdy vrátila na čisté GHCR image.
+
 ## 2026-07-03 — UPDATE z upstreamu: v4.44.0 → v4.49.2
 
 Merge 99 commitů (mj. ceník položek, OSS základ — migrace 0137, iDoklad bank transakce, volitelný e-mail klienta; migrace 0126–0139). Dva konflikty: `InvoiceRepository.php` (naše supportsInternalNote vs. upstream supportsOssItemColumns na stejném místě — ponechány oba helpery) a `InvoiceDetail.vue` (import řádek — sloučeny typy + cashDocumentsApi). `invoice.twig` se zmergoval automaticky (FORK bloky drží). Checklist FÁZE 1–7 prošel; migrace 0126–0139 + naše 0900–0902 aplikované, log čistý.
