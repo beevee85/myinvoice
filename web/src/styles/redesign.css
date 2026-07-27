@@ -157,3 +157,7 @@ h2 { font-size: 1.25rem; }   /* 20px */
 .ui-table tbody tr:hover .row-actions, .ui-table .row-actions:focus-within { opacity: 1; }
 @media (hover: none) { .ui-table .row-actions { opacity: 1; } }
 .ui-table td.num, .ui-table th.num { text-align: right; font-variant-numeric: tabular-nums lining-nums; }
+
+/* ─── Fáze 5: velký nadpis detailu dokladu (28/700) ───
+ * Vlastní třída s vyšší specificitou než globální h1 { 24px } výše. */
+h1.h1-doc { font-size: 1.75rem; font-weight: 700; }

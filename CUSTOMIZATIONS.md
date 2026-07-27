@@ -6,6 +6,18 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-27 — REDESIGN Fáze 5: detail faktury (větev feature/redesign)
+
+**Co se změnilo (`web/src/pages/invoices/InvoiceDetail.vue` — cílené úpravy sekcí, logika+ActionBar tiery beze změny):**
+1. Hlavička: Zpět jako kruhové ikonové tlačítko, číslo faktury 28/700 (`h1.h1-doc` v redesign.css), všechny badge → pilulky (rounded-full).
+2. Karta klienta na `--surface-muted` s avatarem z iniciál (computed `clientInitials`), IČO/DIČ vpravo.
+3. Tři info karty (Data / Měna a DPH / Bankovní účet): `--surface-muted` + radius-card, label 13 px muted vlevo, hodnota 15/600 vpravo, bez borderů.
+4. Položky → `.ui-table` (hlavička surface-muted, `.num` sloupce); Sumace jako `--surface-muted` blok, „Celkem" 22/700 v primary. Poznámka nad položkami sladěna.
+5. Přílohy: drag&drop zóna s dashed borderem 2 px a radius-card, centrovaný obsah, hover/drag zvýraznění.
+6. Aktivita: místo tabulky+karet jednotná **timeline s barevnými tečkami** (nový helper `actionDot` zrcadlí kategorie `actionColor`; štítek akce dál používá actionColor pilulku).
+
+**Proč:** Fáze 5 redesignu dle zadání. **Jak ověřit po merge:** build ✓, testy 50/50 ✓; detail: hlavička s pilulkami, muted karty, timeline v Aktivitě, dashed upload zóna.
+
 ## 2026-07-27 — REDESIGN Fáze 4: přestavba stránky Vydané faktury (větev feature/redesign)
 
 **Co se změnilo (`web/src/pages/invoices/InvoiceList.vue` — logika 1:1, přestavěn template):**
