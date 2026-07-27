@@ -53,6 +53,9 @@ final class MeActionTest extends TestCase
                 'allowed_mfa_methods' => ['passkey', 'totp'],
             ],
         ]);
+        // FORK (beevee85): MeAction má navíc UserSupplierAccess (FÁZE 2) — stub
+        // bez omezení (allowedIdsForUser → null = přístup ke všem dodavatelům).
+        $access = $this->createStub(\MyInvoice\Service\Auth\UserSupplierAccess::class);
         $action = new MeAction(
             $db,
             $config,
@@ -60,6 +63,7 @@ final class MeActionTest extends TestCase
             new MfaPolicyService($config),
             new SessionLockPolicy($config),
             $clock,
+            $access,
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/auth/me')
