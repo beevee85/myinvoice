@@ -1218,6 +1218,7 @@
   },
   "common": {
     "pagination_range": "{from}–{to} z {total}",
+    "per_page": "Počet na stránku", "page_first": "První strana", "page_prev": "Předchozí strana", "page_next": "Další strana", "page_last": "Poslední strana",
     "view_all": "Zobrazit vše",
     "year": "Rok", "month": "Měsíc",
     "loading": "Načítám…", "save": "Uložit", "cancel": "Zrušit", "add": "Přidat",

@@ -6,6 +6,20 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-27 — REDESIGN Fáze 3: sada reusable UI komponent (větev feature/redesign)
+
+**Co se změnilo:**
+1. **13 nových komponent ve `web/src/components/ui/`**: `Button` (primary/cta/secondary/ghost/danger × sm/md/lg, loading, polymorfní button/RouterLink/a, vždy pilulka), `IconButton` (kruh 40 px), `AppSelect` (náhrada nativního `<select>` — pilulkový trigger, listbox panel s ARIA + aria-activedescendant, klávesnice vč. type-ahead, hidden input form fallback přes `name`), `DatePicker` (náhrada `<input type=date>` — český zápis dd.MM.yyyy, kalendář Po–Ne, min/max, Dnes/Vymazat, stejný ISO kontrakt modelValue, hidden input fallback), `Checkbox`/`RadioInput`/`Switch` (sr-only nativní input = a11y+formuláře zadarmo; Switch iOS-like), `SegmentedControl`, `TabsNav` (podtržení 2 px, 15/600, count pilulky), `Badge` (8 barev soft), `StatusDot` (✓/✕/hodiny/—, text v tooltipu), `Card` (radius 20, bez borderu), `Pagination` (kruhová tlačítka + „Počet na stránku" AppSelect).
+2. **Restyle stávajících**: `Modal.vue` (radius 20, kruhový křížek, nový volitelný slot `#footer` — API beze změny), `Toaster.vue` (karty s ikonami, sémantické barvy), `EmptyState.vue` (SVG ilustrace přes currentColor/tokeny, pilulkové CTA, sloty `#icon`/`#actions` — API 100% zpětně kompatibilní), `ActionBar.vue` (jen radius tlačítek → pilulky).
+3. `redesign.css`: sekce `.ui-table` (hlavička --surface-muted 13/600, řádky 48 px, hover, `.row-actions` viditelné při hoveru řádku / vždy na dotyku, `.num` tabular-nums vpravo). i18n: + `common.per_page`, `common.page_first/prev/next/last` (cs+en).
+4. Nativní prvky v 49 stránkách se budou vyměňovat postupně per stránka ve fázích 4–7 (u každé výměny ověřit, že formulář posílá stejná data — AppSelect/DatePicker drží stejný datový kontrakt i hidden-input fallback).
+
+**Které soubory:** 13 nových `web/src/components/ui/*.vue`, upravené `Modal.vue`, `Toaster.vue`, `EmptyState.vue`, `ActionBar.vue`, `redesign.css`, `i18n/cs.json`+`en.json`.
+
+**Proč:** Fáze 3 redesignu — jednotná pilulková komponentová sada místo ad-hoc utility tříd; základ pro přestavbu stránek (F4–F6).
+
+**Jak ověřit po merge:** build + testy projdou; komponenty se dají ověřit dočasným mountem (vzor: viz commit — demo stránka se před commitem mazala); dark mode funguje čistě přepnutím tokenů (žádné dark: varianty v komponentách).
+
 ## 2026-07-27 — REDESIGN Fáze 2: layout shell — tmavá plocha + plovoucí panel (větev feature/redesign)
 
 **Co se změnilo:**

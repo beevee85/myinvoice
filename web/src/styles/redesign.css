@@ -142,3 +142,18 @@ h2 { font-size: 1.25rem; }   /* 20px */
 }
 .text-\[10px\].uppercase { font-size: 0.75rem; }     /* 12px */
 .text-\[11px\].uppercase { font-size: 0.8125rem; }   /* 13px */
+
+/* ─── Fáze 3: sdílený vzhled tabulek (.ui-table) ───
+ * Jedna třída místo opakovaných utility řetězců v každém výpisu; hover-only
+ * akce řádku (.row-actions) zůstávají viditelné na dotykových zařízeních. */
+.ui-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.875rem; }
+.ui-table thead th { background: var(--surface-muted); color: var(--text-muted); font-size: 13px; font-weight: 600; text-align: left; padding: 0 12px; height: 40px; white-space: nowrap; }
+.ui-table thead th:first-child { border-top-left-radius: 10px; border-bottom-left-radius: 10px; }
+.ui-table thead th:last-child { border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
+.ui-table tbody td { height: 48px; padding: 6px 12px; border-bottom: 1px solid var(--color-neutral-100); vertical-align: middle; }
+.ui-table tbody tr:last-child td { border-bottom: none; }
+.ui-table tbody tr:hover { background: var(--surface-muted); }
+.ui-table .row-actions { opacity: 0; transition: opacity 0.15s ease; }
+.ui-table tbody tr:hover .row-actions, .ui-table .row-actions:focus-within { opacity: 1; }
+@media (hover: none) { .ui-table .row-actions { opacity: 1; } }
+.ui-table td.num, .ui-table th.num { text-align: right; font-variant-numeric: tabular-nums lining-nums; }

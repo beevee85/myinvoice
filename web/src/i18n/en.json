@@ -1218,6 +1218,7 @@
   },
   "common": {
     "pagination_range": "{from}–{to} of {total}",
+    "per_page": "Per page", "page_first": "First page", "page_prev": "Previous page", "page_next": "Next page", "page_last": "Last page",
     "view_all": "View all",
     "year": "Year", "month": "Month",
     "loading": "Loading…", "save": "Save", "cancel": "Cancel", "add": "Add",
