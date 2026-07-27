@@ -8,7 +8,7 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ## 2026-07-27 — ZÁMEK DOKLADU V UI + EPO IDENTIFIKACE + VIES CZ699 (přímo na custom, 6 commitů 9c90c80f..e1395c0e)
 
-**Charakter: BUGFIX KANDIDÁT PRO UPSTREAM** (2. dávka) — podklad `/root/vat-fix-snapshots/GITHUB-ISSUE-2.md` + PR větev `pr/lock-and-epo-validation` na forku; po přijetí autorem blok odpadá.
+**Charakter: BUGFIX KANDIDÁT PRO UPSTREAM** — sloučeno s 1. dávkou do JEDNOHO PR: větev `pr/vat-report-fixes` na forku (11 commitů), podklad `/root/vat-fix-snapshots/GITHUB-ISSUE.md` + `GITHUB-PR.md`; po přijetí autorem blok odpadá.
 
 1. **BUG 5 — zámek stavu bez cesty ven z UI:** oba editory (vydané i přijaté) zobrazují u uzamčeného dokladu výstražný pruh + admin tlačítko **„Odemknout k editaci"** → modal s výslovnými následky a povinným checkboxem; formulář je do odemčení `fieldset[disabled]`; příznak nepřežije reload a `?force=1` z URL se ignoruje. Backend: bez force 409 s návodem, force bez admin 403; audit **`invoice.force_edit` / `purchase_invoice.force_edit`** s diffem polí + starým/novým snapshotem (dřív jen `force_updated` bez detailu). Nový **POST `/api/invoices/{id}/rebuild-snapshots`** („Obnovit údaje klienta", admin) — přepíše jen snapshoty z live dat i u zaplacené faktury, audit `invoice.rebuild_snapshots`.
 2. **BUG 6 — EPO XML bez povinné identifikace:** nový **`EpoIdentityValidator`** (povinné: kód FÚ, **ÚzP/c_pracufo**, DIČ, typ poplatníka, e-mail; u PO opr_*; doporučené: telefon, CZ-NACE u DP3). KH/DP3/SHV preview i download vrací **422 `epo_identity_incomplete`** s `missing[]` + `settings_url`; report stránky to kreslí jako blok s výčtem a odkazem na `/admin/settings#epo`; Settings mají kotvu #epo, badge „Nekompletní — EPO podání selže", červené hinty a nápovědu ÚzP. PUT suppliers vrací `epo_ready`+`missing` (informativně). **POZOR: BEKRON (supplier 1) nemá ÚzP ani oprávněnou osobu → jeho výkazy vrací 422, dokud se pole nedoplní** (PROPSOL je kompletní).
@@ -18,7 +18,7 @@ Testy: ForceEditUnlockTest, EpoIdentityGuardTest, ViesClientCzRoutingTest (+2). 
 
 ## 2026-07-27 — OPRAVA DPH VÝKAZŮ: dobropisy, zahraniční RC, forma podání, termíny, konzistence RC (větev fix/vat-credit-note-sign)
 
-**Charakter: BUGFIX KANDIDÁT PRO UPSTREAM** — po přijetí autorem (radekhulan/myinvoice) celý blok z evidence odpadá. Podklad pro autora: `/root/vat-fix-snapshots/UPSTREAM-PROPOSAL.md` + diff report tamtéž.
+**Charakter: BUGFIX KANDIDÁT PRO UPSTREAM** — po přijetí autorem (radekhulan/myinvoice) celý blok z evidence odpadá. Sloučeno s 2. dávkou (zámek dokladu + EPO identifikace) do jednoho PR: větev `pr/vat-report-fixes`, podklad `/root/vat-fix-snapshots/GITHUB-ISSUE.md` + `GITHUB-PR.md` + `DIFF-REPORT.md`.
 
 **Co se změnilo (5 chyb v4.51.0):**
 1. **BUG 1 — dobropisy se přičítaly:** `VatLedgerService::fetchPurchases` nově normalizuje přijaté dobropisy (`document_kind='credit_note'`) přes **-ABS()** na záporné částky (base/vat/inv_total) — v DB žijí obě znaménkové konvence (ruční/AI import záporně, část importů kladně — reálně PF2602004). Propíše se do DPHDP3/DPHKH1/DPHSHV/Knihy DPH. Vydané dobropisy (v DB záporné) beze změny. KH: dobropis nad 10 000 Kč jde přes `abs()` práh jako **samostatný záporný řádek B.2/A.4**. `IncomeTaxBuilder` náklady taktéž -ABS().
