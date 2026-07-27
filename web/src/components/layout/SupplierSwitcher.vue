@@ -33,11 +33,11 @@ function pick(id: number) {
 
 <template>
   <div v-if="supplierStore.hasMultiple" class="relative">
+    <!-- Trigger jako světlá pilulka na tmavém topbaru (app shell redesign) -->
     <button type="button" @click="open = !open"
-      class="cursor-pointer inline-flex items-center gap-1.5 px-3 h-8 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50">
-      <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5m-4 0h4"/></svg>
-      <span class="font-medium">{{ current?.company_name || '—' }}</span>
-      <svg class="w-3 h-3 ml-0.5 transition" :class="{ 'rotate-180': open }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+      class="cursor-pointer inline-flex items-center gap-1.5 pl-2.5 pr-2 h-7 max-w-56 text-xs rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors">
+      <span class="font-medium truncate">{{ current?.company_name || '—' }}</span>
+      <svg class="w-3 h-3 shrink-0 transition" :class="{ 'rotate-180': open }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
     </button>
     <transition
       enter-active-class="transition duration-100 ease-out"

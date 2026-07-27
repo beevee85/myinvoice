@@ -27,6 +27,7 @@ const toast = useToast()
 
 const mobileOpen = ref(false)
 const quickOpen = ref(false)
+const moreOpen = ref(false)
 const supportOpen = ref(false)
 const featureOpen = ref(false)
 const accountantSigningProfilesEnabled = ref(false)
@@ -34,6 +35,17 @@ const logoutBusy = ref(false)
 const canLockSession = computed(() => sessionSecurity.state?.session_state === 'active'
   && sessionSecurity.state.unlock_methods.includes('passkey'))
 let signingSettingsRequest = 0
+
+/** Iniciály uživatele pro avatar v topbaru (max 2 znaky). */
+const initials = computed(() =>
+  (auth.user?.name || '')
+    .split(/\s+/)
+    .map(p => p[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || '?'
+)
 
 async function logout() {
   if (logoutBusy.value) return
@@ -89,18 +101,7 @@ interface NavItem {
 interface NavSection {
   /** Hlavička sekce; pokud chybí, položky jsou bez visual grouping */
   title?: string
-  /** Color accent pro vertikální pruh + text. Tailwind utility class group. */
-  accent?: 'primary' | 'warning' | 'success' | 'danger' | 'neutral'
   items: NavItem[]
-}
-
-/** Mapování accent → soft pill (background + text) per sekce. */
-const ACCENT_CLASSES: Record<NonNullable<NavSection['accent']>, string> = {
-  primary: 'bg-primary-50  text-primary-700',
-  warning: 'bg-warning-50  text-warning-600',
-  success: 'bg-success-50  text-success-600',
-  danger:  'bg-danger-50   text-danger-500',
-  neutral: 'bg-neutral-100 text-neutral-600',
 }
 
 /** Outline icon paths — Heroicons style, stroke 2, viewBox 24, currentColor */
@@ -159,7 +160,6 @@ const navSections = computed<NavSection[]>(() => {
       // Vše co se týká vystavování faktur klientům — klienti/zakázky/schvalování/exporty
       // patří v životním cyklu jednoho prodeje (klient → zakázka → faktura → schválení → export pro účetní).
       title: t('nav.section_sales'),
-      accent: 'primary',
       items: [
         { to: '/invoices',         label: t('nav.invoices'),   icon: ICONS.invoices,  newTo: '/invoices/new' },
         { to: '/recurring',        label: t('nav.recurring'),  icon: ICONS.recurring, newTo: '/recurring/new' },
@@ -174,7 +174,6 @@ const navSections = computed<NavSection[]>(() => {
     },
     {
       title: t('nav.section_purchase'),
-      accent: 'warning',
       items: [
         { to: '/purchase-invoices',          label: t('nav.purchase_invoices'),  icon: ICONS.purchase, newTo: '/purchase-invoices/new' },
         { to: '/clients?role=vendors',       label: t('nav.vendors'),            icon: ICONS.suppliers, newTo: '/clients/new?role=vendor' },
@@ -186,7 +185,6 @@ const navSections = computed<NavSection[]>(() => {
     },
     {
       title: t('nav.section_finance'),
-      accent: 'success',
       items: [
         { to: '/crm',            label: t('nav.crm'),            icon: ICONS.crm },
         { to: '/stats',          label: t('nav.stats'),          icon: ICONS.stats },
@@ -199,7 +197,6 @@ const navSections = computed<NavSection[]>(() => {
     },
     {
       title: t('nav.section_documents'),
-      accent: 'neutral',
       items: [
         { to: '/documents', label: t('nav.documents'), icon: ICONS.documents },
         { to: '/logbook', label: t('nav.logbook'), icon: ICONS.logbook, newTo: '/logbook?tab=trips&new=trip' },
@@ -207,7 +204,6 @@ const navSections = computed<NavSection[]>(() => {
     },
     {
       title: t('nav.section_taxes'),
-      accent: 'danger',
       items: [
         { to: '/reports/dph',         label: t('nav.reports_dph'),         icon: ICONS.tax_dph },
         { to: '/reports/kh',          label: t('nav.reports_kh'),          icon: ICONS.tax_kh },
@@ -227,7 +223,6 @@ const navSections = computed<NavSection[]>(() => {
     // Sjednocený "Import" pokrývá vystavené i přijaté faktury (admin/import s tabs).
     sections.push({
       title: t('nav.system'),
-      accent: 'neutral',
       items: [
         { to: '/admin/settings',         label: t('nav.settings'),        icon: ICONS.settings },
         { to: '/admin/codebooks',        label: t('nav.codebooks'),       icon: ICONS.codebooks },
@@ -245,7 +240,6 @@ const navSections = computed<NavSection[]>(() => {
   if (!isAdmin && auth.user?.role === 'accountant' && accountantSigningProfilesEnabled.value) {
     sections.push({
       title: t('nav.system'),
-      accent: 'neutral',
       items: [
         { to: '/admin/electronic-signatures', label: t('nav.electronic_signatures'), icon: ICONS.approvals },
       ],
@@ -262,7 +256,7 @@ const navSections = computed<NavSection[]>(() => {
   return sections
 })
 
-/** Rychlé zkratky v topbaru (desktop) — ikony navazují na menu (ICONS). */
+/** Akce zeleného CTA „+ Vytvořit" v sidebaru — ikony navazují na menu (ICONS). */
 const quickActions = computed(() => [
   { to: '/invoices/new',          label: t('nav.quick_invoice'),   icon: ICONS.invoices },
   { to: '/invoices/new?type=proforma', label: t('nav.quick_proforma'), icon: ICONS.proforma },
@@ -313,7 +307,7 @@ function isActive(to: string): boolean {
         const iParams = new URLSearchParams(iQs)
         let match = true
         for (const [k, v] of iParams) {
-          if (String(route.query[k] ?? '') !== v) { match = false; break }
+          if (String(route.query[k] ??  '') !== v) { match = false; break }
         }
         if (match) return false
       }
@@ -331,8 +325,8 @@ function isActive(to: string): boolean {
   return true
 }
 
-// Zavři mobile drawer + rychlé menu po navigaci
-watch(() => route.path, () => { mobileOpen.value = false; quickOpen.value = false })
+// Zavři mobile drawer + dropdowny po navigaci
+watch(() => route.path, () => { mobileOpen.value = false; quickOpen.value = false; moreOpen.value = false })
 
 const versionInfo = ref<PublicVersion | null>(null)
 onMounted(async () => {
@@ -341,73 +335,191 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col bg-neutral-50">
+  <!-- App shell: tmavá plocha (--app-bg) pod celou appkou; obsah je plovoucí bílý panel. -->
+  <div class="min-h-screen flex bg-(--app-bg)">
 
-    <!-- ═════════════════════ TOPBAR ═════════════════════ -->
-    <header class="sticky top-0 z-30 bg-surface border-b border-neutral-200">
-      <div class="h-14 px-4 flex items-center justify-between gap-3">
-        <!-- Logo -->
-        <RouterLink to="/" class="flex items-center gap-2.5 shrink-0" @click="mobileOpen = false">
-          <img src="/styles/logo.svg" alt="MyInvoice" class="w-8 h-8" />
-          <span class="text-sm font-semibold leading-tight select-none">
-            My<span class="text-primary-600">Invoice</span><span class="text-neutral-400 font-normal">.cz</span>
+    <!-- Mobile backdrop -->
+    <div
+      v-if="mobileOpen" @click="mobileOpen = false"
+      class="lg:hidden fixed inset-0 bg-black/50 z-30"
+      aria-hidden="true"
+    ></div>
+
+    <!-- ═════════════════════ SIDEBAR (sedí přímo na tmavém pozadí) ═════════════════════ -->
+    <aside
+      :class="[
+        'fixed lg:sticky inset-y-0 left-0 lg:top-0 z-40 lg:z-auto',
+        'h-screen w-60 shrink-0',
+        'bg-(--app-bg) max-lg:shadow-2xl',
+        'flex flex-col',
+        'max-lg:transition-transform duration-200 ease-in-out',
+        mobileOpen ? 'max-lg:translate-x-0' : 'max-lg:-translate-x-full',
+      ]"
+    >
+      <!-- Logo -->
+      <RouterLink to="/" class="flex items-center gap-2.5 px-4 h-16 shrink-0" @click="mobileOpen = false">
+        <span class="w-8 h-8 rounded-lg bg-white flex items-center justify-center shrink-0">
+          <img src="/styles/logo.svg" alt="MyInvoice" class="w-6 h-6" />
+        </span>
+        <span class="text-[15px] font-semibold leading-tight select-none text-white">
+          My<span class="text-primary-300">Invoice</span><span class="text-white/50 font-normal">.cz</span>
+        </span>
+      </RouterLink>
+
+      <!-- Zelené CTA „+ Vytvořit" (jen pro zapisující) -->
+      <div v-if="auth.canWrite" class="relative px-3 pb-1 shrink-0">
+        <button
+          type="button" @click="quickOpen = !quickOpen"
+          class="cursor-pointer w-full h-11 pl-4 pr-3 inline-flex items-center gap-2 rounded-full bg-(--accent-cta) hover:bg-(--color-success-700) text-white text-sm font-semibold transition-colors"
+          :aria-expanded="quickOpen" :aria-label="t('nav.quick_new')"
+        >
+          <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12h14" />
+          </svg>
+          <span>{{ t('nav.quick_new') }}</span>
+          <svg class="w-3.5 h-3.5 ml-auto transition" :class="{ 'rotate-180': quickOpen }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        <transition
+          enter-active-class="transition duration-100 ease-out"
+          enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100"
+          leave-active-class="transition duration-75 ease-in"
+          leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95"
+        >
+          <div v-if="quickOpen" class="absolute left-3 right-3 mt-1.5 bg-surface rounded-xl shadow-lg py-1.5 z-40">
+            <RouterLink
+              v-for="s in quickActions" :key="s.to" :to="s.to" @click="quickOpen = false"
+              class="flex items-center gap-2.5 px-3.5 py-2 text-sm text-neutral-700 hover:bg-neutral-100 hover:text-primary-700"
+            >
+              <svg class="w-4 h-4 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="s.icon" />
+              </svg>
+              <span>{{ s.label }}</span>
+            </RouterLink>
+          </div>
+        </transition>
+        <div v-if="quickOpen" @click="quickOpen = false" class="fixed inset-0 z-10" aria-hidden="true"></div>
+      </div>
+
+      <nav class="flex-1 overflow-y-auto scrollbar-slim px-3 py-2">
+        <!-- Globální vyhledávač — našeptává menu + hledá klienty/faktury -->
+        <GlobalSearch :menu-items="flatNavItems" @navigated="mobileOpen = false" />
+
+        <template v-for="(section, si) in navSections" :key="si">
+          <!-- Sekce oddělené jemnou linkou, titulek malý tlumený -->
+          <div v-if="section.title" class="mt-3 mb-1 pt-3 border-t border-white/10">
+            <div class="px-3 text-xs font-medium text-white/40">{{ section.title }}</div>
+          </div>
+          <div v-else-if="si > 0" class="mt-3 pt-3 border-t border-white/10"></div>
+
+          <!-- Items: external (např. Nápověda → /manual v novém tabu) vs internal route -->
+          <template v-for="item in section.items" :key="item.to">
+            <a
+              v-if="item.external"
+              :href="item.to"
+              target="_blank"
+              rel="noopener"
+              class="flex items-center gap-2.5 px-3 py-2 rounded-full text-sm transition-colors leading-tight text-white/70 hover:text-white hover:bg-white/[0.08]"
+            >
+              <svg class="w-[15px] h-[15px] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
+              </svg>
+              {{ item.label }}
+              <svg class="w-3 h-3 ml-auto text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+              </svg>
+            </a>
+            <div v-else class="relative group">
+              <RouterLink
+                :to="item.to"
+                active-class=""
+                exact-active-class=""
+                class="flex items-center gap-2.5 px-3 py-2 rounded-full text-sm transition-colors leading-tight"
+                :class="[
+                  isActive(item.to)
+                    ? 'bg-(--primary) text-white font-medium'
+                    : 'text-white/70 hover:text-white hover:bg-white/[0.08]',
+                  item.newTo && auth.canWrite ? 'pr-8' : '',
+                ]"
+              >
+                <svg class="w-[15px] h-[15px] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
+                </svg>
+                {{ item.label }}
+              </RouterLink>
+              <!-- Rychlé „+" (vytvořit nový) — skryté, odhalí se až při hoveru nad položkou -->
+              <RouterLink
+                v-if="item.newTo && auth.canWrite"
+                :to="item.newTo"
+                :title="t('nav.quick_new')"
+                :aria-label="t('nav.quick_new')"
+                class="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-5 h-5 rounded-full text-white/40 hover:text-white hover:bg-white/20 transition-all opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"
+              >
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v8m4-4H8M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
+                </svg>
+              </RouterLink>
+            </div>
+          </template>
+        </template>
+      </nav>
+
+      <!-- Verze + odkaz na projekt (dole) -->
+      <div v-if="versionInfo" class="px-4 py-2.5 border-t border-white/10 flex items-center gap-2 shrink-0">
+        <a href="https://myinvoice.cz/" target="_blank" rel="noopener"
+           class="text-xs text-white/40 hover:text-white/80 hover:underline transition-colors"
+           title="MyInvoice.cz">MyInvoice.cz</a>
+        <RouterLink
+          v-if="auth.user?.role === 'admin'"
+          to="/admin/update"
+          class="inline-flex items-center gap-1.5 text-xs text-white/40 hover:text-white/70 transition-colors"
+          :title="t('updates.title')"
+        >
+          <span>v{{ versionInfo.current }}</span>
+          <span
+            v-if="versionInfo.has_update"
+            class="inline-flex items-center gap-1 rounded-full bg-white/15 text-white px-1.5 py-0.5 text-[10px] font-semibold leading-none"
+          >
+            <svg class="w-2 h-2" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/></svg>
+            v{{ versionInfo.latest }}
           </span>
         </RouterLink>
+        <span v-else class="text-xs text-white/40">v{{ versionInfo.current }}</span>
+      </div>
 
-        <!-- Pravá strana topbaru -->
-        <div class="flex items-center gap-2 text-sm">
-          <!-- Rychlé vytvoření (desktop, jen pro zapisující) — jedno decentní tlačítko s menu -->
-          <div v-if="auth.canWrite" class="relative hidden lg:block">
-            <button
-              type="button" @click="quickOpen = !quickOpen"
-              class="cursor-pointer inline-flex items-center gap-1.5 h-8 pl-2 pr-2.5 text-sm rounded-md border border-neutral-200 text-neutral-600 hover:bg-neutral-50 hover:text-primary-700 transition-colors"
-              :class="{ 'bg-neutral-50 text-primary-700': quickOpen }"
-              :aria-expanded="quickOpen" :aria-label="t('nav.quick_new')"
-            >
-              <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12h14" />
-              </svg>
-              <span>{{ t('nav.quick_new') }}</span>
-              <svg class="w-3 h-3 ml-0.5 transition" :class="{ 'rotate-180': quickOpen }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            <transition
-              enter-active-class="transition duration-100 ease-out"
-              enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100"
-              leave-active-class="transition duration-75 ease-in"
-              leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95"
-            >
-              <div v-if="quickOpen" class="absolute right-0 mt-1 w-52 bg-surface border border-neutral-200 rounded-lg shadow-lg py-1 z-40">
-                <RouterLink
-                  v-for="s in quickActions" :key="s.to" :to="s.to" @click="quickOpen = false"
-                  class="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-primary-700"
-                >
-                  <svg class="w-4 h-4 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" :d="s.icon" />
-                  </svg>
-                  <span>{{ s.label }}</span>
-                </RouterLink>
-              </div>
-            </transition>
-            <div v-if="quickOpen" @click="quickOpen = false" class="fixed inset-0 z-10" aria-hidden="true"></div>
-          </div>
-          <!-- Jemný předěl, aby „Vytvořit" nebylo nalepené na jméně uživatele -->
-          <span v-if="auth.canWrite" class="hidden lg:inline-block w-px h-5 bg-neutral-200 mx-1" aria-hidden="true"></span>
-
-          <!-- Jméno uživatele (desktop) — link na profil (heslo + 2FA v záložkách). -->
+      <!-- Mobile only: profil + ovládání relace (na dně sidebaru) -->
+      <div class="lg:hidden border-t border-white/10 px-4 py-3 space-y-3 shrink-0">
+        <div class="flex items-center justify-between">
           <RouterLink
             to="/profile/password"
-            class="hidden lg:inline text-sm text-neutral-600 hover:text-primary-700 hover:underline"
+            @click="mobileOpen = false"
+            class="group min-w-0 flex-1 rounded-lg -ml-2 px-2 py-1.5 text-sm hover:bg-white/[0.08]"
             :title="t('auth.profile_title')"
-          >{{ auth.user?.name }}</RouterLink>
-
-          <!-- Locale switcher (CZ / EN s SVG vlajkami) -->
-          <div class="hidden sm:inline-flex items-center border border-neutral-200 rounded-md overflow-hidden">
+          >
+            <div class="truncate font-medium text-white group-hover:underline">
+              {{ auth.user?.name }}
+            </div>
+            <div class="truncate text-xs text-white/50">{{ auth.user?.email }} · {{ auth.user?.role }}</div>
+          </RouterLink>
+          <a
+            href="/manual" target="_blank" rel="noopener"
+            class="inline-flex w-9 h-9 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
+            :title="t('nav.help')"
+          >
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
+            </svg>
+          </a>
+        </div>
+        <div class="flex items-center justify-between gap-2">
+          <!-- Přepínač motivu (System / Light / Dark) — mobilní varianta -->
+          <ThemeToggle on-dark />
+          <div class="inline-flex items-center border border-white/20 rounded-full overflow-hidden">
             <button
-              @click="setLocale('cs')" title="Čeština" aria-label="Čeština"
-              class="cursor-pointer h-8 px-2 inline-flex items-center"
-              :class="locale === 'cs' ? 'bg-primary-50' : 'hover:bg-neutral-50 grayscale opacity-60 hover:grayscale-0 hover:opacity-100'"
+              @click="setLocale('cs')" title="Čeština"
+              class="cursor-pointer h-9 px-3 inline-flex items-center"
+              :class="locale === 'cs' ? 'bg-white/15' : 'hover:bg-white/10 grayscale opacity-60'"
             >
               <svg width="22" height="15" viewBox="0 0 6 4" xmlns="http://www.w3.org/2000/svg">
                 <rect width="6" height="2" fill="#ffffff"/>
@@ -416,55 +528,47 @@ onMounted(async () => {
               </svg>
             </button>
             <button
-              @click="setLocale('en')" title="English" aria-label="English"
-              class="cursor-pointer h-8 px-2 inline-flex items-center border-l border-neutral-200"
-              :class="locale === 'en' ? 'bg-primary-50' : 'hover:bg-neutral-50 grayscale opacity-60 hover:grayscale-0 hover:opacity-100'"
+              @click="setLocale('en')" title="English"
+              class="cursor-pointer h-9 px-3 inline-flex items-center border-l border-white/20"
+              :class="locale === 'en' ? 'bg-white/15' : 'hover:bg-white/10 grayscale opacity-60'"
             >
               <svg width="22" height="15" viewBox="0 0 60 30" xmlns="http://www.w3.org/2000/svg">
-                <clipPath id="uk-flag-tb"><path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z"/></clipPath>
+                <clipPath id="uk-flag-mob"><path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z"/></clipPath>
                 <path d="M0,0 v30 h60 v-30 z" fill="#012169"/>
                 <path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/>
-                <path d="M0,0 L60,30 M60,0 L0,30" clip-path="url(#uk-flag-tb)" stroke="#C8102E" stroke-width="4"/>
+                <path d="M0,0 L60,30 M60,0 L0,30" clip-path="url(#uk-flag-mob)" stroke="#C8102E" stroke-width="4"/>
                 <path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/>
                 <path d="M30,0 v30 M0,15 h60" stroke="#C8102E" stroke-width="6"/>
               </svg>
             </button>
           </div>
-
-          <!-- Přepínač motivu (System / Light / Dark) — na mobilu je v drawer patičce -->
-          <div class="hidden sm:inline-flex">
-            <ThemeToggle />
-          </div>
-
-          <!-- Nápověda -->
-          <a
-            href="/manual" target="_blank" rel="noopener"
-            class="hidden sm:inline-flex w-8 h-8 items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 hover:text-primary-700"
-            :title="t('nav.help')"
-            :aria-label="t('nav.help')"
-          >
-            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
-            </svg>
-          </a>
-
-          <!-- Odhlásit (desktop) -->
+        </div>
+        <div class="grid gap-2" :class="canLockSession ? 'grid-cols-2' : 'grid-cols-1'">
           <button
             v-if="canLockSession"
             @click="sessionSecurity.lock"
-            class="cursor-pointer hidden sm:inline-flex px-3 h-8 items-center text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50"
+            class="cursor-pointer w-full px-2 h-9 text-sm border border-white/20 rounded-full text-white/80 hover:bg-white/10"
           >{{ t('session_lock.lock_now') }}</button>
           <button
             @click="logout"
             :disabled="logoutBusy"
-            class="cursor-pointer hidden sm:inline-flex px-3 h-8 items-center text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50 disabled:opacity-60"
+            class="cursor-pointer w-full px-2 h-9 text-sm border border-white/20 rounded-full text-white/80 hover:bg-white/10 disabled:opacity-60"
           >{{ t('nav.logout') }}</button>
+        </div>
+      </div>
+    </aside>
 
+    <!-- ═════════════════════ PRAVÝ SLOUPEC: TOPBAR + PLOVOUCÍ PANEL ═════════════════════ -->
+    <div class="flex-1 min-w-0 flex flex-col">
+
+      <!-- Topbar na tmavé ploše -->
+      <header class="sticky top-0 z-20 bg-(--app-bg)">
+        <div class="h-16 px-3 sm:px-6 flex items-center gap-2 sm:gap-3">
           <!-- Hamburger (mobile, < lg) -->
           <button
             type="button" @click="mobileOpen = !mobileOpen"
             :aria-expanded="mobileOpen" aria-label="Menu"
-            class="lg:hidden inline-flex items-center justify-center w-9 h-9 rounded-md text-neutral-700 hover:bg-neutral-100"
+            class="lg:hidden inline-flex items-center justify-center w-10 h-10 rounded-full text-white hover:bg-white/10"
           >
             <svg v-if="!mobileOpen" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
@@ -473,228 +577,142 @@ onMounted(async () => {
               <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
-        </div>
-      </div>
 
-      <!-- Active supplier banner -->
-      <div v-if="supplierStore.hasMultiple && supplierStore.currentSupplier" class="bg-primary-50 border-t border-primary-100">
-        <div class="px-4 py-1.5 text-xs text-primary-700 flex items-center gap-2">
-          <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5m-4 0h4"/>
-          </svg>
-          <span class="flex-1 min-w-0 truncate">
-            {{ t('supplier.active_label') }}: <strong class="font-semibold">{{ supplierStore.currentSupplier.company_name }}</strong>
-            <span v-if="supplierStore.currentSupplier.ic" class="font-mono text-primary-600 ml-1">({{ t('common.ic') }} {{ supplierStore.currentSupplier.ic }})</span>
-          </span>
-          <SupplierSwitcher />
-        </div>
-      </div>
-    </header>
-
-    <!-- ═════════════════════ TĚLO: SIDEBAR + OBSAH ═════════════════════ -->
-    <div class="flex flex-1 min-h-0">
-
-      <!-- Mobile backdrop -->
-      <div
-        v-if="mobileOpen" @click="mobileOpen = false"
-        class="lg:hidden fixed inset-0 bg-black/50 z-20"
-        aria-hidden="true"
-      ></div>
-
-      <!-- ── SIDEBAR ── -->
-      <aside
-        :class="[
-          'fixed lg:sticky top-14 z-30 lg:z-auto',
-          'h-[calc(100vh-3.5rem)] w-60 shrink-0',
-          'bg-surface border-r border-neutral-200',
-          'flex flex-col',
-          'transition-transform duration-200 ease-in-out',
-          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
-        ]"
-      >
-        <nav class="flex-1 overflow-y-auto scrollbar-slim px-2.5 py-3">
-          <!-- Globální vyhledávač (před Přehled) — našeptává menu + hledá klienty/faktury -->
-          <GlobalSearch :menu-items="flatNavItems" @navigated="mobileOpen = false" />
-
-          <template v-for="(section, si) in navSections" :key="si">
-            <!-- Section title — soft pill background v barvě sekce -->
-            <div v-if="section.title" :class="si === 0 ? 'pt-1 pb-1.5' : 'pt-4 pb-1.5'">
-              <div
-                class="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider"
-                :class="section.accent ? ACCENT_CLASSES[section.accent] : 'bg-neutral-100 text-neutral-600'"
-              >{{ section.title }}</div>
-            </div>
-
-            <!-- Items: external (např. Nápověda → /manual v novém tabu) vs internal route -->
-            <template v-for="item in section.items" :key="item.to">
-              <a
-                v-if="item.external"
-                :href="item.to"
-                target="_blank"
-                rel="noopener"
-                class="flex items-center gap-2.5 px-2.5 py-[7px] rounded-md text-sm transition-colors leading-tight text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100"
-              >
-                <svg class="w-[15px] h-[15px] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
-                </svg>
-                {{ item.label }}
-                <svg class="w-3 h-3 ml-auto text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-                </svg>
-              </a>
-              <div v-else class="relative group">
-                <RouterLink
-                  :to="item.to"
-                  active-class=""
-                  exact-active-class=""
-                  class="flex items-center gap-2.5 px-2.5 py-[7px] rounded-md text-sm transition-colors leading-tight"
-                  :class="[
-                    isActive(item.to)
-                      ? 'bg-primary-50 text-primary-700 font-medium'
-                      : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100',
-                    item.newTo && auth.canWrite ? 'pr-8' : '',
-                  ]"
-                >
-                  <svg class="w-[15px] h-[15px] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
-                  </svg>
-                  {{ item.label }}
-                </RouterLink>
-                <!-- Rychlé „+" (vytvořit nový) — skryté, odhalí se až při hoveru nad položkou -->
-                <RouterLink
-                  v-if="item.newTo && auth.canWrite"
-                  :to="item.newTo"
-                  :title="t('nav.quick_new')"
-                  :aria-label="t('nav.quick_new')"
-                  class="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-5 h-5 rounded-md text-neutral-400 hover:text-primary-700 hover:bg-primary-100 transition-all opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"
-                >
-                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v8m4-4H8M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
-                  </svg>
-                </RouterLink>
-              </div>
-            </template>
-          </template>
-        </nav>
-
-        <!-- Verze + odkaz na projekt (dole) -->
-        <div v-if="versionInfo" class="px-4 py-2.5 border-t border-neutral-100 flex items-center gap-2">
-          <a href="https://myinvoice.cz/" target="_blank" rel="noopener"
-             class="text-xs text-neutral-500 hover:text-primary-700 hover:underline transition-colors"
-             title="MyInvoice.cz">MyInvoice.cz</a>
-          <RouterLink
-            v-if="auth.user?.role === 'admin'"
-            to="/admin/update"
-            class="inline-flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
-            :title="t('updates.title')"
+          <!-- „Pracuješ jako" — subtilní pilulka s přepínačem firmy -->
+          <div
+            v-if="supplierStore.hasMultiple && supplierStore.currentSupplier"
+            class="flex items-center gap-2 h-9 pl-3 pr-1.5 rounded-full bg-white/10 text-white/70 text-xs min-w-0"
           >
-            <span>v{{ versionInfo.current }}</span>
-            <span
-              v-if="versionInfo.has_update"
-              class="inline-flex items-center gap-1 rounded-full bg-primary-100 text-primary-700 px-1.5 py-0.5 text-[10px] font-semibold leading-none"
-            >
-              <svg class="w-2 h-2" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/></svg>
-              v{{ versionInfo.latest }}
-            </span>
-          </RouterLink>
-          <span v-else class="text-xs text-neutral-400">v{{ versionInfo.current }}</span>
-        </div>
-
-        <!-- Mobile only: profil + ovládání relace (na dně sidebaru) -->
-        <div class="lg:hidden border-t border-neutral-200 px-4 py-3 bg-neutral-50 space-y-3">
-          <div class="flex items-center justify-between">
-            <RouterLink
-              to="/profile/password"
-              @click="mobileOpen = false"
-              class="group min-w-0 flex-1 rounded-md -ml-2 px-2 py-1.5 text-sm hover:bg-surface"
-              :title="t('auth.profile_title')"
-            >
-              <div class="truncate font-medium text-neutral-900 group-hover:text-primary-700 group-hover:underline">
-                {{ auth.user?.name }}
-              </div>
-              <div class="truncate text-xs text-neutral-500">{{ auth.user?.email }} · {{ auth.user?.role }}</div>
-            </RouterLink>
-            <a
-              href="/manual" target="_blank" rel="noopener"
-              class="inline-flex w-9 h-9 items-center justify-center rounded-md text-neutral-600 hover:bg-surface"
-              :title="t('nav.help')"
-            >
-              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
-              </svg>
-            </a>
-          </div>
-          <div class="flex items-center justify-between gap-2">
-            <!-- Přepínač motivu (System / Light / Dark) — mobilní varianta -->
-            <ThemeToggle />
-            <div class="inline-flex items-center border border-neutral-200 bg-surface rounded-md overflow-hidden">
-              <button
-                @click="setLocale('cs')" title="Čeština"
-                class="cursor-pointer h-9 px-3 inline-flex items-center"
-                :class="locale === 'cs' ? 'bg-primary-50' : 'hover:bg-neutral-50 grayscale opacity-60'"
-              >
-                <svg width="22" height="15" viewBox="0 0 6 4" xmlns="http://www.w3.org/2000/svg">
-                  <rect width="6" height="2" fill="#ffffff"/>
-                  <rect y="2" width="6" height="2" fill="#d7141a"/>
-                  <polygon points="0,0 3,2 0,4" fill="#11457e"/>
-                </svg>
-              </button>
-              <button
-                @click="setLocale('en')" title="English"
-                class="cursor-pointer h-9 px-3 inline-flex items-center border-l border-neutral-200"
-                :class="locale === 'en' ? 'bg-primary-50' : 'hover:bg-neutral-50 grayscale opacity-60'"
-              >
-                <svg width="22" height="15" viewBox="0 0 60 30" xmlns="http://www.w3.org/2000/svg">
-                  <clipPath id="uk-flag-mob"><path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z"/></clipPath>
-                  <path d="M0,0 v30 h60 v-30 z" fill="#012169"/>
-                  <path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/>
-                  <path d="M0,0 L60,30 M60,0 L0,30" clip-path="url(#uk-flag-mob)" stroke="#C8102E" stroke-width="4"/>
-                  <path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/>
-                  <path d="M30,0 v30 M0,15 h60" stroke="#C8102E" stroke-width="6"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div class="grid gap-2" :class="canLockSession ? 'grid-cols-2' : 'grid-cols-1'">
-            <button
-              v-if="canLockSession"
-              @click="sessionSecurity.lock"
-              class="cursor-pointer w-full px-2 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface"
-            >{{ t('session_lock.lock_now') }}</button>
-            <button
-              @click="logout"
-              :disabled="logoutBusy"
-              class="cursor-pointer w-full px-2 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface disabled:opacity-60"
-            >{{ t('nav.logout') }}</button>
-          </div>
-        </div>
-      </aside>
-
-      <!-- ── HLAVNÍ OBSAH ── -->
-      <div class="flex-1 min-w-0 flex flex-col">
-        <main class="flex-1 px-5 sm:px-8 py-6 w-full">
-          <RouterView />
-        </main>
-
-        <footer class="px-5 sm:px-8 py-5 border-t border-neutral-200 text-xs text-neutral-500 flex flex-wrap items-center gap-x-1.5 gap-y-1 leading-none">
-          <span>Developed by</span>
-          <a href="https://mywebdesign.cz" target="_blank" rel="noopener" class="hover:text-neutral-700">MyWebdesign.cz s.r.o.</a>
-          <span aria-hidden="true">·</span>
-          <a href="https://github.com/radekhulan/myinvoice" target="_blank" rel="noopener"
-             class="inline-flex items-center gap-1 hover:text-neutral-700">
-            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+            <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5m-4 0h4"/>
             </svg>
-            <span>GitHub</span>
-          </a>
-          <span aria-hidden="true">·</span>
-          <button type="button" @click="supportOpen = true"
-                  class="cursor-pointer text-primary-600 hover:text-primary-700 font-medium">{{ t('support.author_link') }}</button>
-          <span aria-hidden="true">·</span>
-          <button type="button" @click="featureOpen = true"
-                  class="cursor-pointer text-primary-600 hover:text-primary-700 font-medium">{{ t('support.feature_link') }}</button>
-        </footer>
-      </div>
+            <span class="hidden md:inline shrink-0">{{ t('supplier.active_label') }}:</span>
+            <SupplierSwitcher />
+          </div>
+
+          <div class="flex-1"></div>
+
+          <!-- ⋯ menu: jazyk, motiv, nápověda, zámek -->
+          <div class="relative">
+            <button
+              type="button" @click="moreOpen = !moreOpen"
+              :aria-expanded="moreOpen" :aria-label="t('nav.more')" :title="t('nav.more')"
+              class="cursor-pointer inline-flex items-center justify-center w-10 h-10 rounded-full text-white bg-white/10 hover:bg-white/20 transition-colors"
+              :class="{ 'bg-white/20': moreOpen }"
+            >
+              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/>
+              </svg>
+            </button>
+            <transition
+              enter-active-class="transition duration-100 ease-out"
+              enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100"
+              leave-active-class="transition duration-75 ease-in"
+              leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95"
+            >
+              <div v-if="moreOpen" class="absolute right-0 mt-2 w-64 bg-surface rounded-xl shadow-lg p-2 z-40">
+                <div class="px-2 pt-1 pb-1.5 text-xs text-neutral-500">{{ t('nav.language') }}</div>
+                <div class="px-2 pb-2 inline-flex items-center border border-neutral-200 rounded-full overflow-hidden">
+                  <button
+                    @click="setLocale('cs')" title="Čeština" aria-label="Čeština"
+                    class="cursor-pointer h-8 px-2.5 inline-flex items-center"
+                    :class="locale === 'cs' ? 'bg-primary-50' : 'hover:bg-neutral-50 grayscale opacity-60 hover:grayscale-0 hover:opacity-100'"
+                  >
+                    <svg width="22" height="15" viewBox="0 0 6 4" xmlns="http://www.w3.org/2000/svg">
+                      <rect width="6" height="2" fill="#ffffff"/>
+                      <rect y="2" width="6" height="2" fill="#d7141a"/>
+                      <polygon points="0,0 3,2 0,4" fill="#11457e"/>
+                    </svg>
+                  </button>
+                  <button
+                    @click="setLocale('en')" title="English" aria-label="English"
+                    class="cursor-pointer h-8 px-2.5 inline-flex items-center border-l border-neutral-200"
+                    :class="locale === 'en' ? 'bg-primary-50' : 'hover:bg-neutral-50 grayscale opacity-60 hover:grayscale-0 hover:opacity-100'"
+                  >
+                    <svg width="22" height="15" viewBox="0 0 60 30" xmlns="http://www.w3.org/2000/svg">
+                      <clipPath id="uk-flag-menu"><path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z"/></clipPath>
+                      <path d="M0,0 v30 h60 v-30 z" fill="#012169"/>
+                      <path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/>
+                      <path d="M0,0 L60,30 M60,0 L0,30" clip-path="url(#uk-flag-menu)" stroke="#C8102E" stroke-width="4"/>
+                      <path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/>
+                      <path d="M30,0 v30 M0,15 h60" stroke="#C8102E" stroke-width="6"/>
+                    </svg>
+                  </button>
+                </div>
+                <div class="px-2 pt-1 pb-1.5 text-xs text-neutral-500 border-t border-neutral-100">{{ t('theme.label') }}</div>
+                <div class="px-2 pb-2">
+                  <ThemeToggle />
+                </div>
+                <div class="border-t border-neutral-100 pt-1">
+                  <a
+                    href="/manual" target="_blank" rel="noopener" @click="moreOpen = false"
+                    class="flex items-center gap-2.5 px-2 py-2 rounded-lg text-sm text-neutral-700 hover:bg-neutral-100 hover:text-primary-700"
+                  >
+                    <svg class="w-4 h-4 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
+                    </svg>
+                    {{ t('nav.help') }}
+                  </a>
+                  <button
+                    v-if="canLockSession"
+                    @click="moreOpen = false; sessionSecurity.lock()"
+                    class="cursor-pointer w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-sm text-neutral-700 hover:bg-neutral-100 hover:text-primary-700"
+                  >
+                    <svg class="w-4 h-4 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z" />
+                    </svg>
+                    {{ t('session_lock.lock_now') }}
+                  </button>
+                </div>
+              </div>
+            </transition>
+            <div v-if="moreOpen" @click="moreOpen = false" class="fixed inset-0 z-10" aria-hidden="true"></div>
+          </div>
+
+          <!-- Avatar + jméno (desktop) — link na profil (heslo + 2FA v záložkách). -->
+          <RouterLink
+            to="/profile/password"
+            class="hidden lg:flex items-center gap-2 group"
+            :title="t('auth.profile_title')"
+          >
+            <span class="w-9 h-9 rounded-full bg-white/15 text-white text-xs font-semibold flex items-center justify-center select-none">{{ initials }}</span>
+            <span class="text-sm text-white/90 group-hover:text-white group-hover:underline">{{ auth.user?.name }}</span>
+          </RouterLink>
+
+          <!-- Odhlásit (desktop) -->
+          <button
+            @click="logout"
+            :disabled="logoutBusy"
+            class="cursor-pointer hidden sm:inline-flex px-4 h-9 items-center text-sm border border-white/20 rounded-full text-white/80 hover:bg-white/10 hover:text-white disabled:opacity-60 transition-colors"
+          >{{ t('nav.logout') }}</button>
+        </div>
+      </header>
+
+      <!-- Plovoucí bílý panel s obsahem -->
+      <main class="flex-1 flex flex-col min-w-0 px-3 sm:px-6 pb-2">
+        <div class="flex-1 min-w-0 bg-surface rounded-(--radius-panel) p-5 sm:p-(--space-panel)">
+          <RouterView />
+        </div>
+      </main>
+
+      <footer class="px-6 sm:px-9 py-4 text-xs text-white/40 flex flex-wrap items-center gap-x-1.5 gap-y-1 leading-none">
+        <span>Developed by</span>
+        <a href="https://mywebdesign.cz" target="_blank" rel="noopener" class="hover:text-white/80">MyWebdesign.cz s.r.o.</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://github.com/radekhulan/myinvoice" target="_blank" rel="noopener"
+           class="inline-flex items-center gap-1 hover:text-white/80">
+          <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
+        <span aria-hidden="true">·</span>
+        <button type="button" @click="supportOpen = true"
+                class="cursor-pointer text-white/60 hover:text-white font-medium">{{ t('support.author_link') }}</button>
+        <span aria-hidden="true">·</span>
+        <button type="button" @click="featureOpen = true"
+                class="cursor-pointer text-white/60 hover:text-white font-medium">{{ t('support.feature_link') }}</button>
+      </footer>
     </div>
 
     <!-- ── MODÁL: Podpora autora ── -->
@@ -730,7 +748,7 @@ onMounted(async () => {
         </div>
         <footer class="px-5 py-4 border-t border-neutral-200 flex justify-end">
           <button @click="supportOpen = false"
-                  class="cursor-pointer px-4 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface">{{ t('support.close') }}</button>
+                  class="cursor-pointer px-4 h-9 text-sm border border-neutral-300 rounded-full text-neutral-700 hover:bg-neutral-50">{{ t('support.close') }}</button>
         </footer>
       </div>
     </div>
@@ -751,9 +769,9 @@ onMounted(async () => {
         </div>
         <footer class="px-5 py-4 border-t border-neutral-200 flex justify-end gap-2">
           <button @click="featureOpen = false"
-                  class="cursor-pointer px-4 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface">{{ t('support.close') }}</button>
+                  class="cursor-pointer px-4 h-9 text-sm border border-neutral-300 rounded-full text-neutral-700 hover:bg-neutral-50">{{ t('support.close') }}</button>
           <a href="https://mywebdesign.cz/#kontakt" target="_blank" rel="noopener" @click="featureOpen = false"
-             class="cursor-pointer px-4 h-9 inline-flex items-center text-sm rounded-md bg-primary-600 hover:bg-primary-700 text-white font-medium">{{ t('support.feature_cta') }}</a>
+             class="cursor-pointer px-4 h-9 inline-flex items-center text-sm rounded-full bg-primary-600 hover:bg-primary-700 text-white font-medium">{{ t('support.feature_cta') }}</a>
         </footer>
       </div>
     </div>

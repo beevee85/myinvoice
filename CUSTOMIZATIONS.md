@@ -6,6 +6,20 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-27 — REDESIGN Fáze 2: layout shell — tmavá plocha + plovoucí panel (větev feature/redesign)
+
+**Co se změnilo:**
+1. **`AppLayout.vue` kompletně přestavěn** (logika beze změny — routing, guardy, handlery, `logout()`, `canLockSession` 1:1): tmavá plocha `--app-bg` pod celou appkou; sidebar 240 px sedí přímo na tmavém pozadí (světlý text, sekce oddělené linkou `white/10`, aktivní položka = plná `--primary` pilulka, hover 8 % bílá); nahoře zelené CTA „+ Vytvořit" (`--accent-cta`, pilulka 44 px, chevron → dropdown dosavadních quick akcí z topbaru); obsah = bílý plovoucí panel `bg-surface` + `radius-panel` + `space-panel` bez borderu/stínu; topbar zjednodušen na: pilulku „Pracuješ jako" s přepínačem firmy, ⋯ kruhové menu (vlajky CS/EN, motiv, nápověda, zámek relace), avatar s iniciálami + jméno, Odhlásit.
+2. Satelity: `ThemeToggle.vue` + prop `on-dark`; `SupplierSwitcher.vue` trigger jako světlá pilulka; `GlobalSearch.vue` input tmavá pilulka; `AppShell.vue` (login/setup) na tmavé ploše; `NotFound.vue` + `bg-neutral-50`.
+3. `redesign.css`: `body { background: var(--app-bg) }`. `index.html` + `manifest.webmanifest`: theme-color/background_color `#1E2050`.
+4. **Testy zachovány beze změn souborů testů**: `layout-ui` i `auth-session-lifecycle` procházejí (mobilní patička sidebaru drží strukturu i komentář, přesně 2× `v-if="canLockSession"`, logout catch beze změny). i18n: + `nav.more`, `nav.language` (cs+en).
+
+**Které soubory:** `web/src/components/layout/AppLayout.vue` (přestavba template), `AppShell.vue`, `ThemeToggle.vue`, `SupplierSwitcher.vue`, `GlobalSearch.vue`, `web/src/pages/NotFound.vue`, `web/src/styles/redesign.css`, `web/index.html`, `web/public/manifest.webmanifest`, `web/src/i18n/cs.json` + `en.json` (+2 klíče).
+
+**Proč:** Fáze 2 redesignu — app shell ve stylu moderních fakturačních aplikací (plovoucí panel na tmavé ploše). Bez změny funkcionality.
+
+**Jak ověřit po merge:** build + testy projdou; po přihlášení tmavé pozadí `#1E2050`, obsah v bílém zaobleném panelu, sidebar s aktivní indigo pilulkou a zeleným „+ Vytvořit" (rozbalí 8 akcí), topbar jen pilulka firmy + ⋯ menu + avatar + Odhlásit; na mobilu hamburger → off-canvas sidebar s patičkou (profil, motiv, vlajky, zámek/odhlásit). Pozor při upstream merge: template AppLayout je celý forkový — konflikty řešit ve prospěch redesignu a doplnit nové upstream nav položky ručně.
+
 ## 2026-07-27 — REDESIGN Fáze 1: design tokeny, self-host fonty, typografie (větev feature/redesign)
 
 **Co se změnilo:**

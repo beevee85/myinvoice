@@ -2,6 +2,9 @@
 import { useI18n } from 'vue-i18n'
 import { useTheme, type ThemePreference } from '@/composables/useTheme'
 
+/** onDark: varianta pro tmavou plochu app shellu (sidebar/topbar) — světlé barvy. */
+const props = defineProps<{ onDark?: boolean }>()
+
 const { t } = useI18n()
 const { preference } = useTheme()
 
@@ -27,7 +30,8 @@ const OPTIONS: { value: ThemePreference; key: string; icon: string }[] = [
 
 <template>
   <div
-    class="inline-flex items-center border border-neutral-200 rounded-md overflow-hidden"
+    class="inline-flex items-center border rounded-full overflow-hidden"
+    :class="props.onDark ? 'border-white/20' : 'border-neutral-200'"
     role="group"
     :aria-label="t('theme.label')"
   >
@@ -39,12 +43,12 @@ const OPTIONS: { value: ThemePreference; key: string; icon: string }[] = [
       :title="t(opt.key)"
       :aria-label="t(opt.key)"
       :aria-pressed="preference === opt.value"
-      class="cursor-pointer h-8 px-2 inline-flex items-center"
+      class="cursor-pointer h-8 px-2.5 inline-flex items-center"
       :class="[
-        i > 0 ? 'border-l border-neutral-200' : '',
+        i > 0 ? (props.onDark ? 'border-l border-white/20' : 'border-l border-neutral-200') : '',
         preference === opt.value
-          ? 'bg-primary-50 text-primary-700'
-          : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700',
+          ? (props.onDark ? 'bg-white/15 text-white' : 'bg-primary-50 text-primary-700')
+          : (props.onDark ? 'text-white/60 hover:bg-white/10 hover:text-white' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700'),
       ]"
     >
       <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

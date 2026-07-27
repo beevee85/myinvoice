@@ -114,6 +114,13 @@
   --color-warning-600: #F59E0B;
 }
 
+/* ─── App shell: tmavá plocha pod celou appkou (Fáze 2) ───
+ * Obsah plave jako bílý panel (bg-surface, radius-panel) v AppLayout.vue.
+ * Veřejné stránky mají vlastní světlé min-h-screen wrappery, body pod nimi nevykoukne. */
+body {
+  background: var(--app-bg);
+}
+
 /* ─── Typografie ───
  * Tělo zůstává Inter (--font-sans, teď poprvé skutečně načtený); nadpisy
  * zaobleným Nunito. Base 16px, h1 24/600, h2 20/600. */

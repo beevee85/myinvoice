@@ -128,7 +128,7 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
 <template>
   <div class="relative px-0.5 pb-2">
     <div class="relative">
-      <svg class="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
+      <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/50 pointer-events-none"
            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
       </svg>
@@ -137,7 +137,7 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
         v-model="q"
         type="text"
         :placeholder="t('search.placeholder')"
-        class="w-full pl-8 pr-3 py-1.5 text-sm rounded-md border border-neutral-200 bg-neutral-50 focus:bg-surface focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-200"
+        class="w-full h-10 pl-9 pr-3 text-sm rounded-full border border-transparent bg-white/10 text-white placeholder:text-white/50 focus:bg-white/15 focus:outline-none"
         autocomplete="off"
         spellcheck="false"
         @focus="open = q.trim().length > 0"
