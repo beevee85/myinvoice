@@ -175,7 +175,7 @@ onUnmounted(() => {
         :disabled="disabled"
         autocomplete="off"
         :class="[
-          'w-full h-10 pl-3 pr-16 border border-neutral-300 rounded-md text-sm bg-surface',
+          'w-full h-(--control-h) pl-4 pr-16 border border-neutral-200 rounded-full text-sm bg-surface',
           'focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none',
           'disabled:bg-neutral-50 disabled:text-neutral-400',
         ]"
@@ -190,14 +190,17 @@ onUnmounted(() => {
         class="cursor-pointer absolute right-7 top-1/2 -translate-y-1/2 w-6 h-6 inline-flex items-center justify-center text-neutral-400 hover:text-neutral-700 text-lg leading-none"
         :aria-label="'Zrušit výběr'"
       >×</button>
-      <span class="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none text-xs">▼</span>
+      <svg class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400 pointer-events-none"
+           fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+      </svg>
     </div>
     <div
       v-if="open"
       ref="listbox"
       id="searchable-select-listbox"
       role="listbox"
-      class="absolute z-50 left-0 right-0 mt-1 bg-surface border border-neutral-200 rounded-md shadow-lg max-h-72 overflow-y-auto"
+      class="absolute z-50 left-0 right-0 mt-1 bg-surface border border-neutral-200 rounded-lg shadow-lg max-h-72 overflow-y-auto"
     >
       <div v-if="remote && loading" class="px-3 py-2 text-sm text-neutral-400">
         {{ loadingLabel }}

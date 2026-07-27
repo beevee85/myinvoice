@@ -6,6 +6,20 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-27 — REDESIGN Fáze 4: přestavba stránky Vydané faktury (větev feature/redesign)
+
+**Co se změnilo (`web/src/pages/invoices/InvoiceList.vue` — logika 1:1, přestavěn template):**
+1. **Taby stavů** (Všechny/Zaplacené/Nezaplacené/Po splatnosti/Koncepty) = presety EXISTUJÍCÍCH filtrů (paid/draft → `filter[status]`, Nezaplacené → `unpaid_only`, Po splatnosti → `overdue`); žádná nová API sémantika, URL query beze změny. Jiný stav z panelu (Vystaveno…) = žádný aktivní tab.
+2. **Toolbar hromadných akcí jako kruhové ikony** — stejných 6 akcí + CSV (PDF výběru, vystavit, označit zaplaceno, odeslat, upomínky, klonovat), nově `disabled` dokud výběr nesplňuje podmínky akce (dřív se tlačítka objevovala/mizela). Tooltipy s počty přes stávající i18n klíče.
+3. **Panel filtrů** (--surface-muted, radius 20) rozbalovaný tlačítkem „Filtry" s badge počtu; nativní selecty (5×) → `AppSelect`, date inputy (2×) → `DatePicker`, checkboxy → `Checkbox`. Deep-link s filtry mimo taby panel automaticky rozbalí. **Aktivní filtry jako odstranitelné chipy** (vč. odchylky roku od výchozího).
+4. **Sticky měsíční pruh** --surface-muted (top-16 = pod topbarem) s názvem měsíce, počtem a součty/predikcí vpravo; tabulka `.ui-table` se sloupci dle zadání: checkbox (Checkbox s indeterminate), Var. symbol (odkaz primary/600, tabular-nums), Klient bold + zakázka 12 px muted, Typ (Badge), DUZP/Vystaveno (taxDateClass), Splatnost (červeně po splatnosti), K úhradě (.num), Stav (**StatusDot** s tooltipem, ✉/⚠ mini-indikátory zachovány, „Výkaz" button u konceptů zachován), **Akce** = hover ikony (Upravit u konceptů, PDF, Duplikovat — stejný flow jako na detailu vč. confirmů, ⋯ detail).
+5. „Načíst další" zachováno (klasické stránkování tu nikdy nebylo), teď jako pilulkové tlačítko. Hromadný PDF export → sdílená `Modal` + `Checkbox` + pilulková tlačítka. Mobilní karty: Checkbox/StatusDot/displayStatus (sjednocena dřívější nekonzistence desktop vs mobil). i18n: + `invoice.tab_*` (cs+en).
+6. `SearchableSelect.vue`: input restyle na pilulku (rounded-full, h-40px, SVG chevron) — projeví se i na 7 dalších místech, API beze změny.
+
+**Proč:** Fáze 4 redesignu — vzorová seznamová stránka pro ostatní seznamy (F4+ vzor převezme purchase-invoices).
+
+**Jak ověřit po merge:** build+testy ✓; /invoices: taby přepínají filtry (URL query stejné jako dřív), výběr → ikony toolbaru se aktivují, filtr panel + chipy, měsíční pruhy sticky, hover řádku ukáže akce; formulářová data filtrů identická (AppSelect/DatePicker drží stejný kontrakt). Pozor při upstream merge: template je celý forkový.
+
 ## 2026-07-27 — REDESIGN Fáze 3: sada reusable UI komponent (větev feature/redesign)
 
 **Co se změnilo:**

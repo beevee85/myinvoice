@@ -1480,6 +1480,7 @@
     "amount_to_pay": "K úhradě",
     "status_label": "Stav",
     "subtitle_grouping": "Seskupené podle DUZP (u proformy podle data vystavení)",
+    "tab_all": "Všechny", "tab_paid": "Zaplacené", "tab_unpaid": "Nezaplacené", "tab_overdue": "Po splatnosti", "tab_drafts": "Koncepty",
     "draft_id": "koncept #{id}",
     "back_to_list": "← Zpět na seznam",
     "issue": "Vystavit",

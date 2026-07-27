@@ -1480,6 +1480,7 @@
     "amount_to_pay": "Amount due",
     "status_label": "Status",
     "subtitle_grouping": "Grouped by tax point (or issue date for proformas)",
+    "tab_all": "All", "tab_paid": "Paid", "tab_unpaid": "Unpaid", "tab_overdue": "Overdue", "tab_drafts": "Drafts",
     "draft_id": "draft #{id}",
     "back_to_list": "← Back to list",
     "issue": "Issue",

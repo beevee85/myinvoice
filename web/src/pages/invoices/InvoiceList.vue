@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { invoicesApi, type MonthGroup, type InvoiceListItem } from '@/api/invoices'
-import { formatMoney, formatDate, formatMonth, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
+import { formatMoney, formatDate, formatMonth, statusLabel, typeLabel, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
 import { useHotkey } from '@/composables/useHotkey'
 import { useRowLink } from '@/composables/useRowLink'
 import { useToast } from '@/composables/useToast'
@@ -15,7 +15,15 @@ import { useYearOptions } from '@/composables/useYearOptions'
 import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
-import FilterBar from '@/components/ui/FilterBar.vue'
+import AppSelect from '@/components/ui/AppSelect.vue'
+import DatePicker from '@/components/ui/DatePicker.vue'
+import Checkbox from '@/components/ui/Checkbox.vue'
+import Button from '@/components/ui/Button.vue'
+import IconButton from '@/components/ui/IconButton.vue'
+import Badge from '@/components/ui/Badge.vue'
+import StatusDot from '@/components/ui/StatusDot.vue'
+import TabsNav from '@/components/ui/TabsNav.vue'
+import Modal from '@/components/ui/Modal.vue'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 
 const { t, tm, rt } = useI18n()
@@ -49,7 +57,10 @@ const currencyFilter = ref<string>('')
 const clients = ref<Client[]>([])
 const currencies = ref<Currency[]>([])
 
-// Počet aktivních filtrů pro odznáček na mobilním tlačítku „Filtry" (rok i hledání se nepočítají — rok má výchozí hodnotu, hledání je vždy vidět)
+/** Panel filtrů (rozbaluje tlačítko „Filtry" s badge počtu aktivních). */
+const showFilters = ref(false)
+
+// Počet aktivních filtrů pro odznáček na tlačítku „Filtry" (rok i hledání se nepočítají — rok má výchozí hodnotu, hledání je vždy vidět)
 const activeFilterCount = computed(() => {
   let n = 0
   if (statusFilter.value) n++
@@ -61,6 +72,53 @@ const activeFilterCount = computed(() => {
   if (overdueOnly.value) n++
   if (unpaidOnly.value) n++
   return n
+})
+
+// ─── Taby stavů = presety existujících filtrů (žádná nová API sémantika) ───
+const statusTabs = computed(() => [
+  { value: 'all',     label: t('invoice.tab_all') },
+  { value: 'paid',    label: t('invoice.tab_paid') },
+  { value: 'unpaid',  label: t('invoice.tab_unpaid') },
+  { value: 'overdue', label: t('invoice.tab_overdue') },
+  { value: 'draft',   label: t('invoice.tab_drafts') },
+])
+const activeTab = computed<string>(() => {
+  if (overdueOnly.value) return 'overdue'
+  if (unpaidOnly.value) return 'unpaid'
+  if (statusFilter.value === 'paid') return 'paid'
+  if (statusFilter.value === 'draft') return 'draft'
+  if (!statusFilter.value) return 'all'
+  return '' // jiný stav vybraný v panelu filtrů — žádný tab není aktivní
+})
+function setTab(v: string | number) {
+  const tab = String(v)
+  // preset přepisuje jen stavovou trojici (status / unpaid / overdue); ostatní filtry nechává
+  statusFilter.value = tab === 'paid' ? 'paid' : (tab === 'draft' ? 'draft' : '')
+  unpaidOnly.value = tab === 'unpaid'
+  overdueOnly.value = tab === 'overdue'
+}
+
+// ─── Odstranitelné chipy aktivních filtrů (zrcadlí activeFilterCount + odchylku roku) ───
+const filterChips = computed(() => {
+  const chips: { key: string; label: string; clear: () => void }[] = []
+  if (statusFilter.value) chips.push({ key: 'status', label: statusLabel(statusFilter.value), clear: () => { statusFilter.value = '' } })
+  if (typeFilter.value) chips.push({ key: 'type', label: typeLabel(typeFilter.value), clear: () => { typeFilter.value = '' } })
+  if (clientFilter.value !== '') {
+    const c = clients.value.find(x => x.id === clientFilter.value)
+    chips.push({ key: 'client', label: c?.company_name ?? `#${clientFilter.value}`, clear: () => { clientFilter.value = '' } })
+  }
+  if (currencyFilter.value) chips.push({ key: 'currency', label: currencyFilter.value, clear: () => { currencyFilter.value = '' } })
+  if (monthFilter.value !== '') chips.push({ key: 'month', label: monthOptions.value[Number(monthFilter.value) - 1] ?? String(monthFilter.value), clear: () => { monthFilter.value = '' } })
+  if (dateFrom.value || dateTo.value) chips.push({
+    key: 'range',
+    label: `${dateFrom.value ? formatDate(dateFrom.value) : '…'} – ${dateTo.value ? formatDate(dateTo.value) : '…'}`,
+    clear: () => { dateFrom.value = ''; dateTo.value = '' },
+  })
+  if (overdueOnly.value) chips.push({ key: 'overdue', label: t('invoice.overdue_only'), clear: () => { overdueOnly.value = false } })
+  if (unpaidOnly.value) chips.push({ key: 'unpaid', label: t('invoice.unpaid_only'), clear: () => { unpaidOnly.value = false } })
+  if (yearFilter.value === '') chips.push({ key: 'year', label: t('invoice.all_years'), clear: () => { yearFilter.value = DEFAULT_YEAR } })
+  else if (yearFilter.value !== DEFAULT_YEAR) chips.push({ key: 'year', label: String(yearFilter.value), clear: () => { yearFilter.value = DEFAULT_YEAR } })
+  return chips
 })
 
 const selectedIds = ref<number[]>([])
@@ -385,6 +443,32 @@ async function exportCsv() {
   }
 }
 
+// ─── Rychlé akce řádku (poslední sloupec, zobrazené při hoveru) — zkratky k EXISTUJÍCÍM akcím ───
+const rowBusyId = ref<number | null>(null)
+
+function rowPdf(inv: InvoiceListItem) {
+  window.open(invoicesApi.pdfUrl(inv.id, false), '_blank')
+}
+
+// Stejný flow jako „Duplikovat" na detailu faktury (clone_confirm + posun měsíců v popiscích).
+async function rowClone(inv: InvoiceListItem) {
+  if (!confirm(t('invoice.clone_confirm', { varsymbol: inv.varsymbol || `#${inv.id}` }))) return
+  const incrementMonths = confirm(t('invoice.clone_increment_confirm'))
+  rowBusyId.value = inv.id
+  try {
+    const r = await invoicesApi.clone(inv.id, { increment_month_in_descriptions: incrementMonths })
+    if (!r?.draft_id) {
+      toast.error(t('invoice.invalid_response'))
+      return
+    }
+    router.push(`/invoices/${r.draft_id}/edit`)
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('invoice.clone_failed'))
+  } finally {
+    rowBusyId.value = null
+  }
+}
+
 function mergeGroups(existing: MonthGroup[], incoming: MonthGroup[]): MonthGroup[] {
   const byMonth = new Map<string, MonthGroup>()
   for (const g of existing) byMonth.set(g.month, g)
@@ -456,6 +540,8 @@ const DEFAULT_YEAR = new Date().getFullYear()
 
 onMounted(async () => {
   loadFiltersFromQuery(route.query)
+  // Panel filtrů rozbalit, když URL nese aktivní filtry (deep-link z KPI dlaždic apod.)
+  showFilters.value = activeFilterCount.value > 0 && activeTab.value === ''
   // Načti seznam klientů + měn pro select (paralelně s prvním load)
   clientsApi.list({ archived: false, per_page: 200, role: 'customers' }).then(r => { clients.value = r.data }).catch(() => {})
   codebooksApi.currencies().then(r => {
@@ -554,144 +640,192 @@ const yearOptions = useYearOptions('invoices', yearFilter)
 // `tm()` vrací raw translation message (pole), kdežto `t()` na poli vrátí stringified verzi.
 // `rt()` zformátuje jednotlivé položky pole (pro případnou interpolaci).
 const monthOptions = computed(() => (tm('common.months_short') as unknown as string[]).map(m => rt(m)))
+
+// ─── Vzhledové mapy pro nové komponenty ───
+const TYPE_BADGE: Record<string, 'primary' | 'accent' | 'purple' | 'amber' | 'neutral'> = {
+  invoice: 'primary',
+  proforma: 'accent',
+  credit_note: 'purple',
+  tax_document: 'amber',
+  cancellation: 'neutral',
+}
+
+/** Stav → StatusDot (text stavu jde do tooltipu; po splatnosti má přednost červená). */
+function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'muted' | 'info'; title: string } {
+  const ds = displayStatus(inv.status, inv.payment_status)
+  if (isOverdue(inv.due_date, inv.status)) {
+    return { kind: 'danger', title: `${statusLabel(ds)} · ${t('invoice.overdue_only')}` }
+  }
+  const map: Record<string, 'ok' | 'danger' | 'pending' | 'muted' | 'info'> = {
+    paid: 'ok',
+    partially_paid: 'pending',
+    overpaid: 'info',
+    issued: 'pending',
+    sent: 'pending',
+    reminded: 'pending',
+    draft: 'muted',
+    cancelled: 'muted',
+  }
+  return { kind: map[ds] ?? 'muted', title: statusLabel(ds) }
+}
 </script>
 
 <template>
   <div>
+    <!-- Hlavička stránky -->
     <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
       <div>
-        <h1 class="text-2xl font-semibold">{{ t('invoice.title') }}</h1>
+        <h1>{{ t('invoice.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('invoice.subtitle_grouping') }}</p>
       </div>
-      <div class="flex items-center gap-2">
-        <button v-if="selectedIds.length > 0"
-          @click="openBulkPdfExport"
-          :disabled="bulkBusy"
-          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-primary-500 text-primary-700 hover:bg-primary-50 disabled:opacity-50 text-sm font-medium rounded-md">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 12l-4-4m4 4l4-4M4 20h16"/></svg>
-          {{ t('invoice.bulk_pdf', { n: selectedIds.length }) }}
-        </button>
-        <button v-if="(issuableSelected.length > 0) && auth.canWrite"
-          @click="bulkIssue"
-          :disabled="bulkBusy"
-          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium rounded-md">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-          {{ bulkBusy ? '…' : t('invoice.bulk_issue', { n: issuableSelected.length }) }}
-        </button>
-        <button v-if="(selectedIds.length > 0) && auth.canWrite"
-          @click="bulkReissue"
-          :disabled="bulkBusy"
-          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-primary-500 text-primary-700 hover:bg-primary-50 disabled:opacity-50 text-sm font-medium rounded-md">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2m-6 12h8a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z"/></svg>
-          {{ bulkBusy ? '…' : t('invoice.bulk_reissue', { n: selectedIds.length }) }}
-        </button>
-        <button v-if="(markPayableSelected.length > 0) && auth.canWrite"
-          @click="bulkMarkPaid"
-          :disabled="bulkBusy"
-          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-success-500 text-success-600 hover:bg-success-50 disabled:opacity-50 text-sm font-medium rounded-md">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 14l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
-          {{ bulkBusy ? '…' : t('invoice.bulk_mark_paid', { n: markPayableSelected.length }) }}
-        </button>
-        <button v-if="(sendableSelected.length > 0) && auth.canWrite"
-          @click="bulkSend"
-          :disabled="bulkBusy"
-          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium rounded-md">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 0 0 2.22 0L21 8M5 19h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2z"/></svg>
-          {{ bulkBusy ? '…' : t('invoice.bulk_send', { n: sendableSelected.length }) }}
-        </button>
-        <button v-if="(reminderSelected.length > 0) && auth.canWrite"
-          @click="bulkSendReminders"
-          :disabled="bulkBusy"
-          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 bg-warning-500 hover:bg-warning-600 disabled:opacity-50 text-white text-sm font-medium rounded-md">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 0 0-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/></svg>
-          {{ bulkBusy ? '…' : t('invoice.bulk_reminder', { n: reminderSelected.length }) }}
-        </button>
-        <RouterLink
-          v-if="auth.canWrite"
-          to="/invoices/new"
-          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md"
-        >
-          {{ t('invoice.new') }}
-        </RouterLink>
-      </div>
+      <Button v-if="auth.canWrite" variant="primary" to="/invoices/new">+ {{ t('invoice.new') }}</Button>
     </div>
 
-    <!-- Filtry -->
-    <FilterBar :active-count="activeFilterCount">
-      <template #primary>
+    <!-- Taby stavů (presety filtrů) -->
+    <TabsNav :model-value="activeTab" :tabs="statusTabs" class="mb-4" @update:model-value="setTab" />
+
+    <!-- Search + toolbar hromadných akcí + Filtry -->
+    <div class="flex items-center gap-2 flex-wrap mb-3">
+      <div class="relative flex-1 min-w-56 max-w-md">
+        <svg class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
+             fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
+        </svg>
         <input
           v-model="search"
           type="search"
           :placeholder="t('invoice.search_placeholder')"
-          class="flex-1 min-w-48 h-9 px-3 border border-neutral-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
+          class="w-full h-10 pl-10 pr-4 rounded-full border border-neutral-200 bg-surface text-sm focus-visible:outline-none"
         />
-      </template>
-        <select v-model="statusFilter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
-          <option value="">{{ t('invoice.all_statuses') }}</option>
-          <option value="draft">{{ t('status.draft') }}</option>
-          <option value="issued">{{ t('status.issued') }}</option>
-          <option value="sent">{{ t('status.sent') }}</option>
-          <option value="reminded">{{ t('status.reminded') }}</option>
-          <option value="paid">{{ t('status.paid') }}</option>
-          <option value="cancelled">{{ t('status.cancelled') }}</option>
-        </select>
-        <select v-model="typeFilter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
-          <option value="">{{ t('invoice.all_types') }}</option>
-          <option value="invoice">{{ t('type.invoice') }}</option>
-          <option value="proforma">{{ t('type.proforma') }}</option>
-          <option value="credit_note">{{ t('type.credit_note') }}</option>
-        </select>
-        <div class="min-w-48 flex-1 max-w-xs">
-          <SearchableSelect
-            :model-value="clientFilter === '' ? null : clientFilter"
-            @update:model-value="(v) => clientFilter = v === null ? '' : v"
-            :options="clients.map(c => ({ value: c.id, label: c.company_name, secondary: c.ic ?? undefined }))"
-            :placeholder="t('project.all_clients')"
-          />
-        </div>
-        <select v-model="currencyFilter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
-          <option value="">{{ t('invoice.all_currencies') }}</option>
-          <option v-for="c in currencies" :key="c.id" :value="c.code">{{ c.code }}</option>
-        </select>
-        <select v-model="yearFilter" :disabled="!!dateFrom || !!dateTo"
-          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm disabled:opacity-50">
-          <option value="">{{ t('invoice.all_years') }}</option>
-          <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
-        </select>
-        <select v-model="monthFilter" :disabled="!!dateFrom || !!dateTo || yearFilter === ''"
-          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm disabled:opacity-50"
-          :title="t('invoice.month_filter')">
-          <option :value="''">{{ t('invoice.all_months') }}</option>
-          <option v-for="(label, i) in monthOptions" :key="i + 1" :value="i + 1">{{ label }}</option>
-        </select>
-        <input v-model="dateFrom" type="date" placeholder="Od"
-          class="h-9 px-2 border border-neutral-300 rounded-md text-sm" title="Datum od" />
-        <input v-model="dateTo" type="date" placeholder="Do"
-          class="h-9 px-2 border border-neutral-300 rounded-md text-sm" title="Datum do" />
-        <button v-if="dateFrom || dateTo" @click="dateFrom = ''; dateTo = ''"
-          class="cursor-pointer h-9 px-2 text-xs text-neutral-500 hover:text-neutral-700">{{ t('invoice.clear_date_filter') }}</button>
-        <label class="flex items-center gap-1.5 text-sm text-neutral-700 px-2">
-          <input v-model="overdueOnly" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
-          {{ t('invoice.overdue_only') }}
-        </label>
-        <label class="flex items-center gap-1.5 text-sm text-neutral-700 px-2">
-          <input v-model="unpaidOnly" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
-          {{ t('invoice.unpaid_only') }}
-        </label>
-        <button @click="exportCsv"
-          class="cursor-pointer ml-auto h-9 px-3 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md text-sm inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 0 1 2-2h11l5 5v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-          {{ t('invoice.csv_export') }}
-        </button>
-    </FilterBar>
+      </div>
 
-    <div v-if="loading" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+      <!-- Hromadné akce: kruhové ikony, disabled dokud výběr nesplňuje podmínky dané akce -->
+      <div class="flex items-center gap-1" role="toolbar" aria-label="Hromadné akce">
+        <span v-if="selectedIds.length" class="text-xs text-neutral-500 tabular-nums px-1.5">{{ selectedIds.length }}×</span>
+        <IconButton :label="t('invoice.bulk_pdf', { n: selectedPdfIds.length })" :disabled="bulkBusy || selectedIds.length === 0" @click="openBulkPdfExport">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 12l-4-4m4 4l4-4M4 20h16"/></svg>
+        </IconButton>
+        <template v-if="auth.canWrite">
+          <IconButton :label="t('invoice.bulk_issue', { n: issuableSelected.length })" :disabled="bulkBusy || issuableSelected.length === 0" @click="bulkIssue">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+          </IconButton>
+          <IconButton :label="t('invoice.bulk_mark_paid', { n: markPayableSelected.length })" :disabled="bulkBusy || markPayableSelected.length === 0" @click="bulkMarkPaid">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 14l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
+          </IconButton>
+          <IconButton :label="t('invoice.bulk_send', { n: sendableSelected.length })" :disabled="bulkBusy || sendableSelected.length === 0" @click="bulkSend">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 0 0 2.22 0L21 8M5 19h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2z"/></svg>
+          </IconButton>
+          <IconButton :label="t('invoice.bulk_reminder', { n: reminderSelected.length })" :disabled="bulkBusy || reminderSelected.length === 0" @click="bulkSendReminders">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 0 0-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/></svg>
+          </IconButton>
+          <IconButton :label="t('invoice.bulk_reissue', { n: selectedIds.length })" :disabled="bulkBusy || selectedIds.length === 0" @click="bulkReissue">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2m-6 12h8a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z"/></svg>
+          </IconButton>
+        </template>
+        <IconButton :label="t('invoice.csv_export')" @click="exportCsv">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 0 1 2-2h11l5 5v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        </IconButton>
+      </div>
+
+      <Button variant="secondary" @click="showFilters = !showFilters">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3z"/></svg>
+        {{ t('common.filters') }}
+        <span v-if="activeFilterCount" class="inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-primary-600 text-white text-xs tabular-nums">{{ activeFilterCount }}</span>
+      </Button>
+    </div>
+
+    <!-- Panel filtrů -->
+    <div v-if="showFilters" class="bg-(--surface-muted) rounded-(--radius-card) p-4 mb-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <AppSelect
+          :model-value="statusFilter"
+          @update:model-value="v => statusFilter = String(v)"
+          :options="[
+            { value: '', label: t('invoice.all_statuses') },
+            { value: 'draft', label: t('status.draft') },
+            { value: 'issued', label: t('status.issued') },
+            { value: 'sent', label: t('status.sent') },
+            { value: 'reminded', label: t('status.reminded') },
+            { value: 'paid', label: t('status.paid') },
+            { value: 'cancelled', label: t('status.cancelled') },
+          ]"
+          :placeholder="t('invoice.all_statuses')"
+          :aria-label="t('invoice.all_statuses')"
+        />
+        <AppSelect
+          :model-value="typeFilter"
+          @update:model-value="v => typeFilter = String(v)"
+          :options="[
+            { value: '', label: t('invoice.all_types') },
+            { value: 'invoice', label: t('type.invoice') },
+            { value: 'proforma', label: t('type.proforma') },
+            { value: 'credit_note', label: t('type.credit_note') },
+          ]"
+          :placeholder="t('invoice.all_types')"
+          :aria-label="t('invoice.all_types')"
+        />
+        <SearchableSelect
+          :model-value="clientFilter === '' ? null : clientFilter"
+          @update:model-value="(v) => clientFilter = v === null ? '' : v"
+          :options="clients.map(c => ({ value: c.id, label: c.company_name, secondary: c.ic ?? undefined }))"
+          :placeholder="t('project.all_clients')"
+        />
+        <AppSelect
+          :model-value="currencyFilter"
+          @update:model-value="v => currencyFilter = String(v)"
+          :options="[{ value: '', label: t('invoice.all_currencies') }, ...currencies.map(c => ({ value: c.code, label: c.code }))]"
+          :placeholder="t('invoice.all_currencies')"
+          :aria-label="t('invoice.all_currencies')"
+        />
+        <AppSelect
+          :model-value="yearFilter"
+          @update:model-value="v => yearFilter = v === '' ? '' : Number(v)"
+          :disabled="!!dateFrom || !!dateTo"
+          :options="[{ value: '', label: t('invoice.all_years') }, ...yearOptions.map(y => ({ value: y, label: String(y) }))]"
+          :placeholder="t('invoice.all_years')"
+          :aria-label="t('invoice.all_years')"
+        />
+        <AppSelect
+          :model-value="monthFilter"
+          @update:model-value="v => monthFilter = v === '' ? '' : Number(v)"
+          :disabled="!!dateFrom || !!dateTo || yearFilter === ''"
+          :options="[{ value: '', label: t('invoice.all_months') }, ...monthOptions.map((label, i) => ({ value: i + 1, label }))]"
+          :placeholder="t('invoice.all_months')"
+          :aria-label="t('invoice.month_filter')"
+        />
+        <DatePicker v-model="dateFrom" :max="dateTo || undefined" aria-label="Datum od" placeholder="Od: dd.mm.rrrr" />
+        <DatePicker v-model="dateTo" :min="dateFrom || undefined" aria-label="Datum do" placeholder="Do: dd.mm.rrrr" />
+      </div>
+      <div class="flex items-center gap-6 mt-3">
+        <Checkbox v-model="overdueOnly" :label="t('invoice.overdue_only')" />
+        <Checkbox v-model="unpaidOnly" :label="t('invoice.unpaid_only')" />
+      </div>
+    </div>
+
+    <!-- Chipy aktivních filtrů -->
+    <div v-if="filterChips.length" class="flex items-center gap-2 flex-wrap mb-4">
+      <span
+        v-for="chip in filterChips"
+        :key="chip.key + chip.label"
+        class="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full bg-primary-50 text-primary-700 text-[13px]"
+      >
+        {{ chip.label }}
+        <button
+          type="button"
+          class="cursor-pointer inline-flex items-center justify-center w-5 h-5 rounded-full hover:bg-primary-100"
+          :aria-label="`${t('common.cancel')}: ${chip.label}`"
+          @click="chip.clear()"
+        >
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </span>
+    </div>
+
+    <div v-if="loading">
       <TableSkeleton :rows="8" :cols="7" />
     </div>
 
-    <div v-else-if="!groups.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
-      <EmptyState :title="t('invoice.no_data')" :cta="t('invoice.issue_first')" to="/invoices/new" />
-    </div>
+    <EmptyState v-else-if="!groups.length" :title="t('invoice.no_data')" :cta="t('invoice.issue_first')" to="/invoices/new" />
 
     <div v-else>
       <div class="text-xs text-neutral-500 mb-3 flex items-center justify-between">
@@ -700,139 +834,153 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
       </div>
 
       <!-- Skupiny po měsících -->
-      <section v-for="g in groups" :key="g.month" class="mb-5">
-        <header class="sticky top-16 z-[5] flex items-center justify-between bg-neutral-50/95 backdrop-blur border border-neutral-200 rounded-t-lg px-4 py-2.5 mb-0">
-          <div class="flex items-center gap-3">
-            <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-700">{{ formatMonth(g.month) }}</h2>
-            <span class="text-xs text-neutral-500">{{ g.count }} {{ g.count === 1 ? t('invoice.doc_1') : (g.count < 5 ? t('invoice.doc_2_4') : t('invoice.doc_5plus')) }}</span>
+      <section v-for="g in groups" :key="g.month" class="mb-6">
+        <!-- Sticky pruh měsíce: název + počet vlevo, součty vpravo -->
+        <header class="sticky top-16 z-[5] flex items-center justify-between gap-3 bg-(--surface-muted) rounded-xl px-4 py-2.5">
+          <div class="flex items-baseline gap-3 min-w-0">
+            <span class="text-sm font-semibold text-neutral-800 capitalize whitespace-nowrap">{{ formatMonth(g.month) }}</span>
+            <span class="text-xs text-neutral-500 whitespace-nowrap">{{ g.count }} {{ g.count === 1 ? t('invoice.doc_1') : (g.count < 5 ? t('invoice.doc_2_4') : t('invoice.doc_5plus')) }}</span>
           </div>
-          <div class="flex items-center gap-3 text-xs">
-            <span v-for="tot in g.totals_per_currency" :key="tot.currency" class="font-mono">
+          <div class="flex items-center gap-3 text-xs tabular-nums flex-wrap justify-end">
+            <span v-for="tot in g.totals_per_currency" :key="tot.currency">
               <span class="text-neutral-500">{{ tot.currency }}:</span>
               <span class="font-semibold text-neutral-900 ml-1">{{ formatMoney(tot.with_vat, tot.currency) }}</span>
               <span v-if="tot.draft_with_vat !== 0" class="ml-1 text-primary-600"
                 :title="t('invoice.prediction_hint', { amount: formatMoney(tot.draft_with_vat, tot.currency) })">
                 → {{ formatMoney(tot.with_vat + tot.draft_with_vat, tot.currency) }}
-                <span class="text-[10px] uppercase tracking-wide text-primary-500">{{ t('invoice.prediction') }}</span>
+                <span class="text-[10px] text-primary-500">{{ t('invoice.prediction') }}</span>
               </span>
             </span>
           </div>
         </header>
 
         <!-- Desktop: tabulka -->
-        <div class="hidden md:block bg-surface border border-t-0 border-neutral-200 rounded-b-lg overflow-hidden">
-          <div class="overflow-x-auto">
-          <table class="w-full text-sm table-sticky-first">
-            <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
+        <div class="hidden md:block overflow-x-auto mt-2">
+          <table class="ui-table table-sticky-first">
+            <thead>
               <tr>
-                <th class="px-2 py-2 w-10 text-center">
-                  <input
-                    type="checkbox"
-                    :checked="isGroupSelected(g)"
+                <th class="w-10">
+                  <Checkbox
+                    :model-value="isGroupSelected(g)"
                     :indeterminate="isGroupSelectionPartial(g)"
-                    @change="toggleGroupSelected(g)"
                     :aria-label="t('invoice.select_month', { month: formatMonth(g.month) })"
-                    :title="t('invoice.select_month', { month: formatMonth(g.month) })"
-                    class="w-5 h-5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
+                    @update:model-value="toggleGroupSelected(g)"
                   />
                 </th>
-                <th class="text-left px-4 py-2 font-medium w-32">Var. symbol</th>
-                <th class="text-left px-4 py-2 font-medium">{{ t('invoice.client_project') }}</th>
-                <th class="text-center px-4 py-2 font-medium">Typ</th>
-                <th class="text-center px-4 py-2 font-medium">DUZP / Vystaveno</th>
-                <th class="text-center px-4 py-2 font-medium">Splatnost</th>
-                <th class="text-right px-4 py-2 font-medium">{{ t('invoice.amount_to_pay') }}</th>
-                <th class="text-center px-4 py-2 font-medium">Stav</th>
+                <th class="w-32">Var. symbol</th>
+                <th>{{ t('invoice.client_project') }}</th>
+                <th>Typ</th>
+                <th>DUZP / Vystaveno</th>
+                <th>Splatnost</th>
+                <th class="num">{{ t('invoice.amount_to_pay') }}</th>
+                <th>Stav</th>
+                <th class="w-32"></th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-neutral-100">
+            <tbody>
               <tr
                 v-for="inv in g.invoices"
                 :key="inv.id"
                 @click="openInvoice(inv, $event)"
                 @auxclick.prevent="openInvoice(inv, $event)"
-                class="cursor-pointer hover:bg-neutral-50 transition"
+                class="cursor-pointer"
                 :class="invoiceRowClass(inv.due_date, inv.status)"
               >
-                <td class="px-2 py-2.5 text-center" @click.stop>
-                  <input
-                    type="checkbox"
-                    :checked="selectedIds.includes(inv.id)"
-                    @change="toggleSelected(inv.id)"
-                    class="w-5 h-5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
+                <td @click.stop>
+                  <Checkbox
+                    :model-value="selectedIds.includes(inv.id)"
+                    @update:model-value="toggleSelected(inv.id)"
                   />
                 </td>
-                <td class="px-4 py-2.5 font-mono text-xs">
-                  <span v-if="inv.varsymbol">{{ inv.varsymbol }}</span>
-                  <span v-else class="text-neutral-400">{{ t('invoice.draft_id_short', { id: inv.id }) }}</span>
+                <td>
+                  <RouterLink v-if="inv.varsymbol" :to="`/invoices/${inv.id}`" @click.stop
+                    class="text-primary-700 font-semibold text-[13px] tabular-nums hover:underline">{{ inv.varsymbol }}</RouterLink>
+                  <span v-else class="text-neutral-400 text-[13px] tabular-nums">{{ t('invoice.draft_id_short', { id: inv.id }) }}</span>
                 </td>
-                <td class="px-4 py-2.5">
-                  <div class="font-medium text-neutral-900">{{ inv.client_company_name }}</div>
+                <td>
+                  <div class="font-semibold text-neutral-900">{{ inv.client_company_name }}</div>
                   <div v-if="inv.project_name" class="text-xs text-neutral-500 truncate max-w-md">{{ inv.project_name }}</div>
                 </td>
-                <td class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ typeLabel(inv.invoice_type) }}</td>
-                <td class="px-4 py-2.5 text-center text-xs">
+                <td>
+                  <Badge :color="TYPE_BADGE[inv.invoice_type] ?? 'neutral'" size="sm">{{ typeLabel(inv.invoice_type) }}</Badge>
+                </td>
+                <td class="text-xs">
                   <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
                 </td>
-                <td class="px-4 py-2.5 text-center text-xs">
+                <td class="text-xs">
                   <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : 'text-neutral-600'">
                     {{ formatDate(inv.due_date) }}
                   </span>
                 </td>
-                <td class="px-4 py-2.5 text-right font-mono">
+                <td class="num font-medium">
                   {{ formatMoney(inv.amount_to_pay ?? inv.total_with_vat, inv.currency) }}
                 </td>
-                <td class="px-4 py-2.5 text-center" @click.stop>
-                  <!-- Pro koncepty (s právem editace) zobraz tlačítko "Výkaz" místo "KONCEPT" badge — rychlý přístup k modalu. -->
+                <td @click.stop>
+                  <!-- Pro koncepty (s právem editace) zobraz tlačítko "Výkaz" místo stavu — rychlý přístup k modalu. -->
                   <button v-if="inv.status === 'draft' && inv.invoice_type !== 'tax_document' && auth.canWrite"
                     @click="openWorkReport(inv.id)"
-                    class="cursor-pointer text-xs px-2 py-0.5 rounded border border-primary-500/40 text-primary-700 hover:bg-primary-50 inline-flex items-center gap-1"
+                    class="cursor-pointer text-xs px-2.5 py-1 rounded-full border border-primary-500/40 text-primary-700 hover:bg-primary-50 inline-flex items-center gap-1"
                     :title="t('invoice.wr_btn')">
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-6m3 6v-4m3 4v-2"/></svg>
                     {{ t('invoice.wr_btn') }}
                   </button>
-                  <span v-else class="text-xs px-2 py-0.5 rounded" :class="statusBadgeClass(displayStatus(inv.status, inv.payment_status))">
-                    {{ statusLabel(displayStatus(inv.status, inv.payment_status)) }}
+                  <span v-else class="inline-flex items-center gap-1">
+                    <StatusDot :kind="dotFor(inv).kind" :title="dotFor(inv).title" size="sm" />
+                    <span v-if="inv.sent_at" class="text-xs px-1 py-0.5 rounded-full bg-success-50 text-success-600"
+                      :title="t('invoice.sent_at', { date: formatDate(inv.sent_at) })">✉</span>
+                    <span v-if="inv.reminder_count > 0" class="text-xs px-1 py-0.5 rounded-full bg-warning-50 text-warning-600 font-semibold tabular-nums"
+                      :title="t('invoice.reminder_at', { count: inv.reminder_count, date: formatDate(inv.last_reminder_at) })">⚠ {{ inv.reminder_count }}</span>
                   </span>
-                  <span v-if="inv.sent_at" class="ml-1 text-xs px-1 py-0.5 rounded bg-success-50 text-success-600"
-                    :title="t('invoice.sent_at', { date: formatDate(inv.sent_at) })">✉</span>
-                  <span v-if="inv.reminder_count > 0" class="ml-1 text-xs px-1 py-0.5 rounded bg-warning-50 text-warning-600 font-semibold"
-                    :title="t('invoice.reminder_at', { count: inv.reminder_count, date: formatDate(inv.last_reminder_at) })">⚠ {{ inv.reminder_count }}</span>
+                </td>
+                <td @click.stop>
+                  <!-- Rychlé zkratky k existujícím akcím — viditelné při hoveru řádku -->
+                  <span class="row-actions inline-flex items-center gap-0.5 justify-end w-full">
+                    <IconButton v-if="inv.status === 'draft' && auth.canWrite" :label="t('common.edit')" size="sm" :to="`/invoices/${inv.id}/edit`">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82l-4.207 1.02 1.02-4.207L16.862 4.487Z"/></svg>
+                    </IconButton>
+                    <IconButton label="PDF" size="sm" @click="rowPdf(inv)">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>
+                    </IconButton>
+                    <IconButton v-if="auth.canWrite" :label="t('invoice.clone')" size="sm" :disabled="rowBusyId === inv.id" @click="rowClone(inv)">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2m-6 12h8a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z"/></svg>
+                    </IconButton>
+                    <IconButton :label="t('common.view_all')" size="sm" :to="`/invoices/${inv.id}`">
+                      <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                    </IconButton>
+                  </span>
                 </td>
               </tr>
             </tbody>
           </table>
-          </div>
         </div>
 
         <!-- Mobile: karty -->
-        <div class="md:hidden bg-surface border border-t-0 border-neutral-200 rounded-b-lg divide-y divide-neutral-100 overflow-hidden">
+        <div class="md:hidden mt-2 divide-y divide-neutral-100 rounded-xl overflow-hidden bg-surface">
           <div
             v-for="inv in g.invoices"
             :key="`m-${inv.id}`"
             @click="openInvoice(inv, $event)"
             @auxclick.prevent="openInvoice(inv, $event)"
-            class="cursor-pointer hover:bg-neutral-50 transition px-3 py-3"
+            class="cursor-pointer hover:bg-(--surface-muted) transition px-3 py-3"
             :class="invoiceRowClass(inv.due_date, inv.status)"
           >
             <div class="flex items-start gap-3">
-              <input
-                type="checkbox"
-                :checked="selectedIds.includes(inv.id)"
-                @change="toggleSelected(inv.id)"
-                @click.stop
-                class="mt-0.5 w-5 h-5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
-              />
+              <div @click.stop class="mt-0.5">
+                <Checkbox
+                  :model-value="selectedIds.includes(inv.id)"
+                  @update:model-value="toggleSelected(inv.id)"
+                />
+              </div>
               <div class="flex-1 min-w-0">
                 <div class="flex items-baseline justify-between gap-2">
-                  <div class="font-medium text-neutral-900 truncate">{{ inv.client_company_name }}</div>
-                  <div class="font-mono text-sm font-semibold whitespace-nowrap">
+                  <div class="font-semibold text-neutral-900 truncate">{{ inv.client_company_name }}</div>
+                  <div class="text-sm font-semibold whitespace-nowrap tabular-nums">
                     {{ formatMoney(inv.amount_to_pay ?? inv.total_with_vat, inv.currency) }}
                   </div>
                 </div>
                 <div class="flex items-baseline justify-between gap-2 mt-0.5 text-xs text-neutral-500">
                   <div class="truncate">
-                    <span class="font-mono">
+                    <span class="tabular-nums">
                       <span v-if="inv.varsymbol">{{ inv.varsymbol }}</span>
                       <span v-else class="text-neutral-400">{{ t('invoice.draft_id_short', { id: inv.id }) }}</span>
                     </span>
@@ -850,21 +998,22 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                       {{ formatDate(inv.due_date) }}
                     </span>
                   </div>
-                  <div class="flex items-center gap-1 flex-wrap justify-end" @click.stop>
-                    <span v-if="inv.sent_at" class="text-xs px-1 py-0.5 rounded bg-success-50 text-success-600"
+                  <div class="flex items-center gap-1.5 flex-wrap justify-end" @click.stop>
+                    <span v-if="inv.sent_at" class="text-xs px-1 py-0.5 rounded-full bg-success-50 text-success-600"
                       :title="t('invoice.sent_at', { date: formatDate(inv.sent_at) })">✉</span>
-                    <span v-if="inv.reminder_count > 0" class="text-xs px-1 py-0.5 rounded bg-warning-50 text-warning-600 font-semibold"
+                    <span v-if="inv.reminder_count > 0" class="text-xs px-1 py-0.5 rounded-full bg-warning-50 text-warning-600 font-semibold tabular-nums"
                       :title="t('invoice.reminder_at', { count: inv.reminder_count, date: formatDate(inv.last_reminder_at) })">⚠ {{ inv.reminder_count }}</span>
-                    <!-- Pro koncepty (s právem editace) zobraz tlačítko "Výkaz" místo "KONCEPT" badge — stejně jako v desktop tabulce. -->
+                    <!-- Pro koncepty (s právem editace) tlačítko "Výkaz" — stejně jako v desktop tabulce. -->
                     <button v-if="inv.status === 'draft' && inv.invoice_type !== 'tax_document' && auth.canWrite"
                       @click="openWorkReport(inv.id)"
-                      class="cursor-pointer text-xs px-2 py-0.5 rounded border border-primary-500/40 text-primary-700 hover:bg-primary-50 inline-flex items-center gap-1"
+                      class="cursor-pointer text-xs px-2.5 py-1 rounded-full border border-primary-500/40 text-primary-700 hover:bg-primary-50 inline-flex items-center gap-1"
                       :title="t('invoice.wr_btn')">
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-6m3 6v-4m3 4v-2"/></svg>
                       {{ t('invoice.wr_btn') }}
                     </button>
-                    <span v-else class="text-xs px-2 py-0.5 rounded" :class="statusBadgeClass(inv.status)">
-                      {{ statusLabel(inv.status) }}
+                    <span v-else class="inline-flex items-center gap-1.5">
+                      <StatusDot :kind="dotFor(inv).kind" :title="dotFor(inv).title" size="sm" />
+                      <span class="text-xs text-neutral-500">{{ dotFor(inv).title }}</span>
                     </span>
                   </div>
                 </div>
@@ -874,44 +1023,34 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         </div>
       </section>
 
-      <div v-if="page < pages" class="text-center mt-3">
-        <button @click="load(false)" :disabled="loadingMore"
-          class="cursor-pointer h-10 px-5 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium disabled:opacity-50 rounded-md inline-flex items-center gap-2 shadow-sm">
+      <div v-if="page < pages" class="text-center mt-4">
+        <Button variant="secondary" :loading="loadingMore" @click="load(false)">
           {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
-        </button>
+        </Button>
       </div>
     </div>
 
-    <div v-if="bulkPdfOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" @click.self="bulkPdfOpen = false">
-      <div class="bg-surface rounded-lg shadow-xl w-full max-w-md p-5 space-y-4">
-        <div>
-          <h2 class="text-lg font-semibold">{{ t('invoice.bulk_pdf_title') }}</h2>
-          <p class="text-sm text-neutral-500 mt-1">{{ t('invoice.bulk_pdf_hint', { n: selectedPdfIds.length }) }}</p>
-        </div>
-        <label class="flex items-start gap-3 cursor-pointer rounded-md border border-neutral-200 bg-neutral-50 p-3">
-          <input v-model="bulkPdfSign" type="checkbox"
-            class="mt-0.5 w-4 h-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500" />
-          <span>
+    <!-- Hromadný PDF export -->
+    <Modal v-if="bulkPdfOpen" :title="t('invoice.bulk_pdf_title')" width-class="max-w-md" @close="bulkPdfOpen = false">
+      <div class="space-y-4">
+        <p class="text-sm text-neutral-500">{{ t('invoice.bulk_pdf_hint', { n: selectedPdfIds.length }) }}</p>
+        <div class="rounded-(--radius-input) bg-(--surface-muted) p-3">
+          <Checkbox v-model="bulkPdfSign">
             <span class="block text-sm font-medium text-neutral-800">{{ t('invoice.bulk_pdf_sign') }}</span>
             <span class="block text-xs text-neutral-500 mt-0.5">{{ t('invoice.bulk_pdf_sign_hint') }}</span>
-          </span>
-        </label>
+          </Checkbox>
+        </div>
         <p v-if="selectedPdfIds.length > 100" class="text-sm text-danger-500">
           {{ t('invoice.bulk_pdf_limit') }}
         </p>
-        <div class="flex justify-end gap-2 pt-1">
-          <button type="button" @click="bulkPdfOpen = false" :disabled="bulkBusy"
-            class="cursor-pointer h-9 px-4 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-50">
-            {{ t('common.cancel') }}
-          </button>
-          <button type="button" @click="bulkExportPdf" :disabled="bulkBusy || selectedPdfIds.length > 100"
-            class="cursor-pointer h-9 px-4 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md disabled:opacity-50 inline-flex items-center gap-1.5">
-            {{ bulkBusy ? t('common.loading') : t('invoice.bulk_pdf_download') }}
-          </button>
-        </div>
       </div>
-    </div>
+      <template #footer>
+        <Button variant="ghost" :disabled="bulkBusy" @click="bulkPdfOpen = false">{{ t('common.cancel') }}</Button>
+        <Button variant="primary" :loading="bulkBusy" :disabled="selectedPdfIds.length > 100" @click="bulkExportPdf">
+          {{ t('invoice.bulk_pdf_download') }}
+        </Button>
+      </template>
+    </Modal>
 
     <!-- Work report modal — otevřený z buttonu "Výkaz" v sloupci Stav. -->
     <WorkReportModal v-if="wrModalInvoiceId > 0"
