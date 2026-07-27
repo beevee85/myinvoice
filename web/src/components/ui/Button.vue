@@ -28,7 +28,7 @@ const props = withDefaults(defineProps<{
 
 const VARIANTS: Record<Variant, string> = {
   primary:   'bg-primary-600 hover:bg-primary-700 text-white',
-  cta:       'bg-(--accent-cta) hover:bg-success-700 text-white',
+  cta:       'bg-(--accent-cta) hover:bg-(--accent-cta-hover) text-white',
   secondary: 'border-[1.5px] border-primary-600 text-primary-700 hover:bg-primary-50 bg-transparent',
   ghost:     'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900',
   danger:    'bg-danger-500 hover:bg-danger-600 text-white',

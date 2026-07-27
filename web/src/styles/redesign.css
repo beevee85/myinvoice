@@ -60,7 +60,8 @@
   --surface-muted: #F6F6FB;   /* vnořené sekce, hlavičky tabulek */
   --primary:       var(--color-primary-600);
   --primary-hover: var(--color-primary-700);
-  --accent-cta:    #16A34A;   /* zelené hlavní CTA */
+  --accent-cta:       #15803D;  /* zelené hlavní CTA — ztmaveno z #16A34A kvůli AA kontrastu bílého textu (4,5:1) */
+  --accent-cta-hover: #166534;
   --success:       var(--color-success-600);
   --danger:        var(--color-danger-500);
   --warning:       var(--color-warning-500);

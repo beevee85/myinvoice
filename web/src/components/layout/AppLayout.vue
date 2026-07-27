@@ -370,7 +370,7 @@ onMounted(async () => {
       <div v-if="auth.canWrite" class="relative px-3 pb-1 shrink-0">
         <button
           type="button" @click="quickOpen = !quickOpen"
-          class="cursor-pointer w-full h-11 pl-4 pr-3 inline-flex items-center gap-2 rounded-full bg-(--accent-cta) hover:bg-(--color-success-700) text-white text-sm font-semibold transition-colors"
+          class="cursor-pointer w-full h-11 pl-4 pr-3 inline-flex items-center gap-2 rounded-full bg-(--accent-cta) hover:bg-(--accent-cta-hover) text-white text-sm font-semibold transition-colors"
           :aria-expanded="quickOpen" :aria-label="t('nav.quick_new')"
         >
           <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
