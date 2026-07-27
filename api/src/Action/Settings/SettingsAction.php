@@ -40,6 +40,7 @@ final class SettingsAction
         private readonly Config $config,
         private readonly \MyInvoice\Service\Ares\SupplierRegistryEnricher $enricher,
         private readonly \MyInvoice\Service\Auth\UserSupplierAccess $access,
+        private readonly \MyInvoice\Service\Report\EpoIdentityValidator $epoValidator,
     ) {}
 
     /** Aktuální supplier (z X-Supplier-Id middleware). */
@@ -481,7 +482,18 @@ final class SettingsAction
             $this->pdf->invalidateDraftsBySupplier($id);
         }
         $this->log($request, 'supplier.updated', $id, ['fields' => array_keys(array_intersect_key($body, array_flip($allowed)))]);
-        return $this->respondSupplier($response, $id);
+        // EPO připravenost (informativně, uložení neblokuje): plátce-PO dostane
+        // v odpovědi epo_ready + seznam chybějících povinných polí pro EPO podání
+        // (kód FÚ/ÚzP, DIČ, e-mail, oprávněná osoba) — UI z toho staví hint/badge.
+        $extra = [];
+        $cur = $this->db->pdo()->prepare('SELECT taxpayer_type, is_vat_payer FROM supplier WHERE id = ?');
+        $cur->execute([$id]);
+        $curRow = $cur->fetch(\PDO::FETCH_ASSOC) ?: [];
+        if (($curRow['taxpayer_type'] ?? null) === 'po' && !empty($curRow['is_vat_payer'])) {
+            $epo = $this->epoValidator->forSupplier($id, \MyInvoice\Service\Report\EpoIdentityValidator::DOC_DPHDP3);
+            $extra = ['epo_ready' => $epo['missing'] === [], 'missing' => $epo['missing']];
+        }
+        return $this->respondSupplier($response, $id, $extra);
     }
 
     /** DELETE /api/suppliers/{id} — jen pokud supplier nemá clients/invoices/currencies s daty. */
@@ -547,7 +559,8 @@ final class SettingsAction
         return Json::ok($response, ['deleted' => true]);
     }
 
-    private function respondSupplier(Response $response, int $id): Response
+    /** @param array<string,mixed> $extra doplňkové klíče odpovědi (např. epo_ready/missing po update) */
+    private function respondSupplier(Response $response, int $id, array $extra = []): Response
     {
         if ($id <= 0) return Json::error($response, 'not_found', 'Supplier nenalezen.', 404);
         $stmt = $this->db->pdo()->prepare(
@@ -630,7 +643,7 @@ final class SettingsAction
             // Přijaté faktury nemají cfg fallback — výchozí je vestavěná šablona generátoru.
             'purchase'    => \MyInvoice\Repository\PurchaseInvoiceRepository::PURCHASE_DEFAULT_TEMPLATE,
         ];
-        return Json::ok($response, $row);
+        return Json::ok($response, array_merge($row, $extra));
     }
 
     private function nullable(array $b, string $key): ?string

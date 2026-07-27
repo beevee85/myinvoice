@@ -34,7 +34,19 @@ final class DphPriznaniAction
         private readonly IpMatcher $ipMatcher,
         private readonly \MyInvoice\Service\Report\TaxSubmissionArchiver $archiver,
         private readonly \MyInvoice\Service\Currency\MissingExchangeRateFiller $rateFiller,
+        private readonly \MyInvoice\Service\Report\EpoIdentityValidator $epoValidator,
     ) {}
+
+    /**
+     * EPO identifikace: chybějící povinná pole → 422, viz EpoIdentityValidator.
+     * Bez toho vznikne validně vypadající XML, které EPO portál odmítne.
+     */
+    private function epoIdentityError(Response $response, array $missing): Response
+    {
+        return Json::error($response, 'epo_identity_incomplete',
+            'Nelze vygenerovat XML — chybí povinné údaje pro EPO podání. Doplň je v Nastavení → Daňové nastavení.',
+            422, ['missing' => $missing, 'settings_url' => '/admin/settings#epo']);
+    }
 
     /**
      * GET /api/reports/dphdp3/settings → { vat_period, is_vat_payer }
@@ -149,6 +161,10 @@ final class DphPriznaniAction
 
         $period = (string) ($q['period'] ?? '');
         $period = in_array($period, ['monthly', 'quarterly'], true) ? $period : null;
+        $epo = $this->epoValidator->forSupplier($supplierId, \MyInvoice\Service\Report\EpoIdentityValidator::DOC_DPHDP3);
+        if ($epo['missing'] !== []) {
+            return $this->epoIdentityError($response, $epo['missing']);
+        }
         try {
             $result = $this->builder->build($supplierId, $year, $month, $period);
         } catch (\Throwable $e) {
@@ -157,7 +173,8 @@ final class DphPriznaniAction
 
         return Json::ok($response, [
             'summary'  => $result['summary'],
-            'warnings' => $result['warnings'],
+            // Doporučená pole (telefon, CZ-NACE…) jen varují — generování neblokují.
+            'warnings' => array_merge($result['warnings'], $epo['warnings']),
         ]);
     }
 
@@ -177,6 +194,10 @@ final class DphPriznaniAction
 
         $period = (string) ($q['period'] ?? '');
         $period = in_array($period, ['monthly', 'quarterly'], true) ? $period : null;
+        $epo = $this->epoValidator->forSupplier($supplierId, \MyInvoice\Service\Report\EpoIdentityValidator::DOC_DPHDP3);
+        if ($epo['missing'] !== []) {
+            return $this->epoIdentityError($response, $epo['missing']);
+        }
         // Forma podání (B/O/D/E) + datum zjištění důvodů pro dodatečné přiznání (§ 141 DŘ).
         $fp = \MyInvoice\Service\Report\ReportFormParams::fromQuery(
             $q,

@@ -30,7 +30,19 @@ final class SouhrnneHlaseniAction
         private readonly IpMatcher $ipMatcher,
         private readonly \MyInvoice\Service\Report\TaxSubmissionArchiver $archiver,
         private readonly \MyInvoice\Service\Currency\MissingExchangeRateFiller $rateFiller,
+        private readonly \MyInvoice\Service\Report\EpoIdentityValidator $epoValidator,
     ) {}
+
+    /**
+     * EPO identifikace: chybějící povinná pole → 422, viz EpoIdentityValidator.
+     * Bez toho vznikne validně vypadající XML, které EPO portál odmítne.
+     */
+    private function epoIdentityError(Response $response, array $missing): Response
+    {
+        return Json::error($response, 'epo_identity_incomplete',
+            'Nelze vygenerovat XML — chybí povinné údaje pro EPO podání. Doplň je v Nastavení → Daňové nastavení.',
+            422, ['missing' => $missing, 'settings_url' => '/admin/settings#epo']);
+    }
 
     public function preview(Request $request, Response $response): Response
     {
@@ -43,12 +55,20 @@ final class SouhrnneHlaseniAction
         if ($year === null) {
             return Json::error($response, 'validation_failed', 'Neplatný rok/měsíc.', 400);
         }
+        $epo = $this->epoValidator->forSupplier($supplierId, \MyInvoice\Service\Report\EpoIdentityValidator::DOC_DPHSHV);
+        if ($epo['missing'] !== []) {
+            return $this->epoIdentityError($response, $epo['missing']);
+        }
         try {
             $result = $this->builder->build($supplierId, $year, $month, $period);
         } catch (\Throwable $e) {
             return Json::error($response, 'build_failed', $e->getMessage(), 500);
         }
-        return Json::ok($response, ['summary' => $result['summary'], 'warnings' => $result['warnings']]);
+        return Json::ok($response, [
+            'summary'  => $result['summary'],
+            // Doporučená pole (telefon…) jen varují — generování neblokují.
+            'warnings' => array_merge($result['warnings'], $epo['warnings']),
+        ]);
     }
 
     public function download(Request $request, Response $response): Response
@@ -61,6 +81,10 @@ final class SouhrnneHlaseniAction
         [$year, $month, $period] = $this->parsePeriod($request);
         if ($year === null) {
             return Json::error($response, 'validation_failed', 'Neplatný rok/měsíc.', 400);
+        }
+        $epo = $this->epoValidator->forSupplier($supplierId, \MyInvoice\Service\Report\EpoIdentityValidator::DOC_DPHSHV);
+        if ($epo['missing'] !== []) {
+            return $this->epoIdentityError($response, $epo['missing']);
         }
         try {
             $result = $this->builder->build($supplierId, $year, $month, $period);
