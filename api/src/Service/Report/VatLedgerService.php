@@ -41,7 +41,7 @@ use MyInvoice\Repository\TaxConstantsRepository;
  *   document_kind:?string, status:string, is_draft:bool, tax_date:?string, issue_date:?string,
  *   counterparty_name:string, counterparty_dic:?string, country_iso2:?string,
  *   code:?string, dphdp3_line:?string, dphdp3_line_secondary:?string, kh_section:?string,
- *   is_reverse_charge:bool, vat_deduction_partial:bool, vat_rate:float, base_czk:float, vat_czk:float,
+ *   is_reverse_charge:bool, code_estimated:bool, vat_deduction_partial:bool, vat_rate:float, base_czk:float, vat_czk:float,
  *   total_with_vat_czk:float, is_fixed_asset:bool, exchange_rate:float, exchange_rate_missing:bool
  * }
  */
@@ -189,7 +189,12 @@ final class VatLedgerService
                    COALESCE(pi.tax_date, pi.issue_date) AS tax_date, pi.issue_date,
                    -- RAW kurz (bez COALESCE ...,1) — viz fetchSales / normalize() (issue #238).
                    pi.exchange_rate AS exchange_rate, COALESCE(cur.code, 'CZK') AS currency,
-                   pi.total_with_vat AS inv_total, pi.reverse_charge AS rc_flag,
+                   -- Přijatý dobropis (document_kind='credit_note') je v DB uložen s KLADNÝMI
+                   -- částkami — pro DPH evidenci se znaménko obrací, jinak by dobropis odpočet
+                   -- ZVÝŠIL místo snížil. (Vydané dobropisy v `invoices` jsou naopak ukládány
+                   -- ZÁPORNĚ — fetchSales proto znaménko NEobrací, viz test CreditNote.)
+                   (CASE WHEN pi.document_kind = 'credit_note' THEN -1 ELSE 1 END)
+                       * pi.total_with_vat AS inv_total, pi.reverse_charge AS rc_flag,
                    pi.vat_deduction, pi.vat_deduction_percent,
                    c.company_name AS counterparty_name, c.dic AS counterparty_dic,
                    co.iso2 AS country_iso2, COALESCE(co.is_eu, 0) AS country_is_eu,
@@ -197,16 +202,31 @@ final class VatLedgerService
                    COALESCE(
                        pii.vat_classification_code, pi.vat_classification_code,
                        CASE
+                           -- Zahraniční dodavatel + RC ≠ tuzemský § 92a (kód 5 → ř. 10, KH B.1)!
+                           -- Zrcadlí fallback prodejní strany: EU → 24e (služba § 9/1, ř. 5,
+                           -- KH A.2), 3. země → 24 (ř. 12, KH A.2). Zboží vs. službu z dat
+                           -- nerozlišíme — default služba + warning (code_estimated níže);
+                           -- pořízení zboží z EU = kód 23, dovoz ze 3. země = kód 25 ručně.
+                           WHEN pi.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ'
+                                AND COALESCE(co.is_eu, 0) = 1 THEN '24e'
+                           WHEN pi.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ' THEN '24'
                            WHEN pi.reverse_charge = 1 THEN '5'
                            WHEN pii.vat_rate_snapshot >= ?    THEN '40'
                            WHEN pii.vat_rate_snapshot > 0     THEN '41'
                            ELSE NULL
                        END
                    ) AS code,
+                   -- Příznak odhadnutého kódu (zahraniční RC bez explicitní klasifikace) —
+                   -- KH preview z něj staví warning, ať uživatel zboží překlasifikuje ručně.
+                   (CASE WHEN pii.vat_classification_code IS NULL AND pi.vat_classification_code IS NULL
+                              AND pi.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ'
+                         THEN 1 ELSE 0 END) AS code_estimated,
                    pii.vat_rate_snapshot AS vat_rate,
                    pii.description AS description,
-                   COALESCE(pii.total_without_vat, 0) AS base,
-                   COALESCE(pii.total_vat, 0) AS vat
+                   (CASE WHEN pi.document_kind = 'credit_note' THEN -1 ELSE 1 END)
+                       * COALESCE(pii.total_without_vat, 0) AS base,
+                   (CASE WHEN pi.document_kind = 'credit_note' THEN -1 ELSE 1 END)
+                       * COALESCE(pii.total_vat, 0) AS vat
               FROM purchase_invoices pi
               JOIN clients c ON c.id = pi.vendor_id
          LEFT JOIN countries co ON co.id = c.country_id
@@ -411,6 +431,9 @@ final class VatLedgerService
             'kh_regime_code'         => $clsf['kh_regime_code'] ?? null,
             'kh_bad_debt'            => $clsf['kh_bad_debt'] ?? null,
             'is_reverse_charge'     => $isRc,
+            // Kód nebyl na dokladu, jen odhadnut fallbackem pro zahraniční RC (24e/24) —
+            // KH preview generuje warning (zboží → 23/25 nutno zvolit ručně).
+            'code_estimated'        => !empty($r['code_estimated']),
             'vat_deduction_partial' => $isPartialDeduction,
             'vat_deduction_none'    => $isDeductionNone,
             'vat_rate'              => $vatRate,

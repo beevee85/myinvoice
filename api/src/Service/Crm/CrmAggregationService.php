@@ -1140,7 +1140,10 @@ final class CrmAggregationService
         // mírně přepomenuty, lze skrýt přes dismiss.
         if (!$this->isFullyDismissed($dismissals, 'shv_deadline')) {
             $now = new \DateTimeImmutable($today);
-            $deadlineDate = sprintf('%04d-%02d-25', (int) $now->format('Y'), (int) $now->format('n'));
+            // § 33/4 DŘ: víkend/svátek → nejbližší následující pracovní den (jako výkazy).
+            $deadlineDate = \MyInvoice\Service\Report\CzechWorkingDays::shiftToWorkingDay(
+                new \DateTimeImmutable(sprintf('%04d-%02d-25', (int) $now->format('Y'), (int) $now->format('n')))
+            )->format('Y-m-d');
             $daysToDeadline = (int) $now->diff(new \DateTimeImmutable($deadlineDate))->format('%r%a');
             if ($daysToDeadline >= -3 && $daysToDeadline <= 7) {
                 $prevMonth = $now->modify('first day of last month');
@@ -1311,6 +1314,11 @@ final class CrmAggregationService
      */
     private function buildDeadlineItem(string $type, string $title, string $deadline, string $link, \DateTimeImmutable $now): ?array
     {
+        // § 33/4 DŘ: 25. na víkend/svátek → posun na nejbližší pracovní den, jinak
+        // dashboard hlásí „po termínu" dřív, než lhůta skutečně uplyne (shodně s výkazy).
+        $deadline = \MyInvoice\Service\Report\CzechWorkingDays::shiftToWorkingDay(
+            new \DateTimeImmutable($deadline)
+        )->format('Y-m-d');
         $days = (int) $now->diff(new \DateTimeImmutable($deadline))->format('%r%a');
         if ($days < -3 || $days > 7) {
             return null;
