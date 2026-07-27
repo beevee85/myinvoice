@@ -6,6 +6,7 @@ import App from './App.vue'
 import { vMath } from './directives/vMath'
 import './styles/main.css'
 import './styles/custom-theme.css'
+import './styles/redesign.css'
 
 const app = createApp(App)
 app.use(createPinia())

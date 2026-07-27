@@ -15,6 +15,7 @@ api/.phpunit.cache/
 web/node_modules/
 web/dist/
 web/dist.bak/
+web/.pnpm-store/
 dist/
 manual/generated/
 manual/generated.bak/

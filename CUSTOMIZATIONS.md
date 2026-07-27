@@ -6,6 +6,20 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-27 — REDESIGN Fáze 1: design tokeny, self-host fonty, typografie (větev feature/redesign)
+
+**Co se změnilo:**
+1. **Nová forková CSS vrstva `web/src/styles/redesign.css`** — importovaná v `main.ts` jako poslední (vyhrává nad main.css, custom-theme.css i Tailwind utilities). Obsahuje: nové tokeny redesignu (`--app-bg #1E2050`, `--app-bg-dark #0B0F31`, `--surface-muted #F6F6FB`, `--radius-panel 28` / `--radius-card 20` / `--radius-control 999` / `--radius-input 12`, `--space-panel`, `--grid-gap`, `--sidebar-w 240`, `--control-h 40`, aliasy `--primary`/`--surface`/`--text*`), sytější sémantické barvy (success `#16A34A`, danger `#DC2626`, warning `#F59E0B` + zrcadlené `.dark` hodnoty) a typografii (h1 24/600, h2 20/600, nadpisy `--font-display` = Nunito).
+2. **Fonty poprvé skutečně načtené**: Inter (tělo) + Nunito (nadpisy) self-host ve `web/src/assets/fonts/` (4× variabilní woff2, latin+latin-ext, OFL, ~200 KB) — Vite je hashuje do `dist/assets`, obslouží stávající nginx `/assets/` + SW cache-first, žádné externí requesty. Dřív bylo Inter jen deklarované a UI běželo na systémovém fontu.
+3. **Plošné zrušení drobných UPPERCASE labelů** (407 výskytů): globální `.uppercase { text-transform:none; letter-spacing:normal }` + zvětšení 10/11px labelů na 12–13px. Markup se dočistí per stránka v dalších fázích.
+4. `custom-theme.css`: zrušeno `h1.text-2xl{1.75rem}` (nahrazeno h1 24px v redesign.css). `.gitignore`: + `web/.pnpm-store/`.
+
+**Které soubory:** `web/src/styles/redesign.css` (nový), `web/src/assets/fonts/*.woff2` (4 nové), `web/src/main.ts` (+1 import), `web/src/styles/custom-theme.css` (−1 pravidlo), `.gitignore`.
+
+**Proč:** Fáze 1 kompletního redesignu (app shell ve stylu iDokladu, 8 fází na větvi `feature/redesign`) — tokeny a typografie jako základ pro shell (F2) a komponenty (F3). Bez změny funkcionality.
+
+**Jak ověřit po merge:** `pnpm build` projde (vue-tsc + vite), `node --test tests/*.test.mjs` 50/50; v UI: nadpisy v Nunito (zaoblené), text Inter s diakritikou, hlavičky tabulek/labely bez VERZÁLEK, „Po splatnosti" červená `#DC2626`, zelená tlačítka `#16A34A`. Import pořadí v `main.ts`: main → custom-theme → redesign (poslední MUSÍ zůstat poslední).
+
 ## 2026-07-27 — UPDATE z upstreamu: v4.49.2 → v4.51.0
 
 Merge 49 commitů (mj. passkeys + obecné MFA + zámek session — migrace 0145–0147, branding profily e-mailů — 0141–0144, přehled dávky AI importu, MONETA e-mailová avíza, paušální daň 2026, upstream PWA #231; migrace 0140–0147). Šest konfliktů:

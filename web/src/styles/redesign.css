@@ -1,0 +1,137 @@
+/* ═══════════════════════ FORK (beevee85): REDESIGN 2026 ═══════════════════════
+ * Fáze 1 redesignu (app shell ve stylu moderních fakturačních aplikací):
+ * design tokeny, self-hostované fonty a typografický základ.
+ *
+ * Importováno v main.ts jako POSLEDNÍ (po main.css a custom-theme.css) —
+ * nevrstvená pravidla tady přebíjejí Tailwind @layer utilities i obě
+ * předchozí vrstvy. Upstream main.css zůstává netknutý kvůli merge updatů.
+ *
+ * Nové tokeny (--app-bg, --radius-panel, …) se v šablonách používají přes
+ * arbitrary utility, např. bg-(--app-bg) nebo rounded-(--radius-panel) —
+ * není potřeba je registrovat v @theme.
+ *
+ * Při změně palety srovnej i chart barvy v composables/useTheme.ts
+ * (chart.js nečte CSS proměnné). PDF faktur tenhle soubor neovlivňuje.
+ */
+
+/* ─── Fonty: self-host (web/src/assets/fonts, OFL licence), žádné externí requesty.
+ * Vite je zahashuje do dist/assets → nginx location /assets/ + SW cache-first. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../assets/fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../assets/fonts/inter-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Nunito';
+  font-style: normal;
+  font-weight: 200 1000;
+  font-display: swap;
+  src: url('../assets/fonts/nunito-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Nunito';
+  font-style: normal;
+  font-weight: 200 1000;
+  font-display: swap;
+  src: url('../assets/fonts/nunito-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ─── Nové design tokeny redesignu ───
+ * Sémantické aliasy (--primary, --surface, …) míří přes var() na existující
+ * Tailwind tokeny, takže se v .dark přemapují samy. Samostatné hodnoty
+ * mají vlastní .dark přepis níže. */
+:root {
+  --app-bg:        #1E2050;   /* tmavá plocha pod celou appkou (v obou režimech) */
+  --app-bg-dark:   #0B0F31;   /* varianta pro dark mode */
+  --surface:       var(--color-surface);
+  --surface-muted: #F6F6FB;   /* vnořené sekce, hlavičky tabulek */
+  --primary:       var(--color-primary-600);
+  --primary-hover: var(--color-primary-700);
+  --accent-cta:    #16A34A;   /* zelené hlavní CTA */
+  --success:       var(--color-success-600);
+  --danger:        var(--color-danger-500);
+  --warning:       var(--color-warning-500);
+  --text:          #181624;
+  --text-muted:    #64748B;
+
+  --radius-panel:   28px;     /* velký plovoucí panel */
+  --radius-card:    20px;
+  --radius-control: 999px;    /* všechna tlačítka jsou pilulky */
+  --radius-input:   12px;
+  --space-panel:    32px;
+  --grid-gap:       24px;
+  --sidebar-w:      240px;
+  --control-h:      40px;
+
+  --font-display: 'Nunito', var(--font-sans);
+}
+.dark {
+  --app-bg:        var(--app-bg-dark);
+  --surface-muted: #292C43;
+  --text:          #F2F5FA;
+  --text-muted:    #94A3B8;
+}
+
+/* ─── Sémantické barvy: sytější, srozumitelnější (success zelená místo sage,
+ * danger červená místo coral, warning amber). Přepisuje upstream @theme hodnoty;
+ * .dark blok MUSÍ zrcadlit vše z :root, jinak by :root (pozdější soubor)
+ * přebil i .dark hodnoty z main.css. */
+:root {
+  --color-success-50:  #F0FDF4;
+  --color-success-500: #22C55E;
+  --color-success-600: #16A34A;   /* plné success/CTA tlačítko */
+  --color-success-700: #15803D;   /* hover */
+  --color-danger-50:   #FEF2F2;
+  --color-danger-500:  #DC2626;   /* text (po splatnosti) — AA na bílé */
+  --color-danger-600:  #B91C1C;   /* plné danger tlačítko */
+  --color-warning-50:  #FFFBEB;
+  --color-warning-500: #F59E0B;
+  --color-warning-600: #B45309;   /* warning text — AA na bílé */
+}
+.dark {
+  --color-success-50:  #112B1C;
+  --color-success-500: #4ADE80;
+  --color-success-600: #34D399;
+  --color-success-700: #1E6B45;
+  --color-danger-50:   #2E1414;
+  --color-danger-500:  #F87171;
+  --color-danger-600:  #EF4444;
+  --color-warning-50:  #2C2110;
+  --color-warning-500: #FBBF24;
+  --color-warning-600: #F59E0B;
+}
+
+/* ─── Typografie ───
+ * Tělo zůstává Inter (--font-sans, teď poprvé skutečně načtený); nadpisy
+ * zaobleným Nunito. Base 16px, h1 24/600, h2 20/600. */
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+h1 { font-size: 1.5rem; }    /* 24px */
+h2 { font-size: 1.25rem; }   /* 20px */
+
+/* ─── Konec drobných UPPERCASE labelů ───
+ * Plošně: text-transform pryč a tracking zpět na normál (407 výskytů napříč
+ * stránkami — markup se dočistí v dalších fázích per stránka). Nejmenší
+ * velikosti (10/11px) zvětšit na 12–13px. Barvy nesjednocujeme globálně,
+ * aby nespadly barevné pilulky sekcí — řeší se per komponenta. */
+.uppercase {
+  text-transform: none;
+  letter-spacing: normal;
+}
+.text-\[10px\].uppercase { font-size: 0.75rem; }     /* 12px */
+.text-\[11px\].uppercase { font-size: 0.8125rem; }   /* 13px */

@@ -92,7 +92,7 @@
 :root { --color-neutral-200: #E9EEF5; }
 .shadow-sm { box-shadow: none; }
 h1 { letter-spacing: -0.02em; }
-h1.text-2xl { font-size: 1.75rem; }
+/* h1.text-2xl 28px zrušeno — velikosti nadpisů teď řídí redesign.css (h1 24px). */
 select {
   appearance: none;
   -webkit-appearance: none;
