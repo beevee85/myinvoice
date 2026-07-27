@@ -189,12 +189,16 @@ final class VatLedgerService
                    COALESCE(pi.tax_date, pi.issue_date) AS tax_date, pi.issue_date,
                    -- RAW kurz (bez COALESCE ...,1) — viz fetchSales / normalize() (issue #238).
                    pi.exchange_rate AS exchange_rate, COALESCE(cur.code, 'CZK') AS currency,
-                   -- Přijatý dobropis (document_kind='credit_note') je v DB uložen s KLADNÝMI
-                   -- částkami — pro DPH evidenci se znaménko obrací, jinak by dobropis odpočet
-                   -- ZVÝŠIL místo snížil. (Vydané dobropisy v `invoices` jsou naopak ukládány
-                   -- ZÁPORNĚ — fetchSales proto znaménko NEobrací, viz test CreditNote.)
-                   (CASE WHEN pi.document_kind = 'credit_note' THEN -1 ELSE 1 END)
-                       * pi.total_with_vat AS inv_total, pi.reverse_charge AS rc_flag,
+                   -- Přijatý dobropis (document_kind='credit_note') snižuje odpočet → do DPH
+                   -- evidence VŽDY záporně přes -ABS(). V DB totiž žijí OBĚ konvence: ruční
+                   -- pořízení/AI import ukládá záporně (qty −1, jako CancelInvoiceAction),
+                   -- ale část importů kladně (jen soft warning credit_note_positive_total,
+                   -- reálný případ PF2602004). Prosté ×(−1) by správně uložený záporný
+                   -- dobropis dvojitě negovalo a odpočet ZVÝŠILO. (Vydané dobropisy
+                   -- v `invoices` jsou záporně vždy — fetchSales znaménko NEupravuje.)
+                   (CASE WHEN pi.document_kind = 'credit_note'
+                         THEN -ABS(pi.total_with_vat) ELSE pi.total_with_vat END)
+                       AS inv_total, pi.reverse_charge AS rc_flag,
                    pi.vat_deduction, pi.vat_deduction_percent,
                    c.company_name AS counterparty_name, c.dic AS counterparty_dic,
                    co.iso2 AS country_iso2, COALESCE(co.is_eu, 0) AS country_is_eu,
@@ -223,10 +227,12 @@ final class VatLedgerService
                          THEN 1 ELSE 0 END) AS code_estimated,
                    pii.vat_rate_snapshot AS vat_rate,
                    pii.description AS description,
-                   (CASE WHEN pi.document_kind = 'credit_note' THEN -1 ELSE 1 END)
-                       * COALESCE(pii.total_without_vat, 0) AS base,
-                   (CASE WHEN pi.document_kind = 'credit_note' THEN -1 ELSE 1 END)
-                       * COALESCE(pii.total_vat, 0) AS vat
+                   (CASE WHEN pi.document_kind = 'credit_note'
+                         THEN -ABS(COALESCE(pii.total_without_vat, 0))
+                         ELSE COALESCE(pii.total_without_vat, 0) END) AS base,
+                   (CASE WHEN pi.document_kind = 'credit_note'
+                         THEN -ABS(COALESCE(pii.total_vat, 0))
+                         ELSE COALESCE(pii.total_vat, 0) END) AS vat
               FROM purchase_invoices pi
               JOIN clients c ON c.id = pi.vendor_id
          LEFT JOIN countries co ON co.id = c.country_id

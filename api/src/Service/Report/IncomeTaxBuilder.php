@@ -177,12 +177,13 @@ final class IncomeTaxBuilder
         $stmt->execute([$supplierId, $start, $end]);
         $exemptRevenue = (float) ($stmt->fetchColumn() ?: 0);
 
-        // Costs z přijatých. Přijatý dobropis (credit_note) je uložen s kladnými
-        // částkami → náklady snižuje, proto obrácené znaménko (stejná konvence jako
-        // VatLedgerService::fetchPurchases; vydané dobropisy jsou v DB už záporné).
+        // Costs z přijatých. Přijatý dobropis (credit_note) náklady VŽDY snižuje →
+        // -ABS(), protože v DB žijí obě znaménkové konvence (záporné z ručního
+        // pořízení/AI, kladné z části importů) — viz VatLedgerService::fetchPurchases.
         $stmt = $this->db->pdo()->prepare(
-            "SELECT SUM((CASE WHEN pi.document_kind = 'credit_note' THEN -1 ELSE 1 END)
-                        * COALESCE(pi.{$amount}, 0)) AS total
+            "SELECT SUM(CASE WHEN pi.document_kind = 'credit_note'
+                             THEN -ABS(COALESCE(pi.{$amount}, 0))
+                             ELSE COALESCE(pi.{$amount}, 0) END) AS total
                FROM purchase_invoices pi
           LEFT JOIN currencies c ON c.id = pi.currency_id
               WHERE pi.supplier_id = ?
