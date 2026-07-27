@@ -63,6 +63,7 @@ use MyInvoice\Action\Dashboard\PurchaseSummaryAction;
 use MyInvoice\Action\Invoice\CancelInvoiceAction;
 use MyInvoice\Action\Invoice\CreateInvoiceAction;
 use MyInvoice\Action\Invoice\DeleteInvoiceAction;
+use MyInvoice\Action\Invoice\RebuildInvoiceSnapshotsAction;
 use MyInvoice\Action\Invoice\ExportCsvAction;
 use MyInvoice\Action\Invoice\ExportSelectedPdfAction;
 use MyInvoice\Action\Invoice\InvoiceActivityAction;
@@ -347,6 +348,8 @@ final class Routes
         $app->delete ('/api/invoices/{id:[0-9]+}/payments/{paymentId:[0-9]+}', DeletePaymentAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/payments/{paymentId:[0-9]+}/tax-document', CreatePaymentTaxDocumentAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/cancel',    CancelInvoiceAction::class);
+        // Obnova snapshotů klienta/dodavatele z live dat (admin, i u vystavené) — BUG 5.
+        $app->post   ('/api/invoices/{id:[0-9]+}/rebuild-snapshots', RebuildInvoiceSnapshotsAction::class);
         $app->get    ('/api/invoices/{id:[0-9]+}/isdoc',     InvoiceIsdocAction::class);
         $app->get    ('/api/invoices/{id:[0-9]+}/pdf',       PdfAction::class);
         $app->get    ('/api/invoices/{id:[0-9]+}/pdfs',      ListPdfsAction::class);

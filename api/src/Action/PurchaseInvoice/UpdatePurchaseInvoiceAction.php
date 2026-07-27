@@ -56,12 +56,21 @@ final class UpdatePurchaseInvoiceAction
         $isForce = !empty($request->getQueryParams()['force']);
 
         if ($existing['status'] !== 'draft') {
-            // Force-update: admin smí upravit received / booked / paid (s ?force=1).
+            // Force-update: admin smí upravit received / booked / paid (s ?force=1;
+            // UI: tlačítko „Odemknout k editaci" v editoru → potvrzovací modal).
             // cancelled zůstává immutable (storno = auditní stopa, nemá se editovat).
-            if (!$isAdmin || !$isForce || $existing['status'] === 'cancelled') {
+            // Bez force → 409 s návodem; force bez admin role → 403 (rozlišeno pro UI i testy).
+            if ($existing['status'] === 'cancelled') {
+                return Json::error($response, 'not_editable', 'Stornovanou fakturu nelze upravit (auditní stopa).', 409);
+            }
+            if (!$isForce) {
                 return Json::error($response, 'not_editable',
-                    "Faktura ve stavu '{$existing['status']}' nelze upravit. Admin může upravit received/booked/paid s ?force=1.",
+                    "Faktura ve stavu '{$existing['status']}' nelze upravit. Administrátor ji může odemknout k editaci přímo v editoru dokladu (tlačítko „Odemknout k editaci“).",
                     409);
+            }
+            if (!$isAdmin) {
+                return Json::error($response, 'forbidden',
+                    'Odemknout a upravit fakturu mimo stav draft smí jen administrátor.', 403);
             }
         }
 
@@ -144,11 +153,25 @@ final class UpdatePurchaseInvoiceAction
         // čísla na odpovídající typ (PF2602001 → NN2602001). No-op u draftu / ručních čísel.
         $this->repo->reprefixVarsymbol($id, $supplierId);
 
-        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
-        $action = ($existing['status'] !== 'draft') ? 'purchase_invoice.force_updated' : 'purchase_invoice.updated';
-        $this->logger->log($action, $user['id'] ?? null, 'purchase_invoice', $id, null, $ip, $request->getHeaderLine('User-Agent'));
-
         $invoice = $this->repo->find($id, $supplierId);
+
+        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        // Force-edit non-draft faktury má vlastní typ auditní položky s plným
+        // kontextem: CO se přepsalo (changed) + starý/nový snapshot dodavatele
+        // (vendor_snapshot je jinak immutable záznam k datu zaevidování).
+        $isForceEdit = $existing['status'] !== 'draft';
+        $payload = null;
+        if ($isForceEdit) {
+            $changed = self::diffFields($existing, $invoice ?? []);
+            $payload = [
+                'changed'      => $changed,
+                'old_snapshot' => ['vendor' => self::decodeSnapshot($existing['vendor_snapshot'] ?? null)],
+                'new_snapshot' => ['vendor' => self::decodeSnapshot($invoice['vendor_snapshot'] ?? null)],
+            ];
+        }
+        $action = $isForceEdit ? 'purchase_invoice.force_edit' : 'purchase_invoice.updated';
+        // supplier_id explicitně — auto-resolve ActivityLoggeru entity purchase_invoice nezná.
+        $this->logger->log($action, $user['id'] ?? null, 'purchase_invoice', $id, $payload, $ip, $request->getHeaderLine('User-Agent'), $supplierId);
         // Non-blocking varování (např. dobropis s kladným součtem — viz issue #35).
         $warnings = PurchaseInvoiceValidation::warnings($invoice ?? []);
         // Neplátce + přesto uplatněn odpočet → upozorni (uživatel vědomě přepsal).
@@ -165,6 +188,57 @@ final class UpdatePurchaseInvoiceAction
             $invoice['_warnings'] = $warnings;
         }
         return Json::ok($response, $invoice);
+    }
+
+    /** JSON snapshot (string z DB) → pole pro auditní payload; neparsovatelný → null. */
+    private static function decodeSnapshot(mixed $raw): ?array
+    {
+        if (is_array($raw)) {
+            return $raw;
+        }
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * Sémantické klíče polí změněných force-editem — audit detail „co se přepsalo".
+     * Drž v sync s editovatelnými sloupci PurchaseInvoiceRepository::updateDraft()
+     * (zrcadlí diffFields prodejní UpdateInvoiceAction).
+     *
+     * @return list<string>
+     */
+    private static function diffFields(array $old, array $new): array
+    {
+        $columns = [
+            'vendor_id', 'vendor_invoice_number', 'document_kind', 'varsymbol',
+            'issue_date', 'tax_date', 'due_date', 'received_at',
+            'currency_id', 'exchange_rate', 'reverse_charge', 'prices_include_vat', 'language',
+            'note_above_items', 'note_below_items', 'advance_paid_amount',
+            'vat_classification_code', 'vat_deduction', 'vat_deduction_percent',
+            'tax_deductible', 'is_fixed_asset', 'expense_category_id', 'vendor_is_vat_payer',
+        ];
+        $changed = [];
+        foreach ($columns as $col) {
+            // String cast sjednotí int/float/null/bool porovnání napříč PDO casty.
+            if ((string) ($old[$col] ?? '') !== (string) ($new[$col] ?? '')) {
+                $changed[] = preg_replace('/_id$/', '', $col);
+            }
+        }
+        $project = static fn (array $it): array => [
+            (string) ($it['description'] ?? ''),
+            (string) ($it['quantity'] ?? ''),
+            (string) ($it['unit'] ?? ''),
+            (string) ($it['unit_price_without_vat'] ?? ''),
+            (string) ($it['vat_rate_id'] ?? ''),
+        ];
+        if (array_map($project, array_values((array) ($old['items'] ?? [])))
+            !== array_map($project, array_values((array) ($new['items'] ?? [])))) {
+            $changed[] = 'items';
+        }
+        return $changed;
     }
 
     /**
