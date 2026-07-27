@@ -6,6 +6,16 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-27 — ZÁMEK DOKLADU V UI + EPO IDENTIFIKACE + VIES CZ699 (přímo na custom, 6 commitů 9c90c80f..e1395c0e)
+
+**Charakter: BUGFIX KANDIDÁT PRO UPSTREAM** (2. dávka) — podklad `/root/vat-fix-snapshots/GITHUB-ISSUE-2.md` + PR větev `pr/lock-and-epo-validation` na forku; po přijetí autorem blok odpadá.
+
+1. **BUG 5 — zámek stavu bez cesty ven z UI:** oba editory (vydané i přijaté) zobrazují u uzamčeného dokladu výstražný pruh + admin tlačítko **„Odemknout k editaci"** → modal s výslovnými následky a povinným checkboxem; formulář je do odemčení `fieldset[disabled]`; příznak nepřežije reload a `?force=1` z URL se ignoruje. Backend: bez force 409 s návodem, force bez admin 403; audit **`invoice.force_edit` / `purchase_invoice.force_edit`** s diffem polí + starým/novým snapshotem (dřív jen `force_updated` bez detailu). Nový **POST `/api/invoices/{id}/rebuild-snapshots`** („Obnovit údaje klienta", admin) — přepíše jen snapshoty z live dat i u zaplacené faktury, audit `invoice.rebuild_snapshots`.
+2. **BUG 6 — EPO XML bez povinné identifikace:** nový **`EpoIdentityValidator`** (povinné: kód FÚ, **ÚzP/c_pracufo**, DIČ, typ poplatníka, e-mail; u PO opr_*; doporučené: telefon, CZ-NACE u DP3). KH/DP3/SHV preview i download vrací **422 `epo_identity_incomplete`** s `missing[]` + `settings_url`; report stránky to kreslí jako blok s výčtem a odkazem na `/admin/settings#epo`; Settings mají kotvu #epo, badge „Nekompletní — EPO podání selže", červené hinty a nápovědu ÚzP. PUT suppliers vrací `epo_ready`+`missing` (informativně). **POZOR: BEKRON (supplier 1) nemá ÚzP ani oprávněnou osobu → jeho výkazy vrací 422, dokud se pole nedoplní** (PROPSOL je kompletní).
+3. **Bonus — VIES vs. skupinová registrace:** CZ DIČ s kmenem 699* se ověřuje v registru plátců DPH (CrpDphClient), ne ve VIES (falešné „není platné"); `VendorVatPayerResolver` u CZ699 nikdy nepersistuje neplátce z VIES.
+
+Testy: ForceEditUnlockTest, EpoIdentityGuardTest, ViesClientCzRoutingTest (+2). Bez migrací. openapi + manuál kap. 9/17/29 aktualizovány, HTML regenerováno. Ověřit po merge: suita zelená; editor vydané faktury ukazuje zámek+odemčení; KH preview u nekompletního tenanta vrací výčet chybějících polí.
+
 ## 2026-07-27 — OPRAVA DPH VÝKAZŮ: dobropisy, zahraniční RC, forma podání, termíny, konzistence RC (větev fix/vat-credit-note-sign)
 
 **Charakter: BUGFIX KANDIDÁT PRO UPSTREAM** — po přijetí autorem (radekhulan/myinvoice) celý blok z evidence odpadá. Podklad pro autora: `/root/vat-fix-snapshots/UPSTREAM-PROPOSAL.md` + diff report tamtéž.
