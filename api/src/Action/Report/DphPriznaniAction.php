@@ -35,6 +35,8 @@ final class DphPriznaniAction
         private readonly \MyInvoice\Service\Report\TaxSubmissionArchiver $archiver,
         private readonly \MyInvoice\Service\Currency\MissingExchangeRateFiller $rateFiller,
         private readonly \MyInvoice\Service\Report\EpoIdentityValidator $epoValidator,
+        // Sazby pro dopočet EPO propustné chyby 49 (ř. 40/41) — per rok období.
+        private readonly \MyInvoice\Repository\TaxConstantsRepository $taxConstants,
     ) {}
 
     /**
@@ -174,8 +176,54 @@ final class DphPriznaniAction
         return Json::ok($response, [
             'summary'  => $result['summary'],
             // Doporučená pole (telefon, CZ-NACE…) jen varují — generování neblokují.
-            'warnings' => array_merge($result['warnings'], $epo['warnings']),
+            'warnings' => array_merge(
+                $result['warnings'],
+                $epo['warnings'],
+                $this->roundingWarnings($result['summary'], $year),
+            ),
         ]);
+    }
+
+    /**
+     * Propustná chyba EPO 49 na ř. 40/41 (BUG 7): EPO si daň dopočítává jako
+     * round(zaokrouhlený základ × sazba), zatímco přiznání nese SOUČET daně
+     * z jednotlivých dokladů (haléřové rozdíly zaokrouhlení per doklad). Rozdíl
+     * je legitimní a hodnota z dokladů odpovídá sekci B.2/B.3 kontrolního
+     * hlášení — uživatele jen předem upozorníme, ať hodnotu „neopravuje".
+     * XML se kvůli tomu NIKDY nepřepisuje (musí souhlasit s KH).
+     *
+     * @param array<string,mixed> $summary summary z DphPriznaniBuilder (lines)
+     * @return list<string>
+     */
+    private function roundingWarnings(array $summary, int $year): array
+    {
+        $lines = (array) ($summary['lines'] ?? []);
+        $constants = $this->taxConstants->forYear($year);
+        $rates = [
+            '40' => (float) ($constants['vat_rate_standard'] ?? 21.0),
+            '41' => (float) ($constants['vat_rate_reduced'] ?? 12.0),
+        ];
+        $out = [];
+        foreach ($rates as $line => $rate) {
+            if (!isset($lines[$line])) {
+                continue;
+            }
+            $data = (array) $lines[$line];
+            // Stejné zaokrouhlení jako XML: základ i daň na celé Kč.
+            $baseRounded = (int) round((float) ($data['base'] ?? 0));
+            $vatFromDocs = (int) round((float) ($data['vat'] ?? 0));
+            $vatComputed = (int) round($baseRounded * $rate / 100);
+            $diff = $vatFromDocs - $vatComputed;
+            if ($diff !== 0) {
+                $out[] = sprintf(
+                    'EPO nahlásí propustnou chybu 49 na ř. %s: rozdíl %d Kč vzniká zaokrouhlením základu. '
+                    . 'Hodnota z dokladů je správná a odpovídá sekci B.2/B.3 kontrolního hlášení — neupravuj ji.',
+                    $line,
+                    abs($diff),
+                );
+            }
+        }
+        return $out;
     }
 
     public function download(Request $request, Response $response): Response

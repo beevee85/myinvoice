@@ -124,6 +124,10 @@ export interface AresLookupResult {
     commercial_register?: string
     /** Typ poplatníka odvozený z právní formy: 'fo' = OSVČ (DPFO), 'po' = firma (DPPO), '' = neurčeno. */
     taxpayer_type?: 'fo' | 'po' | ''
+    /** Převažující CZ-NACE normalizovaná na 6 míst; '' když ARES eviduje jen oddíl (viz cz_nace_note). */
+    cz_nace_code?: string
+    /** Poznámka pro UI, když ARES eviduje jen oddíl NACE (<4 číslice) — uživatel doplní třídu ručně. */
+    cz_nace_note?: string
   }
 }
 

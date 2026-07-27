@@ -60,7 +60,7 @@ odmítne nebo bude generovat formálně neúplný výkaz.
 |---|---|---|---|
 | **Kód finančního úřadu** | `c_ufo` | Číselný kód územního finančního orgánu | např. `451` Praha 1, `463` Jihomoravský kraj. Najdeš na posledním podaném přiznání nebo v EPO. |
 | **Kód územního pracoviště** | `c_pracufo` | Konkrétní pracoviště v rámci FÚ | např. `3203` pracoviště Brno III. Volitelné, ale EPO ho někdy vyžaduje. |
-| **CZ-NACE kód (`cz_nace_code`)** | `c_okec` | Hlavní podnikatelská činnost (NACE) | např. `631000` (IT poradenství). Najdeš na živnostenském listě / ARES. Fallback `631000` pokud necháš prázdné. |
+| **CZ-NACE kód (`cz_nace_code`)** | `c_okec` | Hlavní podnikatelská činnost (NACE) | 6místný kód číselníku MFČR, např. `731100` (reklamní agentury). Zadat lze i `73.11` — doplní se automaticky. Dvoumístný oddíl z ARES (např. `74`) číselník nezná a aplikace ho neuloží. Prázdné/neúplné → atribut se vynechá a EPO nahlásí propustnou chybu 30. |
 
 ### Typ plátce a perioda
 
@@ -197,10 +197,17 @@ toggluj na **Kvartálně** a vyber kvartál.
 sekci VetaD/VetaP. Alternativně zavolej na svůj FÚ nebo se podívej na
 [seznam FÚ](https://www.financnisprava.cz/cs/financni-sprava/organy-financni-spravy/uzemni-pracoviste).
 
-**„OKÉČ kód mi vyjde fallback `631000`, ale moje činnost je jiná"**
-→ Vyplň `cz_nace_code` v Daňovém nastavení. Číslo najdeš na živnostenském listě
-nebo v ARES. Builder ho normalizuje (odstraní `CZ-NACE ` prefix, padne na 6
-číslic).
+**„EPO hlásí propustnou chybu 30 — Hlavní ekonomická činnost neodpovídá číselníku"**
+→ Vyplň `cz_nace_code` v Daňovém nastavení **6místným kódem** (např. `731100`;
+lze zadat i `73.11`, doplní se automaticky). Dvoumístný oddíl převzatý z ARES
+(např. `74`) číselník MFČR nezná — aplikace ho od této verze neuloží a do XML
+nepropíše (atribut se vynechá a náhled přiznání na to upozorní).
+
+**„EPO hlásí propustnou chybu 49 na ř. 40/41 — daň neodpovídá základu"**
+→ Nejde o chybu dat: EPO si daň dopočítává ze zaokrouhleného základu, zatímco
+přiznání nese **součet daně z jednotlivých dokladů** (haléřové rozdíly per
+doklad). Hodnota z dokladů je správná a odpovídá sekci B.2/B.3 kontrolního
+hlášení — **neupravuj ji**. Náhled přiznání rozdíl dopředu vypíše ve varováních.
 
 ## DPH přiznání (DPHDP3)
 

@@ -370,6 +370,19 @@ final class SettingsAction
                 }
             }
         }
+        // CZ-NACE (c_okec v DPHDP3, BUG 7): normalizace na 6místný kód číselníku
+        // MFČR (73.11 → 731100, 7311 → 731100, 62020 → 620200). Dvoumístný oddíl
+        // z ARES („74") v číselníku neexistuje → EPO propustná chyba 30; takový
+        // vstup se NEUKLÁDÁ.
+        if (array_key_exists('cz_nace_code', $body) && $body['cz_nace_code'] !== null) {
+            $normalizedNace = \MyInvoice\Service\Report\EpoSupplierBlockBuilder::normalizeCzNaceInput((string) $body['cz_nace_code']);
+            if ($normalizedNace === null) {
+                return Json::error($response, 'validation_failed',
+                    'CZ-NACE musí být alespoň 4místný kód třídy (např. 73.11). Dvoumístný oddíl z ARES nestačí, EPO ho v číselníku nenajde.',
+                    422);
+            }
+            $body['cz_nace_code'] = $normalizedNace; // '' spadne níž na NULL
+        }
         // Empty string → null pro tax fields (NULL = nevyplněno)
         foreach (['taxpayer_type', 'vat_period', 'financial_office_code', 'workplace_code',
                   'cz_nace_code', 'data_box_id',

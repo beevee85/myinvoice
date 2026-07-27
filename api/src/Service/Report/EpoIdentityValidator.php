@@ -129,9 +129,16 @@ final class EpoIdentityValidator
             $out[] = ['field' => 'phone', 'label' => 'Telefon',
                       'why' => 'Doporučený kontakt pro FÚ (atribut c_telef) — urychluje řešení výzev.'];
         }
-        if ($doc === self::DOC_DPHDP3 && self::blank($supplier['cz_nace_code'] ?? null)) {
-            $out[] = ['field' => 'cz_nace_code', 'label' => 'CZ-NACE kód',
-                      'why' => 'Bez něj se c_okec v přiznání nevyplní — FÚ může žádat doplnění hlavní činnosti.'];
+        if ($doc === self::DOC_DPHDP3) {
+            // BUG 7: warning i pro NEÚPLNÝ kód (jen oddíl z ARES, např. „74") —
+            // builder ho do XML nepropíše (chyba 30 by podání nezastavila, ale
+            // FÚ ji hlásí jako propustnou chybu a žádá opravu).
+            $nace = (string) ($supplier['cz_nace_code'] ?? '');
+            $naceDigits = preg_replace('/\D/', '', $nace) ?? '';
+            if (self::blank($nace) || strlen($naceDigits) < 4) {
+                $out[] = ['field' => 'cz_nace_code', 'label' => 'CZ-NACE kód',
+                          'why' => 'c_okec se v přiznání nevyplní a EPO nahlásí propustnou chybu 30 („Hlavní ekonomická činnost by měla odpovídat nějaké hodnotě z číselníku"). Doplň 6místný kód, např. 731100.'];
+            }
         }
         return $out;
     }

@@ -61,6 +61,11 @@ async function loadCommercialRegister() {
   crLoading.value = true
   try {
     const r = await clientsApi.lookupAres(ic)
+    // BUG 7: ARES u některých subjektů eviduje jen oddíl NACE (2 číslice) —
+    // prefill zůstává prázdný a uživatel má doplnit konkrétní třídu ručně.
+    if (r.found && (r.data as any)?.cz_nace_note && !(supplier.value as any)?.cz_nace_code) {
+      toast.info((r.data as any).cz_nace_note)
+    }
     if (r.found && r.data?.commercial_register && supplier.value) {
       supplier.value.commercial_register = r.data.commercial_register
       toast.success(t('settings.commercial_register_loaded'))
@@ -142,6 +147,22 @@ const epoMissingLocal = computed<string[]>(() => {
   if (s.taxpayer_type === 'po') fields.push('opr_jmeno', 'opr_prijmeni', 'opr_postaveni')
   return fields.filter((f) => epoFieldEmpty(s[f]))
 })
+
+// CZ-NACE (BUG 7) — stejné pravidlo jako backend: po odstranění nečíslic musí
+// zbýt aspoň 4místná třída (73.11), jinak EPO číselník kód nezná (chyba 30).
+const czNaceError = computed<string>(() => {
+  const raw = ((supplier.value as any)?.cz_nace_code ?? '').toString().trim()
+  if (raw === '') return ''
+  const digits = raw.replace(/\D/g, '')
+  return digits.length < 4 ? t('settings.cz_nace_too_short') : ''
+})
+// Na blur doplníme kód na 6 míst (73.11 → 731100) — zrcadlí backend normalizaci.
+function normalizeCzNace() {
+  const s = supplier.value as any
+  if (!s) return
+  const digits = (s.cz_nace_code ?? '').toString().replace(/\D/g, '')
+  if (digits.length >= 4) s.cz_nace_code = digits.slice(0, 6).padEnd(6, '0')
+}
 
 // Kopie odchozích e-mailů dodavateli (migrace 0102) — UI stav 'inherit' znamená
 // „klíč v self_copy chybí" = živý fallback na cfg flagy (vzor číslování faktur).
@@ -751,9 +772,12 @@ async function removeLogo() {
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.cz_nace_code') }}</label>
-              <input v-model="supplier.cz_nace_code" type="text" maxlength="8" placeholder="62.01"
+              <input v-model="supplier.cz_nace_code" type="text" maxlength="8" placeholder="731100"
+                @blur="normalizeCzNace"
                 class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
               <p class="text-xs text-neutral-500 mt-1">{{ t('settings.cz_nace_hint') }}</p>
+              <!-- Stejné pravidlo jako backend (BUG 7): pod 4 číslice = oddíl z ARES, EPO chyba 30 -->
+              <p v-if="czNaceError" class="text-xs text-danger-500 mt-1">{{ czNaceError }}</p>
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.data_box_id') }}</label>
