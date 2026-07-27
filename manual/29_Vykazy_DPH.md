@@ -25,12 +25,23 @@ V **Nastavení → Daňové nastavení** vyplň:
 1. **Typ poplatníka** — FO (OSVČ) nebo PO (s.r.o., a.s.)
 2. **Perioda DPH přiznání** — Měsíční nebo Kvartální
 3. **Kód finančního úřadu** (např. 451 = Praha 1)
-4. **Kód územního pracoviště (ÚzP)** — pokud existuje
-5. **DIČ** v Identifikaci firmy (povinné)
-6. Volitelně: CZ-NACE, datová schránka, sestavitel přiznání
-7. Volitelně pro OSS: OSS režim, země identifikace a měna podání
+4. **Kód územního pracoviště (ÚzP)** — najdeš na mojedane.gov.cz nebo v hlavičce dřívějšího podání jako `c_pracufo` (např. 2005 = ÚzP pro Prahu 5)
+5. **DIČ** a **e-mail** v Identifikaci firmy (povinné)
+6. U právnické osoby **oprávněnou osobu** (jméno, příjmení, postavení — typicky jednatel)
+7. Volitelně: telefon, CZ-NACE, datová schránka, sestavitel přiznání
+8. Volitelně pro OSS: OSS režim, země identifikace a měna podání
 
 Detailní mapping všech polí v UI na XML atributy najdeš v sekci [Pole EPO / VetaP](#pole-epo-vetap) níže.
+
+> [!IMPORTANT]
+> **Bez povinných polí se XML nevygeneruje.** Aplikace před sestavením výkazu
+> kontroluje úplnost identifikace: kód FÚ, kód ÚzP, DIČ, typ poplatníka a e-mail
+> (u PO navíc oprávněnou osobu). Chybí-li něco, stránka výkazu zobrazí výčet
+> chybějících polí s odkazem do nastavení — dřív se vygenerovalo validně
+> vypadající XML, které EPO odmítl až při podání, typicky v den lhůty.
+> Chybějící telefon nebo CZ-NACE generování neblokuje, jen se zobrazí upozornění.
+> Sekce Daňové nastavení sama zvýrazní prázdná povinná pole a nekompletnost
+> ohlásí štítkem v záhlaví.
 
 > [!NOTE]
 > **Právnické osoby (PO/s.r.o./a.s.) podávají Kontrolní hlášení VŽDY měsíčně** (§ 101e odst. 1 ZDPH).

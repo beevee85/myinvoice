@@ -1755,6 +1755,28 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/invoices/{id}/rebuild-snapshots:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [InvoiceOps]
+      summary: Obnoví snapshoty klienta/dodavatele na dokladu z aktuálních live dat (admin)
+      description: |
+        Lehčí alternativa k odemčení celého formuláře (typicky změna DIČ odběratele
+        nebo přesun do skupinové registrace): přepíše POUZE `client_snapshot` /
+        `supplier_snapshot` / `bank_snapshot`, a to i u uzamčeného (issued/sent/paid)
+        dokladu. Částky, stav, datumy ani varsymbol se nemění. Auditováno jako
+        `invoice.rebuild_snapshots` se starým i novým snapshotem.
+      responses:
+        '200':
+          description: Aktualizovaná faktura
+        '403': { description: Pouze admin }
+        '409': { description: Draft (snapshoty nepoužívá) nebo stornovaný doklad }
+
   /api/v1/invoices/{id}/cancel:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -3536,6 +3558,7 @@ paths:
             application/json:
               schema: { type: object }
         '403': { description: Pouze admin/accountant }
+        '422': { description: 'epo_identity_incomplete — chybí povinná EPO identifikace daňového subjektu (tělo obsahuje missing[] a settings_url)' }
 
   /api/v1/reports/dphdp3:
     get:
@@ -3556,6 +3579,7 @@ paths:
           content:
             application/xml: {}
         '400': { description: Neplatná forma podání nebo chybějící/neplatné d_zjist }
+        '422': { description: 'epo_identity_incomplete — chybí povinná EPO identifikace daňového subjektu (tělo obsahuje missing[] a settings_url)' }
         '403': { description: Pouze admin/accountant }
 
   /api/v1/reports/dphkh1/preview:
@@ -3571,6 +3595,7 @@ paths:
       responses:
         '200': { description: Summary s counts sekcí A.1/A.2/A.4/A.5/B.1/B.2/B.3 }
         '403': { description: Pouze admin/accountant }
+        '422': { description: 'epo_identity_incomplete — chybí povinná EPO identifikace daňového subjektu (tělo obsahuje missing[] a settings_url)' }
 
   /api/v1/reports/dphkh1:
     get:
@@ -3590,6 +3615,7 @@ paths:
           content:
             application/xml: {}
         '400': { description: Neplatná forma podání nebo chybějící/neplatné d_zjist }
+        '422': { description: 'epo_identity_incomplete — chybí povinná EPO identifikace daňového subjektu (tělo obsahuje missing[] a settings_url)' }
 
   /api/v1/reports/dphshv/preview:
     get:
@@ -3604,6 +3630,7 @@ paths:
         - { in: query, name: month, required: true, schema: { type: integer } }
       responses:
         '200': { description: "Summary s řádky (country, vat_id, sh_type, amount, count)" }
+        '422': { description: 'epo_identity_incomplete — chybí povinná EPO identifikace daňového subjektu (tělo obsahuje missing[] a settings_url)' }
 
   /api/v1/reports/dphshv:
     get:
@@ -3618,6 +3645,7 @@ paths:
           description: XML download
           content:
             application/xml: {}
+        '422': { description: 'epo_identity_incomplete — chybí povinná EPO identifikace daňového subjektu (tělo obsahuje missing[] a settings_url)' }
 
   /api/v1/reports/income-tax/preview:
     get:
