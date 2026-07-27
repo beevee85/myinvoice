@@ -18,6 +18,10 @@ export interface Supplier {
   country_name_en?: string
   ic: string | null
   dic: string | null
+  // FORK F8: vzhled PDF dokladu (migrace 0903)
+  pdf_attribution_enabled?: boolean | number
+  pdf_legal_text?: string | null
+  pdf_barcode_enabled?: boolean | number
   is_vat_payer: boolean
   /** Identifikovaná osoba (§ 6g–6l ZDPH, issue #94) — neplátce v tuzemsku
    *  s přeshraničními povinnostmi. Nelze kombinovat s is_vat_payer. */
@@ -690,6 +694,30 @@ export const settingsApi = {
     ).then(r => r.data)
   },
   deleteEmailLogo: () => api.delete('/settings/email-branding/logo').then(r => r.data),
+
+  // FORK F8: razítko/podpis na PDF doklad
+  uploadSignature: (file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return api.post<{ signature_path: string }>('/settings/signature', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+  deleteSignature: () => api.delete('/settings/signature').then(r => r.data),
+
+  /** FORK F8: URL živého náhledu PDF dokladu (iframe neposílá X-Supplier-Id → supplier_id v query). */
+  documentPreviewUrl: (params: { lang?: string; branding_profile_id?: number | ''; attribution?: boolean; barcode?: boolean; legal_text?: string; paid?: boolean }) => {
+    const sp = new URLSearchParams()
+    const sid = localStorage.getItem('myinvoice.current_supplier_id')
+    if (sid && /^\d+$/.test(sid)) sp.set('supplier_id', sid)
+    if (params.lang) sp.set('lang', params.lang)
+    if (params.branding_profile_id) sp.set('branding_profile_id', String(params.branding_profile_id))
+    if (params.attribution !== undefined) sp.set('attribution', params.attribution ? '1' : '0')
+    if (params.barcode !== undefined) sp.set('barcode', params.barcode ? '1' : '0')
+    if (params.legal_text !== undefined) sp.set('legal_text', params.legal_text)
+    if (params.paid) sp.set('paid', '1')
+    return `/api/settings/document-preview.pdf?${sp.toString()}`
+  },
 
   listBrandingProfiles: () =>
     api.get<BrandingProfile[]>('/settings/branding-profiles').then(r => r.data),

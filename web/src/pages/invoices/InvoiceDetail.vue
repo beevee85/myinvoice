@@ -21,6 +21,8 @@ import { useHotkey } from '@/composables/useHotkey'
 import { useToast } from '@/composables/useToast'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import Modal from '@/components/ui/Modal.vue'
+import Button from '@/components/ui/Button.vue'
 
 const { t, te, locale } = useI18n()
 const toast = useToast()
@@ -922,6 +924,22 @@ function downloadPdf() {
   window.open(invoicesApi.pdfUrl(invoice.value.id, false), '_blank')
 }
 
+// FORK F8 (8e): náhled PDF v modálu — uživatel nemusí soubor stahovat.
+const pdfPreviewOpen = ref(false)
+const pdfPreviewFrame = ref<HTMLIFrameElement | null>(null)
+function printPdfPreview() {
+  // Same-origin iframe → jde vyvolat tiskový dialog přímo; fallback = nové okno.
+  try {
+    pdfPreviewFrame.value?.contentWindow?.print()
+  } catch {
+    if (invoice.value) window.open(invoicesApi.pdfUrl(invoice.value.id, false), '_blank')
+  }
+}
+function downloadPdfFile() {
+  if (!invoice.value) return
+  window.open(invoicesApi.pdfUrl(invoice.value.id, true), '_blank')
+}
+
 async function sendTest() {
   if (!invoice.value) return
   busy.value = 'send-test'
@@ -1299,6 +1317,10 @@ const invoiceActions = computed<ActionItem[]>(() => {
     { key: 'wr', label: t('invoice.wr_btn'), icon: 'chart', tier: 'secondary', variant: 'primary',
       show: isDraft.value && inv.invoice_type !== 'tax_document' && w,
       title: t('invoice.wr_btn') as string, run: () => { wrModalOpen.value = true } },
+    // FORK F8 (8e): náhled vyrenderovaného PDF přímo v aplikaci
+    { key: 'pdf-preview', label: t('common.preview'), icon: 'doc', tier: 'secondary', variant: 'neutral',
+      show: !isDraft.value || inv.items.length > 0,
+      run: () => { pdfPreviewOpen.value = true } },
     // ── overflow ──
     { key: 'public-link', label: t('invoice.public_link.btn'), icon: 'link', tier: 'overflow', variant: 'primary',
       show: !isDraft.value && w, disabled: b,
@@ -2705,5 +2727,20 @@ const invoiceActions = computed<ActionItem[]>(() => {
       @saved="load" />
 
     <LinkedDocumentsPanel v-if="invoice" class="mt-4 block" entity-type="invoice" :entity-id="invoice.id" />
+
+    <!-- FORK F8 (8e): náhled PDF v modálu (iframe s inline dispozicí) -->
+    <Modal v-if="pdfPreviewOpen && invoice" :title="`${t('common.preview')} PDF`" width-class="max-w-4xl" @close="pdfPreviewOpen = false">
+      <iframe
+        ref="pdfPreviewFrame"
+        :src="invoicesApi.pdfUrl(invoice.id, false) + '#toolbar=0'"
+        class="w-full h-[72vh] border-0 rounded-(--radius-input) bg-neutral-100"
+        title="PDF"
+      ></iframe>
+      <template #footer>
+        <Button variant="ghost" @click="pdfPreviewOpen = false">{{ t('common.close') }}</Button>
+        <Button variant="secondary" @click="printPdfPreview">{{ t('common.print') }}</Button>
+        <Button variant="primary" @click="downloadPdfFile">{{ t('invoice.download_pdf') }}</Button>
+      </template>
+    </Modal>
   </div>
 </template>

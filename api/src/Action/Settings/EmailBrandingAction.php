@@ -307,6 +307,131 @@ TWIG;
             ->withHeader('Cache-Control', 'no-store');
     }
 
+    /**
+     * FORK F8: POST /api/settings/signature — razítko/podpis na PDF doklad.
+     * Multipart pole `file` (PNG/JPG/WebP), převod na PNG sup-{sid}-signature.png
+     * ve storage/supplier-logos (SafeLogoPath zná tenhle tvar). Alfa kanál se
+     * splácne až při renderu (PdfLogoFlattener), tady necháváme originál.
+     */
+    public function uploadSignature(Request $request, Response $response): Response
+    {
+        if (!$this->isAdmin($request)) {
+            return Json::error($response, 'forbidden', 'Pouze admin smí měnit razítko/podpis.', 403);
+        }
+        $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
+        if ($sid <= 0) {
+            return Json::error($response, 'no_supplier', 'Žádný supplier scope.', 400);
+        }
+        $file = $request->getUploadedFiles()['file'] ?? null;
+        if (!$file instanceof UploadedFileInterface) {
+            return Json::error($response, 'no_file', 'Žádný soubor nebyl odeslán (pole `file`).', 400);
+        }
+        if ($file->getError() !== UPLOAD_ERR_OK) {
+            return Json::error($response, 'upload_failed', 'Nahrání selhalo (kód ' . $file->getError() . ').', 400);
+        }
+        $size = (int) ($file->getSize() ?? 0);
+        if ($size <= 0 || $size > self::MAX_FILE_SIZE) {
+            return Json::error($response, 'invalid_file_size', 'Razítko/podpis musí mít 1 B až 1 MiB.', 413);
+        }
+
+        $tmpPath = sys_get_temp_dir() . '/.signature-upload-' . bin2hex(random_bytes(8));
+        try {
+            $file->moveTo($tmpPath);
+            $relPath = $this->processSignature($tmpPath, $sid);
+        } catch (\RuntimeException $e) {
+            return Json::error($response, 'conversion_failed', $e->getMessage(), 400);
+        } catch (\Throwable $e) {
+            return Json::error($response, 'move_failed', 'Nepodařilo se zpracovat soubor: ' . $e->getMessage(), 500);
+        } finally {
+            @unlink($tmpPath);
+        }
+
+        $this->db->pdo()->prepare('UPDATE supplier SET signature_path = ? WHERE id = ?')
+            ->execute([$relPath, $sid]);
+
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $userId = isset($user['id']) ? (int) $user['id'] : null;
+        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        $this->logger->log('supplier.signature_uploaded', $userId, 'supplier', $sid, [], $ip, $request->getHeaderLine('User-Agent'));
+
+        return Json::ok($response, ['signature_path' => $relPath]);
+    }
+
+    /** FORK F8: DELETE /api/settings/signature */
+    public function deleteSignature(Request $request, Response $response): Response
+    {
+        if (!$this->isAdmin($request)) {
+            return Json::error($response, 'forbidden', 'Pouze admin smí měnit razítko/podpis.', 403);
+        }
+        $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
+        if ($sid <= 0) {
+            return Json::error($response, 'no_supplier', 'Žádný supplier scope.', 400);
+        }
+        // Soubor smažeme (na rozdíl od loga není hash-verzovaný); snapshoty vystavených
+        // faktur nesou jen cestu — SafeLogoPath při renderu chybějící soubor tiše přeskočí
+        // a doklad se vykreslí bez razítka (degradace, žádná chyba).
+        $abs = \MyInvoice\Service\Mail\SafeLogoPath::resolve('storage/supplier-logos/sup-' . $sid . '-signature.png', $sid);
+        if ($abs !== null) {
+            \MyInvoice\Service\Pdf\PdfLogoFlattener::cleanup($abs);
+            @unlink($abs);
+        }
+        $this->db->pdo()->prepare('UPDATE supplier SET signature_path = NULL WHERE id = ?')->execute([$sid]);
+
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $userId = isset($user['id']) ? (int) $user['id'] : null;
+        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        $this->logger->log('supplier.signature_deleted', $userId, 'supplier', $sid, [], $ip, $request->getHeaderLine('User-Agent'));
+
+        return Json::ok($response, ['deleted' => true]);
+    }
+
+    /**
+     * Validace + konverze nahraného razítka na PNG. Vrací relativní cestu.
+     * @throws \RuntimeException při nevalidním obrázku
+     */
+    private function processSignature(string $tmpPath, int $sid): string
+    {
+        $info = @getimagesize($tmpPath);
+        if ($info === false) {
+            throw new \RuntimeException('Soubor není platný obrázek (PNG/JPG/WebP).');
+        }
+        [$w, $h, $type] = [(int) $info[0], (int) $info[1], (int) $info[2]];
+        $img = match ($type) {
+            IMAGETYPE_PNG  => @imagecreatefrompng($tmpPath),
+            IMAGETYPE_JPEG => @imagecreatefromjpeg($tmpPath),
+            IMAGETYPE_WEBP => @imagecreatefromwebp($tmpPath),
+            default        => null,
+        };
+        if (!$img) {
+            throw new \RuntimeException('Podporované formáty razítka: PNG, JPG, WebP.');
+        }
+        // Downscale na max 900 px šířky — na PDF jde o ~48 mm, víc pixelů je zbytečných.
+        if ($w > 900) {
+            $nw = 900;
+            $nh = max(1, (int) round($h * 900 / $w));
+            $resized = imagecreatetruecolor($nw, $nh);
+            imagealphablending($resized, false);
+            imagesavealpha($resized, true);
+            imagecopyresampled($resized, $img, 0, 0, 0, 0, $nw, $nh, $w, $h);
+            imagedestroy($img);
+            $img = $resized;
+        } else {
+            imagealphablending($img, false);
+            imagesavealpha($img, true);
+        }
+        $dir = \MyInvoice\Infrastructure\Config\RuntimePaths::storage('supplier-logos');
+        if (!is_dir($dir)) @mkdir($dir, 0755, true);
+        $abs = $dir . '/sup-' . $sid . '-signature.png';
+        if (!imagepng($img, $abs)) {
+            imagedestroy($img);
+            throw new \RuntimeException('Uložení razítka selhalo.');
+        }
+        imagedestroy($img);
+        // PdfLogoFlattener cache staré verze pryč (jiný obsah, stejné jméno)
+        \MyInvoice\Service\Pdf\PdfLogoFlattener::cleanup($abs);
+        return 'storage/supplier-logos/sup-' . $sid . '-signature.png';
+    }
+
     private function isAdmin(Request $request): bool
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);

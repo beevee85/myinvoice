@@ -668,6 +668,11 @@ final class Routes
         $app->post   ('/api/settings/supplier/logo',                  [EmailBrandingAction::class, 'uploadLogo']);
         $app->delete ('/api/settings/supplier/logo',                  [EmailBrandingAction::class, 'deleteLogo']);
 
+        // FORK (beevee85) REDESIGN F8: razítko/podpis na PDF + živý náhled vzhledu dokladu
+        $app->post   ('/api/settings/signature',                      [EmailBrandingAction::class, 'uploadSignature']);
+        $app->delete ('/api/settings/signature',                      [EmailBrandingAction::class, 'deleteSignature']);
+        $app->get    ('/api/settings/document-preview.pdf',           \MyInvoice\Action\Settings\DocumentPreviewAction::class);
+
         $app->get    ('/api/settings/units',                          [SettingsAction::class, 'listUnits']);
         $app->post   ('/api/settings/units',                          [SettingsAction::class, 'createUnit']);
         $app->put    ('/api/settings/units/{id:[0-9]+}',              [SettingsAction::class, 'updateUnit']);

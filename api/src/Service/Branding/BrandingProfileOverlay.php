@@ -9,7 +9,8 @@ final class BrandingProfileOverlay
     /** @param array<string,mixed> $supplier @param array<string,mixed> $profile @return array<string,mixed> */
     public static function apply(array $supplier, array $profile): array
     {
-        foreach (['display_name', 'tagline', 'email', 'phone', 'web', 'email_footer', 'logo_path'] as $field) {
+        // FORK F8: signature_path (razítko/podpis) — profil přebíjí supplier jen když ho má.
+        foreach (['display_name', 'tagline', 'email', 'phone', 'web', 'email_footer', 'logo_path', 'signature_path'] as $field) {
             if (($profile[$field] ?? null) !== null && $profile[$field] !== '') {
                 $supplier[$field] = $profile[$field];
             }

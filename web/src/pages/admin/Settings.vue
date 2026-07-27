@@ -8,6 +8,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { renderVarsymbolTemplate, hasCounterPlaceholder } from '@/utils/varsymbol'
 import BrandingProfilesSettings from '@/components/settings/BrandingProfilesSettings.vue'
+import DocumentAppearanceSettings from '@/components/settings/DocumentAppearanceSettings.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -578,6 +579,9 @@ async function removeLogo() {
       </section>
 
       <BrandingProfilesSettings v-model:enabled="supplier.branding_profiles_enabled" @changed="load" />
+
+      <!-- FORK F8: Vzhled PDF dokladu (patička, právní věta, razítko, čárový kód) + živý náhled -->
+      <DocumentAppearanceSettings />
 
       <!-- Číslování faktur — samostatný box -->
       <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">

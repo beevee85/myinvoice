@@ -287,7 +287,18 @@ final class SettingsAction
             'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf',
             // Kopie odchozích e-mailů dodavateli (migrace 0102) — JSON, validace níže
             'self_copy',
+            // FORK (beevee85) REDESIGN F8: vzhled PDF dokladu (migrace 0903)
+            'pdf_attribution_enabled', 'pdf_legal_text', 'pdf_barcode_enabled',
         ];
+
+        // FORK F8: právní věta na PDF — délkový limit (tiskne se pod položky, ne esej)
+        if (array_key_exists('pdf_legal_text', $body)) {
+            $v = trim((string) ($body['pdf_legal_text'] ?? ''));
+            if (mb_strlen($v) > 1000) {
+                return Json::error($response, 'validation_failed', 'Právní věta na PDF může mít max. 1000 znaků.', 400);
+            }
+            $body['pdf_legal_text'] = $v === '' ? null : $v;
+        }
 
         // Identifikovaná osoba (§ 6g–6l ZDPH, issue #94) je z definice NEPLÁTCE
         // v tuzemsku — kombinace obou flagů je nevalidní. Kontrolujeme efektivní

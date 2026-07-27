@@ -277,12 +277,23 @@ final class InvoicePdfRenderer
         $paymentMethod = (string) ($invoice['payment_method'] ?? 'bank_transfer');
         $isBankTransfer = $paymentMethod === 'bank_transfer';
         if ($hasAmount && $bankData !== null && (!$isCzk || $hasVs) && !$isPaid && $isBankTransfer) {
+            // FORK F8: SPAYD klíč DT musí nést skutečnou splatnost dokladu — dřív se
+            // nepředával a generátor padal na default „dnes" (bug potvrzený v analýze).
+            $qrDueDate = null;
+            if (!empty($invoice['due_date'])) {
+                try {
+                    $qrDueDate = new \DateTimeImmutable((string) $invoice['due_date']);
+                } catch (\Throwable) {
+                    $qrDueDate = null;
+                }
+            }
             $qrUri = $this->qr->generate(
                 (string) $invoice['currency'],
                 $remaining,
                 (string) ($invoice['varsymbol'] ?? ''),
                 $bankData,
                 (string) ($supplierData['display_name'] ?? $supplierData['company_name'] ?? 'MyInvoice'),
+                $qrDueDate,
             );
         }
 
@@ -335,19 +346,33 @@ final class InvoicePdfRenderer
             // reálně je — bez loga se název ukazuje vždy (textový brand-name fallback).
             'logo_show_name'    => $logoPath !== null && !empty($supplierData['pdf_logo_show_name']),
             'isdoc_attachment'  => $hasIsdocAttachment, // bool — badge gate
+            // ─── FORK F8: vzhled dokladu (migrace 0903) ───
+            // Měna v textu: pro CZK na české verzi tiskneme „Kč" (jen v hlavičce sloupců,
+            // sumaci a platebním pásu); EN a cizí měny drží ISO kód. Řádek „Měna"
+            // v metadatech zůstává ISO (identifikátor), CZK přepočet taky.
+            'currency_label'    => ($isCzk && $locale !== 'en') ? 'Kč' : (string) $invoice['currency'],
+            'attribution_enabled' => !array_key_exists('pdf_attribution_enabled', $supplierData)
+                || !empty($supplierData['pdf_attribution_enabled']),
+            'legal_text'        => trim((string) ($supplierData['pdf_legal_text'] ?? '')) !== ''
+                ? trim((string) $supplierData['pdf_legal_text']) : null,
+            'barcode_enabled'   => !empty($supplierData['pdf_barcode_enabled']),
+            'signature_path'    => $this->resolveSignaturePath($supplierData, (int) ($invoice['supplier_id'] ?? 0)),
+            'is_overdue'        => !$isPaid && !empty($invoice['due_date'])
+                && (string) $invoice['due_date'] < date('Y-m-d'),
         ];
         return $twig->render('invoice.twig', $vars);
     }
 
     private function newMpdf(string $tmpDir): Mpdf
     {
+        // FORK F8: okraje dle zadání redesignu — 14 / 16 / 18 / 16 mm (top/right/bottom/left)
         return new Mpdf([
             'mode'              => 'utf-8',
             'format'            => 'A4',
-            'margin_top'        => 15,
+            'margin_top'        => 14,
             'margin_bottom'     => 18,
-            'margin_left'       => 12,
-            'margin_right'      => 12,
+            'margin_left'       => 16,
+            'margin_right'      => 16,
             'tempDir'           => $tmpDir,
             'autoPageBreak'     => true,
             ...MpdfFontConfig::options(),
@@ -611,6 +636,23 @@ final class InvoicePdfRenderer
         }
         // PNG fallback: splácni alfa kanál na bílou — mPDF neumí SMask u truecolor
         // RGBA PNG a vykreslil by průhledné pozadí černě (issue #152).
+        return PdfLogoFlattener::flattenedPath($abs);
+    }
+
+    /**
+     * FORK F8: razítko/podpis (obrázek) do bloku „Razítko a podpis" vlevo dole.
+     * Na rozdíl od loga NENÍ gatované email_branding_enabled — je to náležitost
+     * dokladu, ne marketingový branding. Stejná SafeLogoPath validace (tvar
+     * sup-{N}-signature.png / sup-{N}-brand-{P}-{hash}-signature.png) + splácnutí
+     * alfa kanálu (mPDF SMask limit, issue #152).
+     */
+    private function resolveSignaturePath(array $supplier, int $supplierIdFallback = 0): ?string
+    {
+        $path = $supplier['signature_path'] ?? null;
+        if (!$path) return null;
+        $supplierId = (int) ($supplier['id'] ?? $supplierIdFallback);
+        $abs = \MyInvoice\Service\Mail\SafeLogoPath::resolve((string) $path, $supplierId);
+        if ($abs === null) return null;
         return PdfLogoFlattener::flattenedPath($abs);
     }
 

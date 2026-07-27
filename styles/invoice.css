@@ -37,7 +37,7 @@ body {
 }
 .head td { vertical-align: middle; padding-bottom: 4mm; }
 td.logo { width: 55%; }
-td.logo img { max-width: 60mm; max-height: 20mm; }
+td.logo img { max-width: 60mm; max-height: 22mm; }
 /* Logo + název firmy vedle sebe (opt-in pdf_logo_show_name) — název je SOUSEDNÍ buňka
    .head tabulky, ne vnořená tabulka (ta v mPDF rozbíjela border-collapse spodní čáru).
    Logo-cell se zúží na obsah (width:1%) + padding-right = mezera k názvu. */
@@ -204,7 +204,7 @@ table.items th {
 }
 table.items td {
     padding: 3mm 2.5mm;
-    border-bottom: 0.3pt solid #E7E3EE;
+    border-bottom: 0.5pt solid #E9EEF5;
     vertical-align: top;
 }
 table.items .num { text-align: right; font-family: 'montserrat', 'DejaVu Sans', sans-serif; }
@@ -468,6 +468,108 @@ table.czk-recap tr.grand td {
 
 /* Stránkování — výkaz víceprací na nové straně */
 .page-break { page-break-before: always; }
+
+/* ═══════════ FORK (beevee85) — REDESIGN Fáze 8 ═══════════ */
+
+/* Tisková spolehlivost: hlavička položek se opakuje na dalších stranách,
+   řádky se nelámou uprostřed, sumace/rekapitulace nezůstanou osiřelé. */
+table.items thead { display: table-header-group; }
+table.items tr { page-break-inside: avoid; }
+table.totals-table { page-break-inside: avoid; }
+
+/* Číslo řádku u >3 položek */
+table.items th.rownum, table.items td.rownum { width: 4%; color: #A7A0BA; font-size: 8pt; }
+
+/* Štítek ZAPLACENO + datum úhrady vedle čísla dokladu (nenápadný, žádný vodoznak) */
+.paid-chip {
+    display: inline-block;
+    margin-top: 1.5mm;
+    padding: 0.8mm 2.5mm;
+    font-size: 8pt;
+    font-weight: bold;
+    letter-spacing: 0.4pt;
+    color: #1E6B34;
+    background: #EAF6EC;
+    border: 0.4pt solid #BFE0C6;
+    border-radius: 2mm;
+    line-height: 1.4;
+}
+
+/* Code128 čárový kód VS (volitelný) */
+.vs-barcode { margin-top: 2mm; text-align: right; }
+
+/* Kontakt dodavatele v bloku DODAVATEL */
+.supplier-contact { font-size: 8pt; color: #5A5470; margin-top: 1mm; line-height: 1.5; }
+
+/* Volitelná právní věta pod položkami */
+.legal-note { margin: 2.5mm 0 4mm; font-size: 8pt; color: #7A748C; line-height: 1.5; }
+
+/* Spodní blok: razítko/podpis vlevo + rekapitulace DPH vpravo */
+.bottom-block {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8mm;
+    page-break-inside: avoid;
+}
+.bottom-block td { vertical-align: bottom; padding: 0; }
+td.bb-sign { width: 34%; }
+td.bb-gap { width: 6%; font-size: 1pt; }
+td.bb-recap { width: 60%; }
+.sign-label {
+    font-size: 7.5pt;
+    text-transform: uppercase;
+    letter-spacing: 1.2pt;
+    color: #7A748C;
+    font-weight: bold;
+    margin-bottom: 2mm;
+}
+.sign-space { height: 16mm; font-size: 1pt; }
+.sign-img-wrap { text-align: center; }
+.sign-line {
+    border-top: 0.5pt solid #A7A0BA;
+    margin-top: 1.5mm;
+    padding-top: 1.2mm;
+    text-align: center;
+    font-size: 8pt;
+    color: #7A748C;
+}
+table.vat-recap { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+table.vat-recap td { padding: 1.5mm 2.5mm; border-bottom: 0.4pt solid #E9EEF5; }
+table.vat-recap .num { text-align: right; font-family: 'montserrat', 'DejaVu Sans', sans-serif; }
+table.vat-recap tr.vr-head td {
+    color: #7A748C;
+    font-size: 7.5pt;
+    font-weight: bold;
+    background: #F7F5FC;
+    border-bottom: 0.6pt solid #D2CCDF;
+}
+table.vat-recap tr.vr-total td {
+    font-weight: bold;
+    color: #3B2D83;
+    border-top: 0.8pt solid #3B2D83;
+    border-bottom: none;
+}
+
+/* Patička každé stránky: attribution (volitelná) uprostřed + Strana X z Y vpravo */
+.page-footer {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 7pt;
+    color: #C5BFD3;
+    font-family: 'montserrat', 'DejaVu Sans', sans-serif;
+}
+.page-footer td.pf-side { width: 20%; }
+.page-footer td.pf-center { text-align: center; }
+.page-footer td.pf-pageno { text-align: right; color: #A7A0BA; }
+.page-footer a { color: #A7A0BA; text-decoration: none; }
+
+/* Platební pás: výraznější podklad (silnější levandulová — čitelné i v ČB tisku),
+   radius 8px, velkorysejší padding, K úhradě 18pt. Branding accent override
+   (PdfBranding) se připojuje až ZA tento blok, takže per-supplier barvy fungují dál. */
+.pay-band { background: #E6DFFB; border: 0.6pt solid #B9ACE8; border-radius: 8px; }
+.pay-band td { padding: 5.5mm 5mm; }
+.pb-amount-big { font-size: 18pt; }
+.pb-due-overdue { color: #B3261E; font-weight: bold; }
 
 /* ─── VÝKAZ VÍCEPRACÍ ─── */
 /* Nadpis výkazu (byl inline ve šabloně — vytaženo do třídy kvůli branding override). */

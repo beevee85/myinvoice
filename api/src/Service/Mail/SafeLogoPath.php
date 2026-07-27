@@ -21,6 +21,8 @@ use MyInvoice\Infrastructure\Config\RuntimePaths;
  *   storage/supplier-logos/sup-{N}.svg                       — SVG sidecar (PDF)
  *   storage/supplier-logos/sup-{N}-brand-{P}-{hash12}.png    — logo brandingového profilu
  *   storage/supplier-logos/sup-{N}-brand-{P}-{hash12}.svg
+ *   storage/supplier-logos/sup-{N}-signature.png             — razítko/podpis (FORK F8)
+ *   storage/supplier-logos/sup-{N}-brand-{P}-{hash12}-signature.png — razítko profilu
  *
  * `{P}` je id brandingového profilu, `{hash12}` prvních 12 hex znaků SHA-256
  * obsahu — díky němu re-upload nepřepíše soubor, který drží starší snapshot.
@@ -60,7 +62,7 @@ final class SafeLogoPath
         // Basename validace — žádné víc-úrovňové cesty
         $basename = basename($rel);
         $quotedExt = preg_quote($ext, '/');
-        if (!preg_match('/^sup-' . $supplierId . '(?:-brand-[1-9][0-9]*-[a-f0-9]{12})?\.' . $quotedExt . '$/', $basename)) {
+        if (!preg_match('/^sup-' . $supplierId . '(?:-brand-[1-9][0-9]*-[a-f0-9]{12})?(?:-signature)?\.' . $quotedExt . '$/', $basename)) {
             return null;
         }
 

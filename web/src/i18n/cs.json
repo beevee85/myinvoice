@@ -1217,7 +1217,7 @@
     "days_ago": "před {n} dny"
   },
   "common": {
-    "pagination_range": "{from}–{to} z {total}",
+    "pagination_range": "{from}–{to} z {total}", "print": "Tisk",
     "per_page": "Počet na stránku", "page_first": "První strana", "page_prev": "Předchozí strana", "page_next": "Další strana", "page_last": "Poslední strana",
     "view_all": "Zobrazit vše",
     "year": "Rok", "month": "Měsíc",
