@@ -17,9 +17,10 @@ const COLORS: Record<Color, string> = {
   neutral: 'bg-neutral-100 text-neutral-600',
   primary: 'bg-primary-50 text-primary-700',
   success: 'bg-success-50 text-success-700',
-  danger:  'bg-danger-50 text-danger-700',
-  warning: 'bg-warning-50 text-warning-700',
-  accent:  'bg-accent-50 text-accent-700',
+  // danger/warning/accent nemají -700 token (upstream @theme) → -600 (AA na -50 tintu)
+  danger:  'bg-danger-50 text-danger-600',
+  warning: 'bg-warning-50 text-warning-600',
+  accent:  'bg-accent-50 text-accent-600',
   purple:  'bg-purple-50 text-purple-700',
   amber:   'bg-amber-50 text-amber-700',
 }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 /**
  * Generic modal — backdrop, ESC close, click-outside close, sticky header.
@@ -15,6 +16,8 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
 }>()
+
+const { t } = useI18n()
 
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') emit('close')
@@ -40,7 +43,7 @@ void props
       <div class="bg-surface rounded-(--radius-card) shadow-xl w-full flex flex-col max-h-[90vh]" :class="widthClass">
         <header class="px-6 py-4 border-b border-neutral-200 flex items-center justify-between shrink-0">
           <h3 class="text-lg font-semibold">{{ title }}</h3>
-          <button type="button" @click="emit('close')" aria-label="Close"
+          <button type="button" @click="emit('close')" :aria-label="t('common.close')"
             class="cursor-pointer w-9 h-9 inline-flex items-center justify-center rounded-full text-neutral-400 hover:bg-(--surface-muted) hover:text-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40">
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />

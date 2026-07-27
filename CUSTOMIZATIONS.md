@@ -6,6 +6,19 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-27 — REDESIGN Fáze 7: dark mode, a11y, motion (větev feature/redesign)
+
+**Co se změnilo:**
+1. **Dark mode remap čistě přes tokeny** (`redesign.css` .dark): `--color-surface #2F334D` (dle zadání; přebíjí custom-theme #171F33), `--surface-muted #292C43` (z F1), spodní neutrály dorovnané k novému surface (50 `#292C43`, 100 hover `#383D59` — v dark zesvětluje, 200 bordery `#434965`, 300 `#525878`); text 400–900 beze změny (AA drží). `--app-bg-dark #0B0F31` z F1. Žádný hardcode v komponentách. `useTheme.ts` chart barvy dark sladěny (border/grid/tooltipBg).
+2. **A11y**: globální `:focus-visible` outline 2 px `--primary` s offsetem 2 px (a, button, role=button/option/tab/radio, summary); `prefers-reduced-motion: reduce` vypíná přechody i animace; Modal zavírací tlačítko `aria-label` z `common.close` (dřív anglicky natvrdo). IconButton/ovládací prvky mají aria-labely od F3.
+3. **Motion**: globální přechody sjednoceny na `.15s ease-out` (custom-theme), nic přes 250 ms (drawer 200 ms, dropdowny 75–100 ms).
+4. **Responzivita**: off-canvas sidebar s hamburgerem je z F2; stránky F4–F6 mají vlastní mobilní karty. Pro zbývající výpisy přidán opt-in nástroj `.ui-table--stack` (mobilní „label: hodnota" stack přes `data-label` atributy) — konverze ostatních stránek postupně.
+5. Oprava z F3: `Badge` barvy danger/warning/accent odkazovaly na neexistující `-700` tokeny → `-600`.
+
+**Poznámka ke kontrastu:** bílý text na `--accent-cta #16A34A` má ~3,1:1 — pro 14px semibold pod AA (4,5:1). Zadání barvu fixuje; případné ztmavení na `#15803D` je jednořádková změna tokenu.
+
+**Jak ověřit po merge:** build ✓ testy 50/50 ✓; dark: panel #2F334D, muted #292C43, viditelné bordery/hover; Tab ukazuje indigo focus ring; OS „omezit pohyb" vypne animace.
+
 ## 2026-07-27 — REDESIGN Fáze 6: Přehled (větev feature/redesign)
 
 **Co se změnilo:**

@@ -109,7 +109,7 @@ select {
  * Moderní „pocit" = mikrointerakce: akcentový focus ring na všech polích,
  * plynulé přechody, hover zvýraznění řádků tabulek, akcentová selekce textu. */
 button, a, input, select, textarea {
-  transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
+  transition: background-color .15s ease-out, border-color .15s ease-out, color .15s ease-out, box-shadow .15s ease-out;
 }
 input:focus, select:focus, textarea:focus {
   outline: none;

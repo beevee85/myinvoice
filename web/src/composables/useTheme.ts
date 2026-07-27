@@ -44,7 +44,8 @@ const CHART_PALETTE_DARK = ['#A5B4FC', '#818CF8', '#C7D2FE', '#939CF9', '#E0E7FF
 
 const chartColors = computed(() =>
   isDark.value
-    ? { border: '#171F33', tick: '#A6B0C6', grid: '#253147', tooltipBg: '#2A3550', primary: '#6366F1', primarySoft: '#A5B4FC', palette: CHART_PALETTE_DARK }
+    // REDESIGN F7: sladěno s novým dark surface #2F334D (redesign.css) — grid/border viditelné na muted kartách
+    ? { border: '#2F334D', tick: '#A6B0C6', grid: '#3E4360', tooltipBg: '#1F2340', primary: '#6366F1', primarySoft: '#A5B4FC', palette: CHART_PALETTE_DARK }
     : { border: '#FFFFFF', tick: '#64748B', grid: '#E2E8F0', tooltipBg: '#0F172A', primary: '#4F46E5', primarySoft: '#A5B4FC', palette: CHART_PALETTE_LIGHT },
 )
 

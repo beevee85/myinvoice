@@ -161,3 +161,55 @@ h2 { font-size: 1.25rem; }   /* 20px */
 /* ─── Fáze 5: velký nadpis detailu dokladu (28/700) ───
  * Vlastní třída s vyšší specificitou než globální h1 { 24px } výše. */
 h1.h1-doc { font-size: 1.75rem; font-weight: 700; }
+
+/* ═══════════════════════ Fáze 7: dark mode + a11y + motion ═══════════════════════ */
+
+/* ─── Dark mode: remap čistě přes tokeny (nic se nehardcoduje v komponentách).
+ * Panel --surface #2F334D (dle zadání), muted sekce #292C43; spodní konec
+ * neutral škály dorovnaný k novému surface (50 = jemné pozadí, 100 = hover
+ * SVĚTLEJŠÍ než surface, 200/300 = viditelné bordery). Text 400–900 zůstává
+ * z custom-theme (AA kontrast ověřen i na světlejším surface). */
+.dark {
+  --color-surface: #2F334D;
+  --color-neutral-50:  #292C43;
+  --color-neutral-100: #383D59;
+  --color-neutral-200: #434965;
+  --color-neutral-300: #525878;
+}
+
+/* ─── Fokus viditelný z klávesnice: 2px --primary ring s odsazením.
+ * :where() drží specificitu nízko; inputy mají navíc box-shadow ring
+ * z custom-theme (FÁZE 8b) — outline je doplňuje, ne nahrazuje. */
+:where(a, button, [role="button"], [role="option"], [role="tab"], [role="radio"], summary):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+/* ─── prefers-reduced-motion: vypnout přechody i animace globálně. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ─── Mobilní stack tabulek (label: hodnota místo horizontálního scrollu).
+ * Opt-in třída pro postupnou konverzi výpisů: <table class="ui-table ui-table--stack">
+ * + na každé <td> atribut data-label="Sloupec". Stránky přestavěné ve F4–F6 mají
+ * vlastní mobilní karty; tohle je nástroj pro zbývající výpisy. */
+@media (max-width: 767px) {
+  .ui-table--stack thead { display: none; }
+  .ui-table--stack, .ui-table--stack tbody, .ui-table--stack tr, .ui-table--stack td { display: block; }
+  .ui-table--stack tr { padding: 10px 0; border-bottom: 1px solid var(--color-neutral-100); }
+  .ui-table--stack td { height: auto; padding: 2px 0; border-bottom: none; display: flex; justify-content: space-between; gap: 12px; }
+  .ui-table--stack td[data-label]::before {
+    content: attr(data-label);
+    color: var(--text-muted);
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  .ui-table--stack td.num { text-align: right; }
+}
