@@ -13,6 +13,36 @@ aplikace:
 Správa opakovaně používaných fakturačních položek je kvůli návaznosti na
 vystavování dokladů v menu **Prodej → Ceník**.
 
+## Brandingové profily
+
+Brandingové profily jsou volitelný modul, který se zapíná v nastavení dodavatele.
+Dokud je vypnutý, faktury a e-maily používají původní údaje a branding dodavatele.
+Po zapnutí lze vytvořit profily pro různé obchodní značky. Profil může změnit
+logo, zobrazovaný název, slogan, barvu, kontaktní údaje a patičku e-mailu. Právní
+údaje dodavatele (firma, adresa, IČ a DIČ) zůstávají společné a profilem se nemění.
+
+Výchozí profil se použije vždy, když faktura, pravidelná fakturace ani zákazník
+neurčují jiný profil. Výchozí profil není povinný. Přepínač **Používat vlastní
+branding** v jednotlivém profilu řídí zobrazení jeho loga a barev v e-mailech i PDF.
+
+Každému profilu lze přiřadit také e-mailový profil odesílatele. Ten určuje
+SMTP účet, adresu odesílatele, Reply-To a případné podepisování zpráv. Není-li
+vybrán, použije se výchozí e-mailový profil dodavatele.
+
+E-mailový profil, který používá některý brandingový profil, nelze smazat.
+Chybová zpráva vypíše dotčené profily; nejprve jim nastav jiného odesílatele
+nebo výchozí profil dodavatele.
+
+Výchozí profil lze přiřadit zákazníkovi. Nový koncept faktury jej převezme a
+při vystavení se použitá identita uloží do snapshotu dokladu. Pozdější změna
+profilu nebo nahrání nového loga proto nezmění již vystavené faktury.
+
+Akce **Náhled e-mailu** u profilu zobrazí jeho logo, barvu, zobrazovaný název,
+kontakty i vlastní patičku. V náhledu lze přepínat mezi českou a anglickou
+variantou. Původní konfigurace brandingu e-mailů se používá při vypnutém modulu.
+Obsahové e-mailové šablony zůstávají společné pro dodavatele a spravují se
+odděleně na stránce **E-mail šablony**.
+
 ## 36.1 Číselníky
 
 **Systém → Číselníky**.
@@ -173,9 +203,33 @@ Můžeš si změnit:
 
 - **Jméno + jazyk**
 - **Heslo** — vyžaduje původní heslo
-- **2FA** — zapnout / vypnout (vyžaduje heslo + ověření TOTP)
+- **TOTP** — zobrazit stav a aktivovat pomocí QR + ověřovacího kódu
+- **Passkeys** — přidat, pojmenovat, přejmenovat a odvolat vlastní přístupové
+  klíče
+- **Zámek aplikace** — převzít interval správce nebo nastavit vlastní přísnější
+  interval nečinnosti
 
-Viz [39. Bezpečnost § 37.2](39_Bezpecnost.md) pro detail TOTP.
+Přidání nebo odvolání passkey vyžaduje čerstvý passkey/TOTP step-up; první
+passkey účtu bez silného faktoru vyžádá aktuální heslo. Odvolání passkey
+zneplatní ostatní session účtu. Při povinném MFA nelze odebrat poslední
+povolený silný faktor.
+
+V uživatelském menu je také akce **Zamknout**. Správce nastavuje výchozí
+serverový zámek a současně horní limit osobní volby v `cfg.php`:
+
+```php
+'session' => [
+    'lock_after_minutes' => 15, // kladná hodnota zámek zapne; výchozí je 0
+],
+```
+
+Stejné nastavení lze předat přes
+`MYINVOICE_SESSION_LOCK_AFTER_MINUTES`. Automatický zámek je ve výchozím stavu
+vypnutý (`0`). Při této hodnotě jej může uživatel dobrovolně zapnout v profilu
+v rozsahu 1 až 1440 minut. Kladná hodnota správce platí pro uživatele, kteří
+zvolili **Použít nastavení správce**, a je nepřekročitelným maximem; vlastní
+interval proto může být jen stejný nebo kratší. Ruční zamknutí zůstává dostupné
+vždy. Podrobnosti jsou v [39. Bezpečnost](39_Bezpecnost.md).
 
 ## 36.4 E-mailové šablony
 

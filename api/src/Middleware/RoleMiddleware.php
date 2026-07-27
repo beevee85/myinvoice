@@ -42,6 +42,8 @@ final class RoleMiddleware implements MiddlewareInterface
         '/api/auth/setup-crpdph-lookup',
         '/api/auth/setup-sample',
         '/api/auth/login',
+        '/api/auth/webauthn/login/options',
+        '/api/auth/webauthn/login/verify',
         '/api/auth/logout',
         '/api/auth/me',
         '/api/auth/forgot',
@@ -50,6 +52,18 @@ final class RoleMiddleware implements MiddlewareInterface
         '/api/auth/totp/status',
         '/api/auth/totp/setup',
         '/api/auth/totp/enable',
+        '/api/auth/webauthn/credentials',
+        '/api/auth/webauthn/register/options',
+        '/api/auth/webauthn/register/verify',
+        '/api/auth/webauthn/step-up/options',
+        '/api/auth/webauthn/step-up/verify',
+        '/api/auth/mfa/step-up/totp',
+        '/api/auth/session/status',
+        '/api/auth/session/activity',
+        '/api/auth/session/lock',
+        '/api/auth/session/lock-preference',
+        '/api/auth/session/unlock/options',
+        '/api/auth/session/unlock/verify',
         '/api/csrf-token',
     ];
 
@@ -110,6 +124,7 @@ final class RoleMiddleware implements MiddlewareInterface
         // Self-service / connection test (zbytek je v PUBLIC_OR_SELF)
         'GET #^/api/auth/(me|api-me|tokens)(/|$)#',
         'GET #^/api/auth/totp/status$#',
+        '* #^/api/auth/webauthn/credentials/[0-9]+$#',
         // Byznys data
         'GET #^/api/clients(/|$)#',
         'GET #^/api/projects(/|$)#',

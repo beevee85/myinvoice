@@ -181,7 +181,7 @@ docker compose -f docker-compose.production.yml exec app rm -f storage/upgrade-r
 > nic navíc.
 
 **Proč ta změna:** v 3-volume layoutu byl soubor `cfg.local.php` (per-instance
-overrides z setup wizardu — `app.url`, `auth.require_totp`) v ephemeral container
+overrides z setup wizardu — `app.url`, MFA politika) v ephemeral container
 filesystému a `docker-update.sh` ho při recreate kontejneru smazal. Důsledek
 (reportovaný v [issue #23](https://github.com/radekhulan/myinvoice/issues/23)):
 po updatu `Origin` mismatch a všechny mutace v UI dostaly 403. Single-volume
@@ -200,7 +200,7 @@ updaty jsou bezpečné.
    - alpine sidecar `cp -a` přepíše `log/`, `storage/`, `private/` ze 3 starých
      volumes do nového `app-data:/data`,
    - obnoví `cfg.local.php` v `/data/cfg.local.php` (přežijí `app.url` a
-     `auth.require_totp`),
+   nastavení MFA),
    - `docker compose up -d` na novém layoutu.
 4. **Staré volumes nemaže** — vypíše `docker volume rm` příkazy. Smaž je
    až po ověření, že nová instalace vidí faktury / uploady / sessions.

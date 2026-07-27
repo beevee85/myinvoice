@@ -1,17 +1,26 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { authApi, type User, type SetupStatus } from '@/api/auth'
+import { authApi, type User, type SetupStatus, type SessionState } from '@/api/auth'
+import { setCsrfToken } from '@/api/client'
+import { broadcastSessionEvent } from '@/security/sessionChannel'
 import { useSupplierStore } from './supplier'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const csrfToken = ref<string>('')
   const setupStatus = ref<SetupStatus | null>(null)
+  const allowedMfaMethods = ref<Array<'passkey' | 'totp'>>([])
+  const requireMfa = ref(false)
   const loading = ref(false)
+  const lockedSession = ref<SessionState | null>(null)
+  const profileHydrated = ref(false)
+  let logoutRetryCsrfToken = ''
+  let logoutPromise: Promise<void> | null = null
 
   const isAuthenticated = computed(() => user.value !== null)
   const needsSetup = computed(() => setupStatus.value?.needs_setup === true)
   const mustSetupTotp = computed(() => user.value?.must_setup_totp === true)
+  const mustSetupMfa = computed(() => user.value?.must_setup_mfa === true)
 
   // Role helpers. readonly vidí vše co účetní (vč. exportů a DPH výkazů — vše jsou GETy),
   // ale nesmí nic měnit → canWrite gatuje všechna zápisová tlačítka v UI.
@@ -24,16 +33,49 @@ export const useAuthStore = defineStore('auth', () => {
     return setupStatus.value
   }
 
+  function setSessionCsrfToken(token: string) {
+    csrfToken.value = token
+    setCsrfToken(token || null)
+    if (token) logoutRetryCsrfToken = ''
+  }
+
+  function setMfaPolicy(required: boolean, methods: Array<'passkey' | 'totp'>) {
+    requireMfa.value = required
+    allowedMfaMethods.value = methods
+  }
+
   async function refresh() {
     try {
       const data = await authApi.me()
       user.value = data.user
-      csrfToken.value = data.csrf_token
+      setSessionCsrfToken(data.csrf_token)
+      setMfaPolicy(data.require_mfa, data.allowed_mfa_methods)
+      lockedSession.value = null
+      profileHydrated.value = true
       useSupplierStore().setAvailable(data.suppliers || [], data.current_supplier_id || 0)
       return true
-    } catch {
+    } catch (error: any) {
+      if (error?.response?.status === 423
+          && error?.response?.data?.error?.code === 'session_locked') {
+        try {
+          const session = await authApi.sessionStatus()
+          if (session.session_state === 'locked') {
+            user.value = session.user
+            setSessionCsrfToken(session.csrf_token)
+            lockedSession.value = session
+            profileHydrated.value = false
+            return true
+          }
+        } catch {
+          if (user.value !== null) return false
+        }
+      }
+      if (!error?.response && user.value !== null) return false
       user.value = null
-      csrfToken.value = ''
+      setSessionCsrfToken('')
+      setMfaPolicy(false, [])
+      lockedSession.value = null
+      profileHydrated.value = false
       return false
     }
   }
@@ -57,7 +99,10 @@ export const useAuthStore = defineStore('auth', () => {
         cf_turnstile_response: captchaToken,
       })
       user.value = data.user
-      csrfToken.value = data.csrf_token
+      setSessionCsrfToken(data.csrf_token)
+      setMfaPolicy(data.require_mfa, data.allowed_mfa_methods)
+      lockedSession.value = null
+      profileHydrated.value = false
       // Po loginu načti suppliery (login response je nemá, /me je vrátí)
       await refresh()
       return data.user
@@ -66,27 +111,72 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function logout() {
+  function clearPrivateState() {
+    user.value = null
+    csrfToken.value = ''
+    setCsrfToken(null)
+    setMfaPolicy(false, [])
+    lockedSession.value = null
+    profileHydrated.value = false
+    useSupplierStore().setAvailable([], 0)
+  }
+
+  async function performLogout() {
+    const requestCsrfToken = logoutRetryCsrfToken || csrfToken.value
+    if (requestCsrfToken) setCsrfToken(requestCsrfToken)
+
     try {
       await authApi.logout()
+      logoutRetryCsrfToken = ''
+      broadcastSessionEvent('logout')
+    } catch (error) {
+      logoutRetryCsrfToken = requestCsrfToken
+      throw error
     } finally {
-      user.value = null
-      csrfToken.value = ''
+      clearPrivateState()
     }
+  }
+
+  function logout(): Promise<void> {
+    if (logoutPromise) return logoutPromise
+
+    const pending = performLogout()
+    logoutPromise = pending
+    void pending.then(
+      () => {
+        if (logoutPromise === pending) logoutPromise = null
+      },
+      () => {
+        if (logoutPromise === pending) logoutPromise = null
+      },
+    )
+    return pending
+  }
+
+  function setLockedSession(session: SessionState | null) {
+    lockedSession.value = session
   }
 
   return {
     user,
     csrfToken,
     setupStatus,
+    allowedMfaMethods,
+    requireMfa,
     loading,
+    lockedSession,
+    profileHydrated,
     isAuthenticated,
     needsSetup,
     mustSetupTotp,
+    mustSetupMfa,
     isAdmin,
     isReadonly,
     canWrite,
     fetchSetupStatus,
+    setSessionCsrfToken,
+    setMfaPolicy,
+    setLockedSession,
     refresh,
     login,
     logout,

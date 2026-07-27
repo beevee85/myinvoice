@@ -173,7 +173,8 @@ export const adminApi = {
     api.delete(`/admin/email-templates/${code}/${locale}`),
 
   // Cron jobs (Systém → Plánované úlohy)
-  cronJobs: () => api.get<CronJobsResponse>('/admin/cron-jobs').then(r => r.data),
+  cronJobs: (signal?: AbortSignal) =>
+    api.get<CronJobsResponse>('/admin/cron-jobs', { signal }).then(r => r.data),
   runCronJob: (script: string) =>
     api.post<{ script: string; started: boolean }>(`/admin/cron-jobs/${encodeURIComponent(script)}/run`).then(r => r.data),
 

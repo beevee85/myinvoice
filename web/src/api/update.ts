@@ -40,7 +40,8 @@ export const updateApi = {
   publicVersion: () => api.get<PublicVersion>('/version').then((r) => r.data),
 
   /** Admin — kompletní status včetně release notes. */
-  status: () => api.get<UpdateStatus>('/admin/update/status').then((r) => r.data),
+  status: (signal?: AbortSignal) =>
+    api.get<UpdateStatus>('/admin/update/status', { signal }).then((r) => r.data),
 
   /** Admin — vynucený fresh fetch z GitHubu. */
   refresh: () => api.post<UpdateStatus>('/admin/update/refresh').then((r) => r.data),

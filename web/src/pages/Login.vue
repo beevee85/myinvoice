@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, markRaw, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
@@ -7,6 +7,8 @@ const { t } = useI18n()
 import AppShell from '@/components/layout/AppShell.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useTurnstile } from '@/composables/useTurnstile'
+import { authApi } from '@/api/auth'
+import { cancelActiveWebAuthnCeremony, getCredential, isWebAuthnAvailable } from '@/security/webauthn'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -19,6 +21,15 @@ const email = ref('')
 const password = ref('')
 const totp = ref('')
 const totpRequired = ref(false)
+const passkeyFlow = ref<{ flowToken: string; publicKey: Record<string, any>; methods: string[] } | null>(null)
+// Nabídnuté faktory přežívají jednorázovou ceremony. Passkey flow se po selhání
+// (i po pouhém zrušení systémového dialogu) zahazuje, ale možnost přepnout na
+// TOTP musí zůstat vidět — jinak by uživatel musel naslepo znovu odeslat heslo.
+const mfaMethods = ref<string[]>([])
+const canUseTotpFallback = computed(() => !totpRequired.value && mfaMethods.value.includes('totp'))
+const passkeyBusy = ref(false)
+const passwordlessBusy = ref(false)
+const passkeySupported = isWebAuthnAvailable()
 const error = ref<string>('')
 const captchaRequired = ref(false)
 const captchaSiteKey = ref('')
@@ -64,7 +75,7 @@ onMounted(async () => {
   // formuláře probíhal v rozjetém stavu a UX by byl matoucí.
   const stillAuthed = await auth.refresh()
   if (stillAuthed) {
-    router.replace(auth.mustSetupTotp ? '/setup-totp' : '/')
+    router.replace((auth.mustSetupMfa || auth.mustSetupTotp) ? '/setup-mfa' : '/')
     return
   }
   if (auth.setupStatus?.captcha.provider === 'turnstile') {
@@ -82,6 +93,7 @@ onMounted(async () => {
 })
 
 async function submit() {
+  if (passwordlessBusy.value) return
   // Guard: pokud captcha vyžadovaná a token chybí, nepouštět request.
   // (button má `:disabled` ale Enter v inputu submitne form i s disabled buttonem
   //  → bez tohoto guardu by 1. pokus šel s prázdným tokenem → 400 captcha_failed.)
@@ -91,6 +103,7 @@ async function submit() {
   }
   error.value = ''
   otpInfo.value = ''
+  mfaMethods.value = []
   try {
     await auth.login(email.value.trim(), password.value, turnstile.token.value || undefined, totp.value || undefined, {
       emailOtp: emailOtp.value || undefined,
@@ -102,12 +115,28 @@ async function submit() {
     const msg  = e?.response?.data?.error?.message
     const data = e?.response?.data?.error
     if (code === 'totp_required') {
+      passkeyFlow.value = null
       totpRequired.value = true
       error.value = ''
       // Token byl spotřebovaný 1. pokusem (heslo OK, čekáme na TOTP).
       // Reset → fresh token pro další pokus s TOTP kódem (jinak by 2. submit
       // šel s already-consumed tokenem → captcha_failed → user musí submit 2x).
       turnstile.reset()
+    } else if (code === 'mfa_required') {
+      mfaMethods.value = Array.isArray(data.methods) ? data.methods : ['passkey']
+      passkeyFlow.value = {
+        flowToken: data.flow_token,
+        // markRaw: options nesmí být reaktivní Proxy — neklonují se mezi světy
+        // a správci hesel na tom padají (viz plainJson v security/webauthn).
+        publicKey: markRaw(data.public_key),
+        methods: mfaMethods.value,
+      }
+      totpRequired.value = false
+      error.value = ''
+      // Turnstile se tu ZÁMĚRNĚ neresetuje: passkey verify captcha token nepoužívá
+      // a re-render widgetu přebírá fokus dokumentu. Prohlížeč pak nad nezaostřenou
+      // stránkou nevykreslí WebAuthn dialog a credentials.get() visí. Nový token
+      // si vyžádá až cesta, která ho reálně potřebuje (TOTP fallback / další submit).
     } else if (code === 'email_otp_required') {
       // Heslo OK, user nemá TOTP → backend poslal kód na e-mail.
       emailOtpRequired.value = true
@@ -136,6 +165,73 @@ async function submit() {
       turnstile.reset()
     }
   }
+}
+
+async function loginWithPasskey() {
+  if (!passkeySupported || !auth.setupStatus?.passwordless_login_enabled) return
+  if (captchaRequired.value && !turnstile.token.value) {
+    error.value = t('auth.captcha_loading')
+    return
+  }
+
+  passwordlessBusy.value = true
+  error.value = ''
+  try {
+    const flow = await authApi.passkeyLoginOptions(turnstile.token.value || undefined)
+    const credential = await getCredential(flow.public_key)
+    await authApi.passkeyLoginVerify(flow.flow_token, credential)
+    await auth.refresh()
+    router.push('/')
+  } catch (e: any) {
+    const code = e?.response?.data?.error?.code
+    if (code === 'captcha_failed') {
+      error.value = t('auth.captcha_failed')
+    } else if (code === 'too_many_attempts') {
+      error.value = e?.response?.data?.error?.message || t('auth.too_many_attempts')
+    } else {
+      error.value = t('auth.passwordless_passkey_failed')
+    }
+  } finally {
+    turnstile.reset()
+    passwordlessBusy.value = false
+  }
+}
+
+async function verifyPasskey() {
+  if (!passkeyFlow.value || !passkeySupported) return
+  const flow = passkeyFlow.value
+  passkeyBusy.value = true
+  error.value = ''
+  try {
+    const credential = await getCredential(flow.publicKey)
+    await authApi.passkeyLoginVerify(flow.flowToken, credential)
+    await auth.refresh()
+    router.push('/')
+  } catch (e: any) {
+    // Verify endpoint spotřebuje flow už při prvním pokusu. Po browser cancelu
+    // jej také zahodíme, protože klient bezpečně nepozná, zda request odešel.
+    // Další submit hesla proto vždy získá novou ceremony.
+    passkeyFlow.value = null
+    turnstile.reset()
+    error.value = e?.message === 'webauthn_timeout_extension'
+      ? t('auth.passkey_timeout_extension')
+      : e?.message === 'webauthn_timeout'
+        ? t('auth.passkey_timeout')
+        : e?.response?.data?.error?.message || t('auth.passkey_failed')
+  } finally {
+    passkeyBusy.value = false
+  }
+}
+
+function useTotpFallback() {
+  // TOTP dokončuje původní heslový login request. Aktivní passkey flow nesmí
+  // držet submit disabled; nevyužitá ceremony pouze krátce expiruje na serveru.
+  cancelActiveWebAuthnCeremony()
+  passkeyFlow.value = null
+  totpRequired.value = true
+  error.value = ''
+  // Teprve tady je nový captcha token potřeba — další submit půjde s heslem.
+  turnstile.reset()
 }
 
 // Poslat e-mailový kód znovu. Re-submitne heslo s resend_otp=1; backend pošle
@@ -172,6 +268,30 @@ async function resendCode() {
         <p class="text-sm text-neutral-500 mb-6">{{ t('auth.login_subtitle') }}</p>
 
         <form @submit.prevent="submit" class="space-y-4">
+          <div v-if="auth.setupStatus?.passwordless_login_enabled" class="space-y-3">
+            <button
+              v-if="passkeySupported"
+              type="button"
+              :disabled="passwordlessBusy || auth.loading || (captchaRequired && !turnstile.token.value)"
+              autofocus
+              class="w-full h-10 bg-primary-600 hover:bg-primary-700 active:bg-primary-800 disabled:bg-neutral-300 disabled:cursor-not-allowed text-white font-medium rounded-md transition"
+              @click="loginWithPasskey"
+            >
+              {{ passwordlessBusy ? t('auth.passkey_verifying') : t('auth.passwordless_passkey_login') }}
+            </button>
+            <p v-if="passkeySupported" class="text-xs text-neutral-500 text-center">
+              {{ t('auth.passwordless_passkey_hint') }}
+            </p>
+            <p v-else class="text-sm text-warning-700">
+              {{ t('auth.passwordless_passkey_unsupported') }}
+            </p>
+            <div class="flex items-center gap-3" aria-hidden="true">
+              <span class="h-px flex-1 bg-neutral-200"></span>
+              <span class="text-xs text-neutral-500">{{ t('auth.or_password_login') }}</span>
+              <span class="h-px flex-1 bg-neutral-200"></span>
+            </div>
+          </div>
+
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('auth.email') }}</label>
             <input
@@ -179,7 +299,7 @@ async function resendCode() {
               type="email"
               autocomplete="email"
               required
-              autofocus
+              :autofocus="!auth.setupStatus?.passwordless_login_enabled"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
             />
           </div>
@@ -209,6 +329,23 @@ async function resendCode() {
               class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-lg tracking-widest text-center focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
             />
             <p class="text-xs text-neutral-500 mt-1">{{ t('auth.totp_hint') }}</p>
+          </div>
+
+          <div v-if="passkeyFlow || canUseTotpFallback"
+               class="rounded-md border border-primary-500/40 bg-primary-50 p-3 space-y-2">
+            <template v-if="passkeyFlow">
+              <button v-if="passkeySupported" type="button" @click="verifyPasskey" :disabled="passkeyBusy"
+                      class="w-full h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
+                {{ passkeyBusy ? t('auth.passkey_verifying') : t('auth.passkey_login') }}
+              </button>
+              <p v-else class="text-sm text-warning-700">
+                {{ t('auth.passkey_unsupported_recovery') }}
+              </p>
+            </template>
+            <button v-if="canUseTotpFallback" type="button" @click="useTotpFallback"
+                    class="w-full text-sm text-primary-700 hover:underline">
+              {{ t('auth.use_totp_instead') }}
+            </button>
           </div>
 
           <div v-if="emailOtpRequired">
@@ -257,7 +394,7 @@ async function resendCode() {
 
           <button
             type="submit"
-            :disabled="auth.loading || (captchaRequired && !turnstile.token.value)"
+            :disabled="auth.loading || passwordlessBusy || !!passkeyFlow || (captchaRequired && !turnstile.token.value)"
             class="w-full h-10 bg-primary-600 hover:bg-primary-700 active:bg-primary-800 disabled:bg-neutral-300 disabled:cursor-not-allowed text-white font-medium rounded-md transition"
           >
             {{ auth.loading ? '…' : t('auth.login') }}

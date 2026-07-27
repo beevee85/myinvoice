@@ -12,6 +12,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Mail\RecipientResolver;
+use MyInvoice\Service\Mail\SafeLogoPath;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -273,10 +274,10 @@ final class SettingsAction
             'purchase_invoice_number_format',
             'invoice_number_period',
             // Per-supplier branding emailů (migrace 0016) + PDF logo+název (migrace 0058)
-            'email_branding_enabled', 'email_accent_color', 'pdf_logo_show_name',
+            'email_branding_enabled', 'email_accent_color', 'pdf_logo_show_name', 'branding_profiles_enabled',
             // Tax settings pro EPO výkazy (migrace 0038, fáze 6)
             'taxpayer_type', 'vat_period', 'financial_office_code', 'workplace_code',
-            'cz_nace_code', 'data_box_type', 'data_box_id', 'flat_tax_band',
+            'cz_nace_code', 'data_box_id', 'flat_tax_band',
             'sest_jmeno', 'sest_prijmeni', 'sest_telefon', 'sest_email', 'sest_funkce',
             'oss_enabled', 'oss_valid_from', 'oss_valid_to', 'oss_identification_country', 'oss_return_currency',
             // Doplňky pro DPH/KH XML VetaP (migrace 0043)
@@ -359,7 +360,7 @@ final class SettingsAction
         }
         // Empty string → null pro tax fields (NULL = nevyplněno)
         foreach (['taxpayer_type', 'vat_period', 'financial_office_code', 'workplace_code',
-                  'cz_nace_code', 'data_box_type', 'data_box_id',
+                  'cz_nace_code', 'data_box_id',
                   'oss_valid_from', 'oss_valid_to', 'oss_identification_country',
                   'sest_jmeno', 'sest_prijmeni', 'sest_telefon', 'sest_email', 'sest_funkce',
                   'street_number_pop', 'street_number_orient',
@@ -448,7 +449,7 @@ final class SettingsAction
         foreach ($allowed as $f) {
             if (array_key_exists($f, $body)) {
                 $sets[] = "$f = ?";
-                $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf'], true)
+                $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf'], true)
                     ? ((int) (bool) $body[$f])
                     : $body[$f];
             }
@@ -568,7 +569,11 @@ final class SettingsAction
         $row['email_branding_enabled']   = (bool) ($row['email_branding_enabled'] ?? false);
         $row['email_accent_color']       = (string) ($row['email_accent_color'] ?? '#3B2D83');
         $row['pdf_logo_show_name']       = (bool) ($row['pdf_logo_show_name'] ?? false);
-        $row['has_email_logo']           = is_file(\MyInvoice\Infrastructure\Config\RuntimePaths::storage('supplier-logos') . '/sup-' . $row['id'] . '.png');
+        $row['branding_profiles_enabled'] = (bool) ($row['branding_profiles_enabled'] ?? false);
+        $row['default_branding_profile_id'] = $row['default_branding_profile_id'] !== null
+            ? (int) $row['default_branding_profile_id']
+            : null;
+        $row['has_email_logo']           = SafeLogoPath::resolve($row['logo_path'] ?? null, $row['id']) !== null;
         $row['payment_thanks_enabled']        = (bool) ($row['payment_thanks_enabled'] ?? false);
         $row['payment_thanks_auto_send']      = (bool) ($row['payment_thanks_auto_send'] ?? false);
         $row['payment_thanks_default_checked']= (bool) ($row['payment_thanks_default_checked'] ?? false);

@@ -198,6 +198,35 @@ final class RoleMiddlewareTest extends TestCase
         self::assertSame(204, $response->getStatusCode());
     }
 
+    public function testAllRolesCanManageOwnPasskeys(): void
+    {
+        foreach (['readonly', 'accountant', 'admin'] as $role) {
+            foreach ([
+                ['GET', '/api/auth/webauthn/credentials'],
+                ['POST', '/api/auth/webauthn/register/options'],
+                ['POST', '/api/auth/webauthn/register/verify'],
+                ['POST', '/api/auth/webauthn/step-up/options'],
+                ['POST', '/api/auth/webauthn/step-up/verify'],
+                ['POST', '/api/auth/mfa/step-up/totp'],
+                ['GET', '/api/auth/session/status'],
+                ['POST', '/api/auth/session/activity'],
+                ['POST', '/api/auth/session/lock'],
+                ['GET', '/api/auth/session/lock-preference'],
+                ['PUT', '/api/auth/session/lock-preference'],
+                ['POST', '/api/auth/session/unlock/options'],
+                ['POST', '/api/auth/session/unlock/verify'],
+                ['PATCH', '/api/auth/webauthn/credentials/42'],
+                ['DELETE', '/api/auth/webauthn/credentials/42'],
+            ] as [$method, $path]) {
+                $response = $this->middleware()->process(
+                    $this->request($method, $path, $role),
+                    $this->okHandler(),
+                );
+                self::assertSame(204, $response->getStatusCode(), "$role $method $path");
+            }
+        }
+    }
+
     /**
      * Oprava funkční mezery: účetní smí plnou CRUD na přijatých fakturách.
      */

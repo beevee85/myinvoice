@@ -204,6 +204,16 @@ final class Config
     private static function baselineDefaults(): array
     {
         return [
+            'session' => [
+                'lock_after_minutes' => 0,
+            ],
+            'auth' => [
+                'require_mfa'         => null,
+                'allowed_mfa_methods' => ['passkey', 'totp'],
+                'passwordless_login'  => [
+                    'enabled' => false,
+                ],
+            ],
             'ares' => [
                 'api'       => 'https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty',
                 'cache_ttl' => 86400,
@@ -229,6 +239,7 @@ final class Config
                     'csob' => \MyInvoice\Service\Bank\EmailNotice\Parser\CsobBankEmailNoticeParser::class,
                     'fio' => \MyInvoice\Service\Bank\EmailNotice\Parser\FioBankEmailNoticeParser::class,
                     'creditas' => \MyInvoice\Service\Bank\EmailNotice\Parser\CreditasBankEmailNoticeParser::class,
+                    'moneta' => \MyInvoice\Service\Bank\EmailNotice\Parser\MonetaBankEmailNoticeParser::class,
                 ],
             ],
         ];
@@ -273,16 +284,19 @@ final class Config
             'REDIS_PASSWORD'          => ['redis.auth', 'string'],
 
             // Session
-            'MYINVOICE_SESSION_DRIVER'       => ['session.driver', 'string'],
             'MYINVOICE_SESSION_COOKIE_SECURE'=> ['session.cookie_secure', 'bool'],
             // Cookie name přes ENV kvůli full-ENV deployům (Portainer/Dockge/PaaS):
             // přes plain HTTP musí být ne-`__Host-` jméno (`__Host-` vyžaduje Secure),
             // jinak se přihlašovací cookie neuloží. Default je `__Host-myinvoice_session`.
             'MYINVOICE_SESSION_COOKIE_NAME'  => ['session.cookie_name', 'string'],
             'MYINVOICE_SESSION_SAMESITE'     => ['session.cookie_samesite', 'string'],
+            'MYINVOICE_SESSION_LOCK_AFTER_MINUTES' => ['session.lock_after_minutes', 'lock_timeout'],
 
             // Auth
             'MYINVOICE_AUTH_REQUIRE_TOTP'    => ['auth.require_totp', 'bool'],
+            'MYINVOICE_AUTH_REQUIRE_MFA'     => ['auth.require_mfa', 'bool'],
+            'MYINVOICE_AUTH_MFA_METHODS'     => ['auth.allowed_mfa_methods', 'csv'],
+            'MYINVOICE_AUTH_PASSWORDLESS_LOGIN' => ['auth.passwordless_login.enabled', 'bool'],
 
             // SMTP
             'MYINVOICE_SMTP_HOST'       => ['smtp.host', 'string'],
@@ -372,11 +386,36 @@ final class Config
     private static function castEnv(string $raw, string $type): mixed
     {
         return match ($type) {
-            'bool'   => filter_var($raw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? (bool) $raw,
-            'int'    => (int) $raw,
-            'float'  => (float) $raw,
-            default  => $raw,
+            'bool'       => filter_var($raw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? (bool) $raw,
+            'int'        => (int) $raw,
+            'lock_timeout' => self::castSessionLockTimeoutEnv($raw),
+            'csv'        => self::castCsvEnv($raw),
+            'float'      => (float) $raw,
+            default      => $raw,
         };
+    }
+
+    private static function castSessionLockTimeoutEnv(string $raw): int|string
+    {
+        $value = trim($raw);
+        if (preg_match('/^(?:0|[1-9][0-9]*)$/D', $value) === 1) {
+            return (int) $value;
+        }
+
+        // Zámek je volitelná ochrana. Neplatnou hodnotu ponecháme policy
+        // vrstvě, která ji fail-soft vypne a vystaví diagnostiku v health.
+        return $value;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function castCsvEnv(string $raw): array
+    {
+        return array_values(array_filter(
+            array_map(static fn (string $value): string => trim($value), explode(',', $raw)),
+            static fn (string $value): bool => $value !== '',
+        ));
     }
 
     /**

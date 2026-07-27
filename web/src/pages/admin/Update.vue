@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { updateApi, type UpdateStatus } from '@/api/update'
 import { systemApi, type HealthResponse } from '@/api/client'
+import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -16,16 +17,16 @@ const cancelling = ref(false)
 const triggerResult = ref<{ status: string; message?: string; instructions?: string[] } | null>(null)
 const errorMsg = ref<string | null>(null)
 
-let pollHandle: number | null = null
+const pollingEnabled = ref(true)
 
 const isAdmin = computed(() => auth.user?.role === 'admin')
 
-async function load() {
+async function load(signal?: AbortSignal) {
   errorMsg.value = null
   try {
     const [nextStatus, nextHealth] = await Promise.all([
-      updateApi.status(),
-      systemApi.health(),
+      updateApi.status(signal),
+      systemApi.health(signal),
     ])
     status.value = nextStatus
     health.value = nextHealth
@@ -74,9 +75,10 @@ async function triggerUpgrade() {
     triggerResult.value = r
     // Pro Docker: po queue startuj polling, ať vidíme result.json až watcher dojede
     if (r.status === 'queued') {
-      startPolling()
+      pollingEnabled.value = true
+    } else {
+      await load()
     }
-    await load()
   } catch (e: unknown) {
     errorMsg.value = (e as Error)?.message ?? 'Trigger failed'
   } finally {
@@ -91,7 +93,7 @@ async function cancelStuckUpgrade() {
   errorMsg.value = null
   try {
     await updateApi.cancel()
-    stopPolling()
+    pollingEnabled.value = false
     triggerResult.value = null
     await load()
   } catch (e: unknown) {
@@ -101,32 +103,12 @@ async function cancelStuckUpgrade() {
   }
 }
 
-function startPolling() {
-  if (pollHandle !== null) return
-  pollHandle = window.setInterval(async () => {
-    await load()
-    if (status.value && !status.value.upgrade_in_progress) {
-      stopPolling()
-    }
-  }, 5000)
+async function pollUpdate(signal: AbortSignal) {
+  await load(signal)
+  pollingEnabled.value = status.value?.upgrade_in_progress === true
 }
 
-function stopPolling() {
-  if (pollHandle !== null) {
-    window.clearInterval(pollHandle)
-    pollHandle = null
-  }
-}
-
-onMounted(async () => {
-  await load()
-  // Pokud je při otevření stránky upgrade „v běhu", spusť polling — backend se navíc
-  // sám uzdraví (prošlý flag / cílová verze už nasazená), takže se to nezasekne.
-  if (status.value?.upgrade_in_progress) {
-    startPolling()
-  }
-})
-onUnmounted(stopPolling)
+useSessionAwarePolling(pollUpdate, 5000, pollingEnabled)
 
 // Mini markdown renderer pro release notes (GitHub release body).
 // Žádný HTML injection — escape všechno, pak inline tagy + bloky.
@@ -242,11 +224,13 @@ const healthWarnings = computed(() => health.value?.warnings ?? [])
 
 function warningTitle(code: string): string {
   if (code === 'secret_encryption_key') return t('updates.warning_secret_key_title')
+  if (code === 'webauthn_configuration') return t('updates.warning_webauthn_title')
   return t('updates.warning_generic_title')
 }
 
 function warningText(code: string): string {
   if (code === 'secret_encryption_key') return t('updates.warning_secret_key_text')
+  if (code === 'webauthn_configuration') return t('updates.warning_webauthn_text')
   return t('updates.warning_generic_text')
 }
 

@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.51.0] — 2026-07-26
+
+### Added
+
+- **Přístupové klíče (passkeys) jako druhý faktor.** Účet si v *Profil → Přístupové klíče* může zaregistrovat libovolný počet klíčů — otisk prstu, obličej, zámek zařízení nebo hardwarový klíč. Registrace prvního klíče se ověřuje aktuálním heslem, dalších už existujícím silným faktorem. Kde klíč fyzicky leží, rozhoduje prohlížeč: buď je vázaný na zařízení (Windows Hello, Touch ID), nebo ho synchronizuje správce hesel či cloud účtu — první případ znamená, že se ztrátou zařízení mizí i faktor, proto si u jediného zařízením vázaného klíče drž zálohu v podobě druhého klíče nebo TOTP. Ověření uživatele na zařízení je povinné, ceremonie jsou jednorázové a systém hlídá anomálie čítače podpisů. Funkce je čistě opt-in: kdo si klíč nezaregistruje, nepozná změnu. (#239)
+- **Volitelné přihlášení bez hesla.** Po zapnutí `auth.passwordless_login.enabled` nabídne přihlašovací stránka tlačítko *Přihlásit přístupovým klíčem* — bez zadávání e-mailu a hesla. Vyžaduje HTTPS a platnou `app.url`, protože z ní vychází WebAuthn origin. Výchozí stav je vypnuto. (#239)
+- **Obecná politika vícefaktorového ověření.** `auth.require_mfa` a `auth.allowed_mfa_methods` nahrazují dosavadní TOTP-only `auth.require_totp`, které zůstává funkční jako legacy varianta. Seznam povolených metod řídí, co **splní** povinné MFA — nikdy nezpůsobí, že by se přeskočil faktor, který uživatel reálně má: kdo má zapnuté TOTP, zadává ho i po zúžení seznamu na `['passkey']`, jen ho systém pošle zaregistrovat povolenou metodu. Neznámá hodnota v seznamu (třeba `email_otp`, které se nastavuje zvlášť) start aplikace neshodí, jen se objeví health warning. (#239)
+- **Zámek aplikace.** Po nastavené době nečinnosti se session zamkne a business API ji odmítne i tehdy, když někdo odstraní překryv v prohlížeči. Odemyká se **výhradně přístupovým klíčem** a odemčení rotuje session ID i CSRF token, aniž by prodloužilo absolutní platnost přihlášení. Správce nastavuje výchozí a maximální interval přes `session.lock_after_minutes` (0 = nevynucuje), uživatel si v profilu může zvolit vlastní, kratší. Účet bez použitelné passkey si vlastní interval nastavit nemůže — zamčenou session by nešlo odemknout. (#239)
+- **Účelové potvrzení citlivých operací.** Vydání API tokenu i správa přístupových klíčů vyžadují čerstvé ověření silným faktorem (passkey nebo TOTP); proof je jednorázový a vázaný na konkrétní operaci i session. (#239)
+
+### Changed
+
+- **`reset-2fa.php` se jmenuje `reset-mfa.php`** a resetuje všechny faktory — vypne TOTP, odvolá přístupové klíče, zruší důvěryhodná zařízení, čekající e-mailové kódy i rozpracovaná ověřovací flow a invaliduje všechny session. Původní název zůstává funkčním aliasem. (#239)
+- **Session jsou autoritativně v MariaDB, `session.driver` se ignoruje.** Redis dál slouží pro rate limiting, brute-force ochranu a cache; jeho výpadek ale nesmí obnovit odvolanou, nahrazenou ani zamčenou session. Klíč `session.driver` můžeš z `cfg.php` bez náhrady smazat. (#239)
+- **CSP povoluje rámce rozšíření prohlížeče** (`frame-src ... chrome-extension: moz-extension:`). Správci hesel vykreslují výběr přístupového klíče jako iframe na vlastní URL; bez toho se okno nevykreslí a přihlášení klíčem se zasekne. Rozšíření má ke stránce přístup tak jako tak, takže se tím nic neotevírá. (#239)
+- **CI konečně pouští integrační testy.** Backend job má nově MariaDB i Redis, takže z 1848 testů jich reálně běží 1738 místo zhruba 1416 — včetně testů atomicity session, které dosud neběžely nikde. (#239)
+
+### Upgrade
+
+- **Instalace s povinným MFA odhlásí všechny přihlášené.** Migrace označí existující session jako `legacy`, protože z pouhé existence TOTP nelze odvodit, že konkrétní session druhý faktor skutečně ověřila. Kde je MFA povinné, musí se každý jednou znovu přihlásit; přihlašovací endpointy starou cookie ignorují, takže stačí normální login. Instalace bez povinného MFA se změna netýká. (#239)
+- **Migrace `0145` přestavuje tabulku `sessions`** (dvanáct sloupců, backfill, tři indexy) a po dobu jejího běhu je tabulka zamčená. Naměřeno ~16 s na 300 000 session; u běžných instalací s jednotkami až stovkami řádků je to pod sekundu. Vyplatí se před upgradem spustit `php api/bin/cron-cleanup.php`. Po migraci **neexistuje rollback jen přes kód** — nové sloupce jsou `NOT NULL` bez defaultu a starší verze je neplní, takže návrat vyžaduje i obnovu databáze ze zálohy. (#239)
+
+## [4.50.1] — 2026-07-24
+
+### Fixed
+
+- **Souhrnné hlášení (DPHSHV) chybně rozdělovalo jméno fyzické osoby a nerozdělovalo adresu.** Oprava rozdělení jména z issue #200 (odstranění akademických titulů) se aplikovala jen na přiznání k DPH a kontrolní hlášení — souhrnné hlášení si `VetaP` sestavovalo vlastní starou logikou, která zůstala neopravená. U OSVČ `MUDr. Josef Novák` tak vzniklo `jmeno="MUDr."`, `prijmeni="Josef Novák"` místo správného `jmeno="Josef"`, `prijmeni="Novák"`. Ze stejného důvodu se celá adresa psala do atributu `ulice` (`ulice="Nová 158"`) místo rozdělení na `ulice="Nová"` a `c_pop="158"`. Souhrnné hlášení nově sestavuje `VetaP` stejným sdíleným helperem jako přiznání a kontrolní hlášení (odstranění vedoucích i koncových titulů, přednost strukturovaných polí jméno/příjmení, rozdělení adresy na ulici a čísla popisné/orientační). Kontaktní atributy `email`/`c_telef`, které DPHSHV na rozdíl od DPH/KH nezná, se do souhrnného hlášení záměrně nevkládají, aby ho EPO neodmítlo. Jde čistě o generátor XML — stačí nasadit a hlášení znovu vyexportovat. (#200)
+
+## [4.50.0] — 2026-07-24
+
+### Fixed
+
+- **Souhrnné hlášení (DPHSHV) generovalo XML, které EPO odmítlo.** Portál MOJE daně vracel na vygenerovaném souhrnném hlášení tři různé chyby a hlášení nešlo podat. (1) Atribut `shvies_forma` se plnil hodnotou „B" (řádné), jenže DPHSHV zná jen `[RN]` — „R" pro řádné, „N" pro následné (opravné) hlášení; „B" bylo omylem převzaté z kontrolního hlášení, kde platí. Nově se vyplňuje „R". (2) Každý řádek `VetaR` nesl `k_storno="N"`, EPO ale u řádného hlášení kód storna zakazuje („Pro řádné souhrnné hlášení nesmí být vyplněn kód storna") — atribut je vyhrazený pro storno řádky následného hlášení, takže se v řádném vynechává úplně. (3) Do `c_vat` se psalo DIČ včetně kódu země (`SK2020122753`), přestože kód země patří samostatně do `k_stat` a `c_vat` má být bez prefixu (`2020122753`) — jinak EPO hlásilo „DIČ pořizovatele může být nesprávné". DIČ se nově normalizuje sdílenou logikou z kontrolního hlášení: strhne se **jen** prefix odpovídající kódu země (ISO i DPH variantě — Řecko má ISO „GR", ale DPH kód „EL"), nikdy ne libovolná první dvě písmena, aby se nepoškodila alfanumerická vnitrostátní část (např. francouzské „FRAB123456789" → „AB123456789"). Jde čistě o generátor XML — stačí nasadit a hlášení znovu vyexportovat. (#238)
+- **Cizoměnná faktura mohla vstoupit do daňových výkazů s kurzem 1, tedy jako by šlo o koruny.** Import vydaných faktur z Fakturoidu (i z iDokladu) přenášel měnu, ale nepřenášel do faktury měnový kurz — na rozdíl od přijatých faktur, kde se kurz dotahoval. Faktura se základem 23,60 EUR pak do souhrnného hlášení i přiznání k DPH vstoupila jako 23,60 Kč (a do XML jako 24 Kč) místo správných 573,13 Kč. Příčinou byla kombinace: import kurz nezaložil a sdílený producent daňových řádků (`VatLedgerService`, ze kterého čerpá přiznání k DPH, kontrolní i souhrnné hlášení) při chybějícím kurzu tiše dosazoval 1,0. Nově import vydaných faktur přebírá kurz ze zdroje (Fakturoid `exchange_rate`, iDoklad `ExchangeRate`) a při jeho absenci dopočítá oficiální kurz ČNB k datu uskutečnění plnění; týká se faktur i dobropisů z obou importů. Daňový producent nově rozlišuje skutečný kurz od chybějícího a chybějící kurz vede k viditelnému upozornění místo tichého přepočtu. (#238)
+- **Automatické doplnění kurzů po upgradu kontrolovalo jen přijaté faktury.** Skript `backfill-exchange-rates.php` umí doplnit kurz přijatým i vydaným fakturám, ale detekce v `migrate.php`, která ho po migracích spouští, počítala jen chybějící kurzy v `purchase_invoices`. Pokud žádná přijatá faktura kurz nepostrádala, backfill se nespustil vůbec, i když bez kurzu byly vydané faktury. Detekce nově sčítá non-CZK doklady bez kurzu na obou stranách (přijaté i vydané, mimo storna a koncepty). (#238)
+- **Přehled souhrnného hlášení popisoval typy plnění posunutě.** Ve frontendu byly popisky kódů plnění o jeden posunuté — kód 3 (poskytnutí služby do EU) se zobrazoval jako „Přemístění zboží", ačkoli samotné XML mělo kód správně. Popisky se opravily podle DPHSHV (0 = dodání zboží do EU, 1 = přemístění obchodního majetku, 2 = třístranný obchod prostřední osobou, 3 = poskytnutí služby do EU) a přesunuly do jazykových souborů. (#238)
+
+### Changed
+
+- **Chybějící kurz u daňového výkazu se doplní z ČNB při stažení, ne že výkaz spadne.** Když přiznání k DPH, kontrolní nebo souhrnné hlášení narazí na cizoměnný doklad bez kurzu, náhled výkazu na to jen upozorní (nic nezapisuje) a při **stažení XML** se chybějící kurzy tiše doplní oficiálním kurzem ČNB k datu uskutečnění plnění a výkaz se vytvoří. Tvrdá chyba nastane pouze tehdy, když ČNB kurz pro daný den a měnu vůbec nezná — pak se vypíšou čísla dotčených faktur a doklad je bezpečnější nevytvořit než vykázat cizí měnu jako koruny. Doplnění kurzu je idempotentní: nikdy nepřepíše ručně zadaný kurz.
+
+### Removed
+
+- **Zahozen matoucí sloupec `supplier.data_box_type`.** Přidala ho migrace 0038 jako „typ datové schránky (OVM/PO/FO)", ale UI pro něj nikdy nemělo editační pole, takže byl na všech instalacích prázdný. Jediné místo, které ho četlo, byl generátor EPO `VetaP` — a používal ho chybně jako typ daňového subjektu, což rozbilo podání DPH/KH/SHV všem právnickým osobám (opraveno v 4.49.2). Typ subjektu drží `taxpayer_type` (fyzická/právnická osoba) a nic jiného s ním souviset nemá; sloupec se zavádějícím jménem k té záměně jen zval, tak jde pryč i s průchodem přes API a frontend. Datové schránky zatím implementované nejsou — až budou, dostanou vlastní, jednoznačně pojmenovaná pole. `data_box_id` zůstává beze změny. Žádná data se neztrácejí, sloupec byl všude NULL. (migrace 0140)
+
 ## [4.49.2] — 2026-07-20
 
 ### Fixed

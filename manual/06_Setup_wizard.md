@@ -19,6 +19,8 @@ Vytvoříš první uživatelský účet s rolí `admin` (plná práva).
 | E-mail | Login + adresa pro reset hesla / system notifikace |
 | Heslo | Min. 12 znaků, indikátor síly (slabé / střední / silné). Bez maxima — passphrase je OK. |
 | Heslo znovu | Ověřovací duplicita |
+| Vyžadovat silné MFA | Po dokončení wizardu musí admin zaregistrovat passkey nebo zapnout TOTP |
+| Povolené metody | Passkey, TOTP nebo obě možnosti |
 
 Klikni **Další**.
 
@@ -70,8 +72,11 @@ vlastní záznamy nechá být. Sekce se zobrazí jen tehdy, když nějaká ukáz
 existují. Alternativně z příkazové řádky `php api/bin/reset.php --keep-users-supplier`
 smaže všechna byznys data, ale ponechá přihlášení a nastaveného dodavatele.
 
-Klikni **Dokončit**. Wizard tě **automaticky přihlásí** a přesměruje na
-[Přehled (dashboard)](08_Prehled.md).
+Klikni **Dokončit**. Pokud není silné MFA povinné, wizard tě automaticky
+přihlásí a přesměruje na [Přehled (dashboard)](08_Prehled.md). Při povinném MFA
+dostaneš nejprve omezenou stránku `/setup-mfa`; plný přístup vznikne až po
+registraci jedné z povolených metod. Passkey vyžaduje stabilní HTTPS hostname
+v `app.url` (lokálně je podporované `http://localhost`).
 
 ## 6.4 Co dál po setupu
 

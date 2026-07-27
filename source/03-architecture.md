@@ -124,7 +124,7 @@ myinvoice.cz/
 │
 ├── storage/                      # gitignore, runtime data
 │   ├── invoices/                 # cached PDF: YYYY-MM/Faktura-YY-MM-NNN.pdf
-│   ├── sessions/                 # fallback pokud bez Redis
+│   ├── sessions/                 # rezervovaný runtime prostor
 │   ├── uploads/                  # supplier logo, signature
 │   ├── cache/                    # Twig compile cache
 │   └── backup/                   # mariadb-dump archivy
@@ -183,6 +183,34 @@ JSON response
 - Vývoj: `pnpm dev` (Vite, port 5173, proxy na PHP `:8080`)
 - Build: `pnpm build` → `web/dist/` → kopíruje se do `api/public/` při deploy (single origin)
 - PHP backend slouží i statiku v produkci (přes `index.html` fallback v `web.config`/`.htaccess`)
+
+### PWA — service worker
+
+`web/public/service-worker.js` se servíruje z rootu (`/service-worker.js`), aby měl scope `/`.
+Rewrite pravidla jsou v `.htaccess`, `web.config` i `docker/nginx.conf`; sám SW a
+`manifest.webmanifest` jdou vždy s `no-store`, aby se aktualizace nezablokovala.
+
+Strategie podle cesty:
+
+| Cesta | Strategie | Proč |
+| --- | --- | --- |
+| `/api`, `/api/*` | žádná cache (`cache: 'no-store'`) | fakturační data nesmí zastarat |
+| HTML navigace | SW nezachytává | `index.html` drží mapu na hash-chunky |
+| `/assets/`, `/pwa/` | cache-first | Vite hashuje názvy, ikony jsou stabilní |
+| `/styles/` | stale-while-revalidate | nehashovaná statika (`invoice.css`, `logo.svg`) — cache-first by ji držel až do bumpu `STATIC_CACHE` |
+
+Regresní testy: `pnpm test:pwa` (`web/tests/*.test.mjs`, běží i v CI).
+
+**Kill-switch.** Zaregistrovaný service worker žije v prohlížečích dál i po odstranění
+z kódu. Cesta zpět je `web/public/service-worker.kill.js` — odregistruje SW, smaže jeho
+cache a obnoví otevřená okna. Nasazení po buildu, před publikací:
+
+```
+cp web/public/service-worker.kill.js web/dist/service-worker.js
+```
+
+Registrace v `web/src/main.ts` se přitom nechává být (nainstaluje kill-switch, který se
+hned zase odregistruje). Odstranit ji jde, až budou klienti prokazatelně čistí.
 
 ## 4. IIS — `web.config`
 
@@ -315,9 +343,18 @@ return [
     'session' => [
         'driver'        => 'auto',              // auto | redis | db
         'lifetime_days' => 30,
-        'cookie_name'   => 'myinvoice_session',
+        'lock_after_minutes' => 0,               // výchozí + maximum osobní volby; 0 nic nevynucuje
+        'cookie_name'   => '__Host-myinvoice_session',
         'cookie_secure' => true,
         'cookie_samesite' => 'Lax',
+    ],
+    'auth' => [
+        'require_mfa' => null,                   // null = kompatibilita s require_totp
+        'allowed_mfa_methods' => ['passkey', 'totp'],
+        'passwordless_login' => [
+            'enabled' => false,                  // opt-in discoverable passkey login
+        ],
+        'require_totp' => false,                 // legacy TOTP-only politika
     ],
     'smtp' => [
         'host'       => '',

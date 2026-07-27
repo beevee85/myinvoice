@@ -49,6 +49,7 @@ use MyInvoice\Action\Admin\ListActivityLogAction;
 use MyInvoice\Action\Admin\ListSentEmailsAction;
 use MyInvoice\Action\Admin\UserAdminAction;
 use MyInvoice\Action\Settings\EmailBrandingAction;
+use MyInvoice\Action\Settings\BrandingProfilesAction;
 use MyInvoice\Action\Settings\EmailProfilesAction;
 use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
@@ -96,6 +97,8 @@ use MyInvoice\Action\PurchaseInvoice\GetPurchaseInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\PaymentQrAction;
 use MyInvoice\Action\PurchaseInvoice\PaymentOrderAction;
 use MyInvoice\Action\PurchaseInvoice\ListPurchaseInvoicesAction;
+use MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceImportBatchesAction;
+use MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceDocumentKindAction;
 use MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceActivityAction;
 use MyInvoice\Action\PurchaseInvoice\ScanInboxAction;
 use MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceExchangeRateAction;
@@ -149,7 +152,10 @@ use MyInvoice\Action\Auth\ForgotPasswordAction;
 use MyInvoice\Action\Auth\LoginAction;
 use MyInvoice\Action\Auth\LogoutAction;
 use MyInvoice\Action\Auth\MeAction;
+use MyInvoice\Action\Auth\MfaStepUpAction;
+use MyInvoice\Action\Auth\PasskeyAction;
 use MyInvoice\Action\Auth\ResetPasswordAction;
+use MyInvoice\Action\Auth\SessionAction;
 use MyInvoice\Action\Auth\SetupAction;
 use MyInvoice\Action\Auth\SetupAresLookupAction;
 use MyInvoice\Action\Auth\SetupCrpDphLookupAction;
@@ -201,6 +207,7 @@ final class Routes
             $g->post('/setup-crpdph-lookup', SetupCrpDphLookupAction::class);  // public proxy do registru plátců DPH (účty z DIČ)
             $g->post('/setup-sample',    SetupSampleAction::class);         // public sample data generator (jen pokud nejsou data)
             $g->post('/login',           LoginAction::class);
+            $g->post('/webauthn/login/options', [LoginAction::class, 'passkeyOptions']);
             $g->post('/logout',          LogoutAction::class);
             $g->get ('/me',              MeAction::class);
             $g->get ('/api-me',          ApiMeAction::class);  // connection-test pro bearer i session
@@ -211,6 +218,23 @@ final class Routes
             $g->get ('/totp/status',     [TotpAction::class, 'status']);
             $g->post('/totp/setup',      [TotpAction::class, 'setup']);
             $g->post('/totp/enable',     [TotpAction::class, 'enable']);
+            // WebAuthn/passkeys — interní session-only self-service API
+            $g->get   ('/webauthn/credentials',              [PasskeyAction::class, 'credentials']);
+            $g->post  ('/webauthn/register/options',          [PasskeyAction::class, 'registerOptions']);
+            $g->post  ('/webauthn/register/verify',           [PasskeyAction::class, 'registerVerify']);
+            $g->post  ('/webauthn/login/verify',              [PasskeyAction::class, 'loginVerify']);
+            $g->post  ('/webauthn/step-up/options',           [PasskeyAction::class, 'stepUpOptions']);
+            $g->post  ('/webauthn/step-up/verify',            [PasskeyAction::class, 'stepUpVerify']);
+            $g->patch ('/webauthn/credentials/{id:[0-9]+}',   [PasskeyAction::class, 'rename']);
+            $g->delete('/webauthn/credentials/{id:[0-9]+}',   [PasskeyAction::class, 'revoke']);
+            $g->post  ('/mfa/step-up/totp',                   [MfaStepUpAction::class, 'totp']);
+            $g->get   ('/session/status',                     [SessionAction::class, 'status']);
+            $g->post  ('/session/activity',                   [SessionAction::class, 'activity']);
+            $g->post  ('/session/lock',                       [SessionAction::class, 'lock']);
+            $g->get   ('/session/lock-preference',            [SessionAction::class, 'lockPreference']);
+            $g->put   ('/session/lock-preference',            [SessionAction::class, 'updateLockPreference']);
+            $g->post  ('/session/unlock/options',             [SessionAction::class, 'unlockOptions']);
+            $g->post  ('/session/unlock/verify',              [SessionAction::class, 'unlockVerify']);
             // API tokeny (Personal Access Tokens) — správa jen ze session auth
             $g->get   ('/tokens',                  ListTokensAction::class);
             $g->post  ('/tokens',                  CreateTokenAction::class);
@@ -224,6 +248,7 @@ final class Routes
 
         // Globální vyhledávač pro sidebar (klienti/dodavatelé + vydané/přijaté faktury)
         $app->get('/api/search', \MyInvoice\Action\Search\GlobalSearchAction::class);
+        $app->get('/api/branding-profiles', [BrandingProfilesAction::class, 'publicList']);
 
         // Codebooks
         $app->get('/api/codebooks/countries',  [CodebookAction::class, 'countries']);
@@ -354,6 +379,7 @@ final class Routes
         // scan-inbox je admin/accountant only (check v Action).
         $app->post   ('/api/purchase-invoices/scan-inbox',                ScanInboxAction::class);
         $app->get    ('/api/purchase-invoices/export',                     ExportPurchaseInvoicesAction::class);
+        $app->get    ('/api/purchase-invoices/import-batches',             PurchaseInvoiceImportBatchesAction::class);
         $app->get    ('/api/purchase-invoices',                           ListPurchaseInvoicesAction::class);
         $app->post   ('/api/purchase-invoices',                           CreatePurchaseInvoiceAction::class);
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}',                GetPurchaseInvoiceAction::class);
@@ -362,6 +388,7 @@ final class Routes
         $app->put    ('/api/purchase-invoices/{id:[0-9]+}/items',          SetPurchaseInvoiceItemsAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/exchange-rate', SetPurchaseInvoiceExchangeRateAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/transition',     TransitionPurchaseInvoiceStatusAction::class);
+        $app->post   ('/api/purchase-invoices/{id:[0-9]+}/document-kind',   SetPurchaseInvoiceDocumentKindAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/dismiss-extraction-warning', DismissExtractionWarningAction::class);
         // Propojení se zálohovou fakturou (advance) — proti dvojímu započtení nákladu
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}/advance-candidates', AdvanceCandidatesAction::class);
@@ -576,6 +603,13 @@ final class Routes
         $app->post   ('/api/settings/email-profiles/{id:[0-9]+}/folders', [EmailProfilesAction::class, 'browseImapFolders']);
         $app->put    ('/api/settings/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'update']);
         $app->delete ('/api/settings/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'delete']);
+        $app->get    ('/api/settings/branding-profiles',                 [BrandingProfilesAction::class, 'list']);
+        $app->post   ('/api/settings/branding-profiles',                 [BrandingProfilesAction::class, 'create']);
+        $app->put    ('/api/settings/branding-profiles/{id:[0-9]+}',     [BrandingProfilesAction::class, 'update']);
+        $app->delete ('/api/settings/branding-profiles/{id:[0-9]+}',     [BrandingProfilesAction::class, 'delete']);
+        $app->post   ('/api/settings/branding-profiles/{id:[0-9]+}/default', [BrandingProfilesAction::class, 'setDefault']);
+        $app->post   ('/api/settings/branding-profiles/{id:[0-9]+}/logo', [BrandingProfilesAction::class, 'uploadLogo']);
+        $app->delete ('/api/settings/branding-profiles/{id:[0-9]+}/logo', [BrandingProfilesAction::class, 'deleteLogo']);
         $app->get    ('/api/settings/pdf-signing/diagnostics', PdfSigningDiagnosticsAction::class);
         $app->get    ('/api/settings/pdf-signing',          [SigningProfilesAction::class, 'pdfSettings']);
         $app->post   ('/api/settings/pdf-signing/test',     [SigningProfilesAction::class, 'testPdfSigning']);

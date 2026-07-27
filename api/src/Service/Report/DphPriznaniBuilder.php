@@ -71,6 +71,14 @@ final class DphPriznaniBuilder
         }
 
         $lines = $this->mapper->aggregateForDphPriznani($supplierId, $year, $month, $period);
+        // #238: doklady v cizí měně bez kurzu — NEházíme chybu, vrátíme je v
+        // `missing_rates` a akce je při stažení doplní z ČNB (náhled jen varuje).
+        $missingRates = $this->mapper->missingRatesForPeriod($supplierId, $year, $month, $period);
+        if ($missingRates !== []) {
+            $warnings[] = 'Chybí kurz u dokladů v cizí měně: '
+                . implode(', ', \MyInvoice\Service\Report\VatLedgerService::missingExchangeRateLabels($missingRates))
+                . '. Při stažení XML se doplní z ČNB.';
+        }
         $this->appendSalesDataWarnings($supplierId, $year, $month, $period, $warnings);
         if ($isIdentified) {
             $lines = $this->filterLinesForIdentified($lines, $warnings);
@@ -331,6 +339,7 @@ final class DphPriznaniBuilder
             'xml'      => $dom->saveXML() ?: '',
             'summary'  => $summary,
             'warnings' => $warnings,
+            'missing_rates' => $missingRates,
         ];
     }
 
@@ -449,7 +458,7 @@ final class DphPriznaniBuilder
                     COALESCE(c.iso2, 'CZ') AS country_iso2,
                     s.ic, s.dic, s.is_vat_payer, s.is_identified,
                     s.taxpayer_type, s.vat_period, s.financial_office_code,
-                    s.workplace_code, s.cz_nace_code, s.data_box_type, s.data_box_id,
+                    s.workplace_code, s.cz_nace_code, s.data_box_id,
                     s.email, s.phone,
                     s.street_number_pop, s.street_number_orient,
                     s.opr_jmeno, s.opr_prijmeni, s.opr_postaveni,

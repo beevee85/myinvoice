@@ -7,6 +7,8 @@ namespace MyInvoice\Action\Auth;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\FirstRunLockMiddleware;
+use MyInvoice\Service\Auth\MfaPolicyService;
+use MyInvoice\Service\Auth\PasskeyService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -19,6 +21,8 @@ final class SetupStatusAction
     public function __construct(
         private readonly FirstRunLockMiddleware $lockProbe,
         private readonly Config $config,
+        private readonly PasskeyService $passkeys,
+        private readonly MfaPolicyService $mfaPolicy,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -26,6 +30,10 @@ final class SetupStatusAction
         return Json::ok($response, [
             'needs_setup' => $this->lockProbe->needsSetup(),
             'version'     => '0.1.0',
+            'passwordless_login_enabled' =>
+                (bool) $this->config->get('auth.passwordless_login.enabled', false)
+                && $this->passkeys->isAvailable()
+                && $this->mfaPolicy->isMethodAllowed('passkey'),
             'captcha'     => [
                 'provider'   => $this->config->get('captcha.provider', 'none'),
                 'site_key'   => $this->config->get('captcha.site_key', ''),

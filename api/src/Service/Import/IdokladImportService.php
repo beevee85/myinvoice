@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
@@ -53,7 +54,26 @@ final class IdokladImportService
         private readonly SnapshotBuilder $snapshots,
         private readonly ImageToPdfConverter $imageToPdf,
         private readonly IdokladBankTransactionImporter $bankTransactions,
+        private readonly ExchangeRateApplier $exchangeRateApplier,
     ) {}
+
+    /**
+     * #238: přenes měnový kurz na čerstvě importovaný VYSTAVENÝ doklad (faktura/dobropis).
+     * iDoklad vrací `ExchangeRate` (+ `ExchangeRateAmount`) — má přednost. Když chybí,
+     * dopočti z ČNB k DUZP (ensureRate plní jen non-CZK doklad s NULL kurzem, nikdy
+     * nepřepíše). Bez toho by VatLedgerService použil náhradní kurz 1.0 (cizí měna jako CZK).
+     */
+    private function applyIssuedExchangeRate(int $invoiceId, array $i, int $supplierId): void
+    {
+        $currencyCode = strtoupper($this->idokladCurrencyCode($i, $supplierId));
+        $rate = self::idokladExchangeRate($i);
+        if ($currencyCode !== 'CZK' && $rate !== null && $rate > 0.0) {
+            $date = (string) ($i['DateOfTaxing'] ?? $i['DateOfIssue'] ?? '');
+            $this->invoices->setExchangeRate($invoiceId, $rate, $date !== '' ? $date : null);
+        } else {
+            $this->exchangeRateApplier->ensureRate($invoiceId);
+        }
+    }
 
     /**
      * Spustí job. Volá worker, ne přímo UI (UI vytvoří job a vrátí, worker pak picknul).
@@ -428,6 +448,9 @@ final class IdokladImportService
         if (!empty($items)) {
             $this->invoices->replaceItems($invoiceId, $items);
         }
+
+        // #238: kurz z iDokladu (ExchangeRate) → jinak ČNB fallback k DUZP.
+        $this->applyIssuedExchangeRate($invoiceId, $i, $supplierId);
 
         // #121: promítni platební stav z iDokladu (PaymentStatus 1=Paid / 3=Overpaid)
         // — zaplacené historické doklady nesmí zůstat viset jako nezaplacené pohledávky.
@@ -1314,6 +1337,8 @@ final class IdokladImportService
                 if (!empty($items)) {
                     $this->invoices->replaceItems($invoiceId, $items);
                 }
+                // #238: kurz z iDokladu (ExchangeRate) → jinak ČNB fallback k DUZP.
+                $this->applyIssuedExchangeRate($invoiceId, $i, $supplierId);
                 // #121: vyrovnaný/uhrazený dobropis nesmí zůstat draft
                 $this->applyIssuedPaymentState(
                     $invoiceId,

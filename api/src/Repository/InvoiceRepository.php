@@ -735,12 +735,22 @@ final class InvoiceRepository
 
         // Supplier_id se odvodí z client (immutable per client)
         $clientId = (int) $data['client_id'];
-        $stmt = $pdo->prepare('SELECT supplier_id FROM clients WHERE id = ?');
+        $stmt = $pdo->prepare(
+            'SELECT c.supplier_id, c.default_branding_profile_id, s.default_branding_profile_id AS supplier_branding_profile_id,
+                    s.branding_profiles_enabled
+               FROM clients c JOIN supplier s ON s.id = c.supplier_id WHERE c.id = ?'
+        );
         $stmt->execute([$clientId]);
-        $supplierId = (int) $stmt->fetchColumn();
-        if ($supplierId === 0) {
+        $client = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($client === false) {
             throw new \InvalidArgumentException("Client #$clientId nenalezen.");
         }
+        $supplierId = (int) $client['supplier_id'];
+        $brandingProfileId = empty($client['branding_profiles_enabled']) ? null : (array_key_exists('branding_profile_id', $data)
+            ? $this->resolveBrandingProfileId($data['branding_profile_id'], $supplierId)
+            : ($client['default_branding_profile_id'] !== null
+                ? (int) $client['default_branding_profile_id']
+                : ($client['supplier_branding_profile_id'] !== null ? (int) $client['supplier_branding_profile_id'] : null)));
 
         // Výchozí kategorie tržby — explicitní volba vyhrává, jinak default zakázky >
         // klienta (sdílený helper, viz resolveDefaultRevenueCategoryId). Stejnou logiku
@@ -768,7 +778,7 @@ final class InvoiceRepository
         $hasReminders = $this->supportsAutoSendReminders();
         $hasInternalNote = $this->supportsInternalNote();
         $sql = 'INSERT INTO invoices
-            (invoice_type, parent_invoice_id, client_id, project_id, supplier_id,
+            (invoice_type, parent_invoice_id, client_id, project_id, supplier_id, branding_profile_id,
              issue_date, tax_date, due_date, currency_id, reverse_charge, prices_include_vat, language,
              note_above_items, note_below_items, advance_paid_amount, discount_percent, varsymbol,
              payment_method, status, vat_classification_code, revenue_category, revenue_category_id,'
@@ -776,7 +786,7 @@ final class InvoiceRepository
             . ($hasReminders ? ' auto_send_reminders,' : '')
             . ($hasInternalNote ? ' internal_note,' : '')
             . ' created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?,'
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?,'
             . ($hasExempt ? ' ?, ?,' : '')
             . ($hasReminders ? ' ?,' : '')
             . ($hasInternalNote ? ' ?,' : '')
@@ -788,6 +798,7 @@ final class InvoiceRepository
             $clientId,
             isset($data['project_id']) && $data['project_id'] ? (int) $data['project_id'] : null,
             $supplierId,
+            $brandingProfileId,
             (string) $data['issue_date'],
             ($data['invoice_type'] ?? 'invoice') === 'proforma' ? null : (string) ($data['tax_date'] ?? $data['issue_date']),
             (string) $data['due_date'],
@@ -858,10 +869,20 @@ final class InvoiceRepository
 
         $hasExempt = $this->supportsIncomeTaxExempt();
         $hasReminders = $this->supportsAutoSendReminders();
+        // FORK (beevee85): interní poznámka (FÁZE 6)
         $hasInternalNote = $this->supportsInternalNote();
+        $currentStmt = $this->db->pdo()->prepare('SELECT supplier_id, branding_profile_id FROM invoices WHERE id = ?');
+        $currentStmt->execute([$id]);
+        $current = $currentStmt->fetch(PDO::FETCH_ASSOC);
+        if ($current === false) {
+            throw new \InvalidArgumentException("Invoice #$id nenalezena.");
+        }
+        $brandingProfileId = array_key_exists('branding_profile_id', $data)
+            ? $this->resolveBrandingProfileId($data['branding_profile_id'], (int) $current['supplier_id'])
+            : ($current['branding_profile_id'] !== null ? (int) $current['branding_profile_id'] : null);
 
         $sql = 'UPDATE invoices SET
-                client_id = ?, project_id = ?,
+                client_id = ?, project_id = ?, branding_profile_id = ?,
                 issue_date = ?, tax_date = ?, due_date = ?,
                 currency_id = ?, reverse_charge = ?, prices_include_vat = ?, language = ?,
                 note_above_items = ?, note_below_items = ?,
@@ -878,6 +899,7 @@ final class InvoiceRepository
         $params = [
             (int) $data['client_id'],
             isset($data['project_id']) && $data['project_id'] ? (int) $data['project_id'] : null,
+            $brandingProfileId,
             (string) $data['issue_date'],
             empty($data['tax_date']) ? null : (string) $data['tax_date'],
             (string) $data['due_date'],
@@ -1317,7 +1339,31 @@ final class InvoiceRepository
         if (array_key_exists('revenue_category_id', $row)) {
             $row['revenue_category_id'] = $row['revenue_category_id'] !== null ? (int) $row['revenue_category_id'] : null;
         }
+        if (array_key_exists('branding_profile_id', $row)) {
+            $row['branding_profile_id'] = $row['branding_profile_id'] !== null ? (int) $row['branding_profile_id'] : null;
+        }
         return $row;
+    }
+
+    private function resolveBrandingProfileId(mixed $value, int $supplierId): ?int
+    {
+        if ($value === null || $value === '') {
+            $stmt = $this->db->pdo()->prepare('SELECT CASE WHEN branding_profiles_enabled = 1 THEN default_branding_profile_id ELSE NULL END FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $default = $stmt->fetchColumn();
+            return $default !== false && $default !== null ? (int) $default : null;
+        }
+        $id = (int) $value;
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT bp.id FROM branding_profiles bp
+               JOIN supplier s ON s.id = bp.supplier_id AND s.branding_profiles_enabled = 1
+              WHERE bp.id = ? AND bp.supplier_id = ? AND bp.is_active = 1'
+        );
+        $stmt->execute([$id, $supplierId]);
+        if ($stmt->fetchColumn() === false) {
+            throw new \InvalidArgumentException("Brandingový profil #$id nenalezen.");
+        }
+        return $id;
     }
 
     /**

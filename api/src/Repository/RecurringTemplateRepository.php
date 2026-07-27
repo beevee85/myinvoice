@@ -390,18 +390,19 @@ final class RecurringTemplateRepository
         $pdo = $this->db->pdo();
 
         $sql = 'INSERT INTO recurring_invoice_templates
-            (supplier_id, client_id, project_id, name,
+            (supplier_id, branding_profile_id, client_id, project_id, name,
              frequency, day_of_month, end_of_month, anchor_date, end_date, next_run_date,
              invoice_type, currency_id, language, payment_method, reverse_charge, prices_include_vat, discount_percent,
              revenue_category_id,
              payment_due_days, tax_date_mode, draft_open_mode, reminder_days_before,
              note_above_items, note_below_items,
              increment_month_in_descriptions, auto_issue, auto_send_email, status, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
             (int) $data['supplier_id'],
+            $this->resolveBrandingProfileId($data['branding_profile_id'] ?? null, (int) $data['supplier_id']),
             (int) $data['client_id'],
             !empty($data['project_id']) ? (int) $data['project_id'] : null,
             (string) $data['name'],
@@ -462,7 +463,7 @@ final class RecurringTemplateRepository
         //    bez posunu cyklu. Tím se např. změna „20. v měsíci" → „konec měsíce"
         //    projeví hned na nejbližším vystavení (20.6. → 30.6.), ne až o cyklus dál.
         $cur = $this->db->pdo()->prepare(
-            'SELECT last_run_date, next_run_date FROM recurring_invoice_templates WHERE id = ?'
+            'SELECT last_run_date, next_run_date, supplier_id FROM recurring_invoice_templates WHERE id = ?'
         );
         $cur->execute([$id]);
         $existing = $cur->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -478,7 +479,7 @@ final class RecurringTemplateRepository
         }
 
         $sql = 'UPDATE recurring_invoice_templates SET
-                client_id = ?, project_id = ?, name = ?,
+                client_id = ?, project_id = ?, branding_profile_id = ?, name = ?,
                 frequency = ?, day_of_month = ?, end_of_month = ?,
                 anchor_date = ?, end_date = ?,
                 next_run_date = ?,
@@ -492,6 +493,7 @@ final class RecurringTemplateRepository
         $this->db->pdo()->prepare($sql)->execute([
             (int) $data['client_id'],
             !empty($data['project_id']) ? (int) $data['project_id'] : null,
+            $this->resolveBrandingProfileId($data['branding_profile_id'] ?? null, (int) ($data['supplier_id'] ?? $existing['supplier_id'] ?? 0)),
             (string) $data['name'],
             (string) $data['frequency'],
             $dayOfMonth,
@@ -650,6 +652,9 @@ final class RecurringTemplateRepository
         $row['supplier_id']    = (int) $row['supplier_id'];
         $row['client_id']      = (int) $row['client_id'];
         $row['project_id']     = $row['project_id'] !== null ? (int) $row['project_id'] : null;
+        if (array_key_exists('branding_profile_id', $row)) {
+            $row['branding_profile_id'] = $row['branding_profile_id'] !== null ? (int) $row['branding_profile_id'] : null;
+        }
         $row['currency_id']    = (int) $row['currency_id'];
         if (array_key_exists('revenue_category_id', $row)) {
             $row['revenue_category_id'] = $row['revenue_category_id'] !== null ? (int) $row['revenue_category_id'] : null;
@@ -676,6 +681,27 @@ final class RecurringTemplateRepository
             $row['discount_percent'] = (float) $row['discount_percent'];
         }
         return $row;
+    }
+
+    private function resolveBrandingProfileId(mixed $value, int $supplierId): ?int
+    {
+        if ($value === null || $value === '') {
+            $stmt = $this->db->pdo()->prepare('SELECT CASE WHEN branding_profiles_enabled = 1 THEN default_branding_profile_id ELSE NULL END FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $default = $stmt->fetchColumn();
+            return $default !== false && $default !== null ? (int) $default : null;
+        }
+        $id = (int) $value;
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT bp.id FROM branding_profiles bp
+               JOIN supplier s ON s.id = bp.supplier_id AND s.branding_profiles_enabled = 1
+              WHERE bp.id = ? AND bp.supplier_id = ? AND bp.is_active = 1'
+        );
+        $stmt->execute([$id, $supplierId]);
+        if ($stmt->fetchColumn() === false) {
+            throw new \InvalidArgumentException("Brandingový profil #$id nenalezen.");
+        }
+        return $id;
     }
 
     private function castItem(array $row): array

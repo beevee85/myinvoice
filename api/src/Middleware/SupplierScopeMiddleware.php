@@ -56,6 +56,15 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
 
     public function process(Request $request, Handler $handler): Response
     {
+        $path = $request->getUri()->getPath();
+        if (str_starts_with($path, '/api/auth/webauthn/')
+            || str_starts_with($path, '/api/auth/mfa/')
+            || str_starts_with($path, '/api/auth/session/')
+        ) {
+            return $handler->handle($request);
+        }
+
+        // FORK (beevee85): omezení uživatele na vybrané dodavatele (FÁZE 2)
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $allowed = $user === [] ? null : $this->access->allowedIdsForUser($user);
 

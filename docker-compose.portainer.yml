@@ -71,6 +71,12 @@ services:
       MYINVOICE_SESSION_COOKIE_SECURE: ${MYINVOICE_SESSION_COOKIE_SECURE:-false}
       MYINVOICE_SESSION_COOKIE_NAME: ${MYINVOICE_SESSION_COOKIE_NAME:-myinvoice_session}
 
+      # MFA, passwordless login a zámek session (volitelné).
+      MYINVOICE_AUTH_REQUIRE_MFA: ${MYINVOICE_AUTH_REQUIRE_MFA:-}
+      MYINVOICE_AUTH_MFA_METHODS: ${MYINVOICE_AUTH_MFA_METHODS:-}
+      MYINVOICE_AUTH_PASSWORDLESS_LOGIN: ${MYINVOICE_AUTH_PASSWORDLESS_LOGIN:-}
+      MYINVOICE_SESSION_LOCK_AFTER_MINUTES: ${MYINVOICE_SESSION_LOCK_AFTER_MINUTES:-}
+
       # SMTP (volitelné — lze nechat prázdné a doplnit v Nastavení). Prázdné klíče
       # se v Configu ignorují, takže nepřebijí pozdější nastavení ze setup wizardu.
       MYINVOICE_SMTP_HOST: ${MYINVOICE_SMTP_HOST:-}

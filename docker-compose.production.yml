@@ -44,6 +44,11 @@ services:
       # Vestavěný cron v app kontejneru (default 1). Při více replikách app nastav 0,
       # jinak by plánované úlohy běžely v každé replice (duplicitní zálohy, recurring…).
       MYINVOICE_ENABLE_CRON: ${MYINVOICE_ENABLE_CRON:-1}
+      # Prázdné hodnoty nepřebíjí cfg.docker.php; politiku lze nastavit v .env.
+      MYINVOICE_AUTH_REQUIRE_MFA: ${MYINVOICE_AUTH_REQUIRE_MFA:-}
+      MYINVOICE_AUTH_MFA_METHODS: ${MYINVOICE_AUTH_MFA_METHODS:-}
+      MYINVOICE_AUTH_PASSWORDLESS_LOGIN: ${MYINVOICE_AUTH_PASSWORDLESS_LOGIN:-}
+      MYINVOICE_SESSION_LOCK_AFTER_MINUTES: ${MYINVOICE_SESSION_LOCK_AFTER_MINUTES:-}
       # Full-ENV SMTP (12-factor). Prázdné/chybějící klíče se v Configu ignorují
       # (viz Config::applyEnvOverrides guard), takže nepřebijí SMTP z cfg.docker.php.
       MYINVOICE_SMTP_HOST: ${MYINVOICE_SMTP_HOST:-}

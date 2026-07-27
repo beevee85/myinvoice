@@ -32,6 +32,21 @@ export interface DphSettings {
   has_financial_office: boolean
 }
 
+export interface KhPreview {
+  summary: {
+    period: string
+    a1_count: number
+    a2_count: number
+    a4_count: number
+    a5_count_aggregated: number
+    b1_count: number
+    b2_count: number
+    b3_count_aggregated: number
+    submission_deadline: string
+  }
+  warnings: string[]
+}
+
 export interface DphTrendRow {
   period: string
   vat_output: number
@@ -245,19 +260,9 @@ export const reportsApi = {
     }).then(r => r.data),
 
   khPreview: (year: number, month: number, period?: 'monthly' | 'quarterly') =>
-    api.get<{
-      summary: {
-        period: string
-        a1_count: number
-        a4_count: number
-        a5_count_aggregated: number
-        b1_count: number
-        b2_count: number
-        b3_count_aggregated: number
-        submission_deadline: string
-      }
-      warnings: string[]
-    }>('/reports/dphkh1/preview', { params: { year, month, ...(period ? { period } : {}) } }).then(r => r.data),
+    api.get<KhPreview>('/reports/dphkh1/preview', {
+      params: { year, month, ...(period ? { period } : {}) },
+    }).then(r => r.data),
 
   // Souhrnné hlášení (EU dodání) — plátci i identifikované osoby; lze kvartálně pro služby
   shvPreview: (year: number, month: number, period?: 'monthly' | 'quarterly') =>
@@ -358,8 +363,8 @@ export const reportsApi = {
     api.get<MonthlyExportJob>(`/reports/monthly-export/jobs/${id}`).then(r => r.data),
 
   /** Poslední exporty (historie — zůstávají ke stažení dokud nejsou smazané / uklizené). */
-  monthlyExportJobs: () =>
-    api.get<MonthlyExportJob[]>('/reports/monthly-export/jobs').then(r => r.data),
+  monthlyExportJobs: (signal?: AbortSignal) =>
+    api.get<MonthlyExportJob[]>('/reports/monthly-export/jobs', { signal }).then(r => r.data),
 
   monthlyExportCancel: (id: number) =>
     api.post<{ ok: boolean; cancel_requested: boolean }>(`/reports/monthly-export/jobs/${id}/cancel`).then(r => r.data),

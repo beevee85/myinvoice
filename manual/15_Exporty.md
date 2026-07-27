@@ -193,7 +193,7 @@ do účetního systému Pohoda. Na rozdíl od ISDOC je to **jeden velký XML**
 
 Před prvním exportem do Pohody **musíš nastavit Pohoda kódy v dodavateli**:
 
-**Systém → Dodavatelé → [tvůj] → Editovat → záložka Pohoda**
+**Systém → Číselníky → Dodavatelé → [tvůj] → Editovat → záložka Pohoda**
 
 | Pole | Význam | Příklad |
 |---|---|---|

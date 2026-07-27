@@ -242,6 +242,12 @@ final class InvoiceEmailVarsBuilder
                     'email'        => $snap['email'] ?? null,
                     'phone'        => $snap['phone'] ?? null,
                     'web'          => $snap['web'] ?? null,
+                    'email_footer' => $snap['email_footer'] ?? null,
+                    'branding_profile_id' => $snap['branding_profile_id'] ?? null,
+                    'email_branding_enabled' => (bool) ($snap['email_branding_enabled'] ?? false),
+                    'email_accent_color' => $snap['email_accent_color'] ?? '#3B2D83',
+                    'logo_path' => $snap['logo_path'] ?? null,
+                    'email_profile_id' => $snap['email_profile_id'] ?? null,
                 ];
             }
         }
@@ -265,24 +271,45 @@ final class InvoiceEmailVarsBuilder
             $row['id'] = $sid;
         }
 
-        // 3. Branding (logo, accent color, toggle) — vždy LIVE z aktuálního supplier,
-        //    nepatří do snapshotu, protože reprezentuje současnou identitu firmy.
+        // 3. Profilový branding vystaveného dokladu je immutable ve snapshotu.
+        //    Bez profilového snapshotu je základ VŽDY živý branding ze supplier
+        //    (shodně s PDF resolveSupplier: logo/barva/přepínač nejsou ve snapshotu) —
+        //    platí pro vypnutý modul i pro zapnutý modul u dokladu bez vybraného
+        //    profilu. Explicitní profil (draft) tento základ přebije živým overlayem.
         if ($row !== null && $sid > 0) {
-            $bStmt = $this->db->pdo()->prepare(
-                'SELECT email_branding_enabled, email_accent_color, logo_path
-                   FROM supplier WHERE id = ?'
-            );
-            $bStmt->execute([$sid]);
-            $br = $bStmt->fetch(\PDO::FETCH_ASSOC);
-            if ($br !== false) {
-                $row['email_branding_enabled'] = (bool) $br['email_branding_enabled'];
-                $row['email_accent_color']     = (string) ($br['email_accent_color'] ?: '#3B2D83');
-                $row['logo_path']              = $br['logo_path'] ?: null;
-                $row['accent_soft']            = AccentColor::emailBackground(
-                    $row['email_branding_enabled'],
-                    $row['email_accent_color'],
+            $hasSnapshotProfile = !empty($row['branding_profile_id']);
+            if (!$hasSnapshotProfile) {
+                $legacyStmt = $this->db->pdo()->prepare(
+                    'SELECT branding_profiles_enabled, email_branding_enabled, email_accent_color, logo_path
+                       FROM supplier WHERE id = ?'
                 );
+                $legacyStmt->execute([$sid]);
+                $legacy = $legacyStmt->fetch(\PDO::FETCH_ASSOC);
+
+                if ($legacy !== false) {
+                    $row['email_branding_enabled'] = (bool) $legacy['email_branding_enabled'];
+                    $row['email_accent_color'] = (string) ($legacy['email_accent_color'] ?: '#3B2D83');
+                    $row['logo_path'] = $legacy['logo_path'] ?: null;
+                }
+
+                if ($legacy !== false && !empty($legacy['branding_profiles_enabled']) && !empty($invoice['branding_profile_id'])) {
+                    $profileId = (int) $invoice['branding_profile_id'];
+                    $bStmt = $this->db->pdo()->prepare(
+                        'SELECT bp.* FROM supplier s
+                           JOIN branding_profiles bp ON bp.id = ?
+                                                    AND bp.supplier_id = s.id AND bp.is_active = 1
+                          WHERE s.id = ? AND s.branding_profiles_enabled = 1'
+                    );
+                    $bStmt->execute([$profileId, $sid]);
+                    $br = $bStmt->fetch(\PDO::FETCH_ASSOC);
+                    if ($br !== false) {
+                        $row = \MyInvoice\Service\Branding\BrandingProfileOverlay::apply($row, $br);
+                    }
+                }
             }
+            $row['email_branding_enabled'] = (bool) ($row['email_branding_enabled'] ?? false);
+            $row['email_accent_color'] = (string) ($row['email_accent_color'] ?? '#3B2D83');
+            $row['accent_soft'] = AccentColor::emailBackground($row['email_branding_enabled'], $row['email_accent_color']);
         }
 
         return $row;
