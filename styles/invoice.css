@@ -16,7 +16,7 @@ body {
 .head {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 8mm;
+    margin-bottom: 6mm;
     border-bottom: 0.8pt solid #3B2D83;
 }
 /* Dobropis — červený header pro vizuální odlišení */
@@ -35,7 +35,7 @@ body {
     color: #7A748C;
     text-decoration: line-through;
 }
-.head td { vertical-align: middle; padding-bottom: 4mm; }
+.head td { vertical-align: middle; padding-bottom: 3mm; }
 td.logo { width: 55%; }
 td.logo img { max-width: 60mm; max-height: 22mm; }
 /* Logo + název firmy vedle sebe (opt-in pdf_logo_show_name) — název je SOUSEDNÍ buňka
@@ -102,14 +102,14 @@ td.meta { width: 45%; text-align: right; }
 .parties {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 6mm;
+    margin-bottom: 4mm;
 }
 /* Dodavatel bez výplně (vzdušnost) — zvýrazněný tintem zůstává jen odběratel.
    Kompaktní střih (vzor iDoklad/Fakturoid): drobný štítek + hustá adresa 9pt. */
 .parties td {
     width: 50%;
     vertical-align: top;
-    padding: 3mm 4mm;
+    padding: 2.5mm 3.5mm;
     font-size: 9pt;
     line-height: 1.45;
 }
@@ -149,11 +149,11 @@ td.meta { width: 45%; text-align: right; }
 .meta-grid {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 6mm;
+    margin-bottom: 4mm;
     font-size: 9.5pt;
 }
 .meta-grid td {
-    padding: 1.6mm 3mm;
+    padding: 1.15mm 3mm;
     vertical-align: top;
     border-bottom: 0.5pt solid #E7E3EE;
 }
@@ -188,22 +188,21 @@ td.meta-value.mono { font-family: 'montserrat', 'DejaVu Sans', sans-serif; }
 table.items {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 6mm;
+    margin-bottom: 4mm;
     font-size: 9pt;
 }
 /* Lehká hlavička — tichý šedý popisek + tenká neutrální linka (žádný barevný blok). */
 table.items th {
     color: #7A748C;
-    font-size: 8pt;
-    text-transform: uppercase;
-    letter-spacing: 0.8pt;
+    font-size: 8.5pt;
+    letter-spacing: 0.3pt;
     padding: 2.2mm 2.5mm;
     text-align: left;
     font-weight: 700;
     border-bottom: 0.8pt solid #D2CCDF;
 }
 table.items td {
-    padding: 3mm 2.5mm;
+    padding: 2mm 2.5mm;
     border-bottom: 0.5pt solid #E9EEF5;
     vertical-align: top;
 }
@@ -217,7 +216,7 @@ table.items .vat { font-size: 8.5pt; }
 .totals {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 5mm;
+    margin-bottom: 3mm;
 }
 .totals td { vertical-align: top; padding: 0; }
 .totals .left { width: 55%; padding-right: 4mm; }
@@ -252,7 +251,7 @@ table.totals-table tr.grand td {
     color: #3B2D83;
     font-size: 14pt;
     font-weight: bold;
-    padding: 3mm;
+    padding: 2mm 3mm;
 }
 table.totals-table tr.grand td.tot-label { color: #3B2D83; }
 table.totals-table tr.advance td { color: #5A5470; }
@@ -376,7 +375,7 @@ table.czk-recap tr.grand td {
     padding: 1.6mm;
     line-height: 0;
 }
-.pb-qr-box img { width: 27mm; height: 27mm; }
+.pb-qr-box img { width: 24mm; height: 24mm; }
 .pb-qr-caption {
     font-size: 7pt;
     color: #5A5470;
@@ -408,8 +407,8 @@ table.czk-recap tr.grand td {
 
 /* Notes a poznámky */
 .note {
-    margin: 4mm 0;
-    padding: 3mm;
+    margin: 2.5mm 0;
+    padding: 2.5mm;
     background: #FBFAFD;
     border-left: 2pt solid #6753AE;
     font-size: 9pt;
@@ -478,7 +477,7 @@ table.items tr { page-break-inside: avoid; }
 table.totals-table { page-break-inside: avoid; }
 
 /* Číslo řádku u >3 položek */
-table.items th.rownum, table.items td.rownum { width: 4%; color: #A7A0BA; font-size: 8pt; }
+table.items th.rownum, table.items td.rownum { width: 6%; color: #A7A0BA; font-size: 8pt; white-space: nowrap; }
 
 /* Štítek ZAPLACENO + datum úhrady vedle čísla dokladu (nenápadný, žádný vodoznak) */
 .paid-chip {
@@ -502,13 +501,13 @@ table.items th.rownum, table.items td.rownum { width: 4%; color: #A7A0BA; font-s
 .supplier-contact { font-size: 8pt; color: #5A5470; margin-top: 1mm; line-height: 1.5; }
 
 /* Volitelná právní věta pod položkami */
-.legal-note { margin: 2.5mm 0 4mm; font-size: 8pt; color: #7A748C; line-height: 1.5; }
+.legal-note { margin: 2mm 0 3mm; font-size: 8pt; color: #7A748C; line-height: 1.5; }
 
 /* Spodní blok: razítko/podpis vlevo + rekapitulace DPH vpravo */
 .bottom-block {
     width: 100%;
     border-collapse: collapse;
-    margin-top: 8mm;
+    margin-top: 2mm;
     page-break-inside: avoid;
 }
 .bottom-block td { vertical-align: bottom; padding: 0; }
@@ -523,7 +522,7 @@ td.bb-recap { width: 60%; }
     font-weight: bold;
     margin-bottom: 2mm;
 }
-.sign-space { height: 16mm; font-size: 1pt; }
+.sign-space { height: 8mm; font-size: 1pt; }
 .sign-img-wrap { text-align: center; }
 .sign-line {
     border-top: 0.5pt solid #A7A0BA;
@@ -534,7 +533,7 @@ td.bb-recap { width: 60%; }
     color: #7A748C;
 }
 table.vat-recap { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
-table.vat-recap td { padding: 1.5mm 2.5mm; border-bottom: 0.4pt solid #E9EEF5; }
+table.vat-recap td { padding: 1.3mm 2.5mm; border-bottom: 0.4pt solid #E9EEF5; }
 table.vat-recap .num { text-align: right; font-family: 'montserrat', 'DejaVu Sans', sans-serif; }
 table.vat-recap tr.vr-head td {
     color: #7A748C;
@@ -567,7 +566,7 @@ table.vat-recap tr.vr-total td {
    radius 8px, velkorysejší padding, K úhradě 18pt. Branding accent override
    (PdfBranding) se připojuje až ZA tento blok, takže per-supplier barvy fungují dál. */
 .pay-band { background: #E6DFFB; border: 0.6pt solid #B9ACE8; border-radius: 8px; }
-.pay-band td { padding: 5.5mm 5mm; }
+.pay-band td { padding: 4mm 5mm; }
 .pb-amount-big { font-size: 18pt; }
 .pb-due-overdue { color: #B3261E; font-weight: bold; }
 
@@ -584,3 +583,8 @@ table.vat-recap tr.vr-total td {
     color: #3B2D83;
     text-decoration: underline;
 }
+
+table.items th .cur { text-transform: none; letter-spacing: 0.2pt; }
+
+/* FORK F8: spisová značka pod kontaktem dodavatele (nahrazuje spodní patičku dokladu) */
+.supplier-register { font-size: 7pt; color: #A7A0BA; margin-top: 1mm; line-height: 1.4; }

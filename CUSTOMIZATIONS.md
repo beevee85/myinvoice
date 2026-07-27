@@ -6,6 +6,18 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-27 — REDESIGN Fáze 8: PDF šablona faktury (větev feature/redesign)
+
+**Co se změnilo (mPDF+Twig pipeline zachována; `invoice.twig`, `styles/invoice.css`, `InvoicePdfRenderer.php`, migrace **0903**):**
+1. **8a opravy:** „Vaše číslo" jen když ≠ název zakázky; **Kč** pro CZK (hlavičky sloupců `(Kč)`, sumace, platební pás; ISO jen v řádku Měna a CZK přepočtu; EN drží ISO); logo max-height 22 mm; **vypnutelná attribution patička** (`supplier.pdf_attribution_enabled`, default zapnuto) — pozor: Twig `|default()` přepisuje i `false`, používá se `?? true`.
+2. **8b obsah:** **Rekapitulace DPH** (Sazba|Základ|Výše DPH|Celkem + součtový řádek) ve spodním bloku — per-sazbové řádky ze sumace ODSTRANĚNY (duplikovaly by se; sumace = jen Celkem + zálohy); u neplátce/proformy skryta. **Razítko a podpis** vlevo dole (`supplier.signature_path` — mrtvý sloupec z 0001 oživen; upload `POST/DELETE /api/settings/signature`, SafeLogoPath vzor `sup-{N}-signature.png`, GD konverze, alfa flatten při renderu; `branding_profiles.signature_path` + overlay připraveny, per-profil upload UI zatím není). **Právní věta** (`pdf_legal_text`, max 1000 zn.). Kontakt dodavatele (e-mail·telefon·web) + spisová značka v bloku DODAVATEL — spodní patička dokladu ODSTRANĚNA (redundantní, drží 1 stranu). **Strana X z Y** v patičce každé strany. Volitelný **Code128 VS** (`pdf_barcode_enabled`, mPDF `<barcode>`). Štítek **ZAPLACENO + datum** u čísla dokladu; částečná úhrada „Uhrazeno · zbývá" v platebním pásu (řádky v sumaci jen bez pásu). „Místo dodání" NEIMPLEMENTOVÁNO — datový model dodací adresy v aplikaci neexistuje (vyžadovalo by DB+editor, mimo pravidlo nefunkčních změn).
+3. **8c sazba:** okraje 14/16/18/16; `thead` repeat na dalších stranách; `tr`/sumace/spodní blok `page-break-inside: avoid`; oddělovače 0.5 pt #E9EEF5; sloupec „#" u >3 položek; hlavičky položek sentence case (mPDF neumí span text-transform override). Kompaktnější sazba → **faktura do ~8 položek = 1 strana** (testy: 10/12 scénářů 1 str.).
+4. **8d platba:** pás výraznější (#E6DFFB, radius 8 px, K úhradě 18 pt), **QR SPAYD DT fix** (due_date se generátoru dřív nepředával → DT bylo „dnes"), po splatnosti červené datum, QR 24 mm v bílém boxu.
+5. **8e:** akce **Náhled** na detailu faktury (Modal+iframe `?inline` + Tisk + Stáhnout); **Nastavení → Vzhled dokladu** (`DocumentAppearanceSettings.vue`) s přepínači, právní větou, uploadem razítka a **živým PDF náhledem na ukázkových datech** (`GET /api/settings/document-preview.pdf` — snapshot-injection, bez zápisů; parametry přepisují neuložené hodnoty; podporuje brandingové profily + EN).
+6. **8f testy:** 12 scénářů rendrováno bez DB (snapshot-injection, skript v commitu není — viz /root/redesign-pdf-nahledy/): 1 položka ✓1str, 40 položek ✓4str+thead repeat, sazby 21/12/0 ✓, neplátce ✓, RC ✓, EUR+CZK přepočet ✓1str, EN ✓, dlouhé texty ✓2str zalomené, zaplacená ✓ (štítek+zelený pás+vypnutá patička), po splatnosti ✓ červeně, s logem (2str — logo +12 mm), částečná úhrada ✓1str. **ISDOC embed ověřen** (`pdfdetach -list` = invoice.isdoc).
+
+**Jak ověřit po merge:** migrace 0903 aplikovaná; vystavit PDF → Kč, rekapitulace, Strana X z Y; Nastavení → Vzhled dokladu funguje vč. náhledu; QR obsahuje DT (načíst bankovní appkou). Pozor při upstream merge: invoice.twig/invoice.css nesou rozsáhlé FORK F8 bloky.
+
 ## 2026-07-27 — REDESIGN Fáze 7: dark mode, a11y, motion (větev feature/redesign)
 
 **Co se změnilo:**

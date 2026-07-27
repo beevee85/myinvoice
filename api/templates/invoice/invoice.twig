@@ -14,7 +14,7 @@
   <table class="page-footer"><tr>
     <td class="pf-side">&nbsp;</td>
     <td class="pf-center">
-      {% if attribution_enabled|default(true) %}
+      {% if attribution_enabled ?? true %}
         {% if locale == 'en' %}Powered by <a href="https://myinvoice.cz/">MyInvoice.cz</a> invoicing system by <a href="https://mywebdesign.cz/">MyWebdesign.cz</a>{% else %}Používá fakturační systém <a href="https://myinvoice.cz/">MyInvoice.cz</a> od <a href="https://mywebdesign.cz/">MyWebdesign.cz</a>{% endif %}
       {% endif %}
     </td>
@@ -53,7 +53,7 @@
       {% endif %}
       {# FORK F8: volitelný Code128 čárový kód VS (podatelny/skenování) — jen číslice
          platebního VS, stejné číslo jako v QR. #}
-      {% if barcode_enabled|default(false) and payment_varsymbol %}
+      {% if (barcode_enabled ?? false) and payment_varsymbol %}
         <div class="vs-barcode"><barcode code="{{ payment_varsymbol }}" type="C128B" size="0.75" height="0.9" /></div>
       {% endif %}
       {% if parent_varsymbol %}
@@ -89,6 +89,9 @@
         {%- if supplier.phone %}{% if supplier.email %} &#160;·&#160; {% endif %}{{ supplier.phone }}{% endif -%}
         {%- if supplier.web %}{% if supplier.email or supplier.phone %} &#160;·&#160; {% endif %}{{ supplier.web|replace({'https://': '', 'http://': ''})|trim('/') }}{% endif -%}
       </div>
+      {% endif %}
+      {% if supplier.commercial_register %}
+      <div class="supplier-register">{{ supplier.commercial_register }}</div>
       {% endif %}
       <div class="spacer-2">&nbsp;</div>
       <div class="ic-dic">
@@ -259,7 +262,7 @@
           <div class="bank-meta-line">{{ t('Uhrazeno', 'Paid to date') }}: {{ invoice.paid_total|number_format(2, decimal_sep, thousand_sep) }}&nbsp;{{ currency_label|default(invoice.currency) }} · {{ t('zbývá', 'remaining') }} {{ _band_due|number_format(2, decimal_sep, thousand_sep) }}&nbsp;{{ currency_label|default(invoice.currency) }}</div>
         {% endif %}
         {# FORK F8: po splatnosti červené datum #}
-        <div class="bank-meta-line{% if is_overdue|default(false) %} pb-due-overdue{% endif %}">{{ t('Splatnost', 'Due') }}: {{ invoice.due_date|date(date_format) }}</div>
+        <div class="bank-meta-line{% if is_overdue ?? false %} pb-due-overdue{% endif %}">{{ t('Splatnost', 'Due') }}: {{ invoice.due_date|date(date_format) }}</div>
       {% endif %}
     </td>
     {% if qr_data_uri and not is_paid %}
@@ -290,21 +293,21 @@
       <th style="width:{{ _rownum ? '26' : '30' }}%">{{ t('Popis', 'Description') }}</th>
       <th class="num nowrap" style="width:7%">{{ t('Mn.', 'Qty') }}</th>
       <th class="nowrap" style="width:7%">{{ t('Jed.', 'Unit') }}</th>
-      <th class="num nowrap" style="width:15%">{{ t('Cena/j', 'Price/unit') }} ({{ _cur }})</th>
+      <th class="num nowrap" style="width:15%">{{ t('Cena/j', 'Price/unit') }} <span class="cur">({{ _cur }})</span></th>
       <th class="center nowrap vat" style="width:8%">{{ t('DPH', 'VAT') }}</th>
-      <th class="num nowrap" style="width:16%">{{ t('Bez DPH', 'Without VAT') }} ({{ _cur }})</th>
-      <th class="num nowrap" style="width:17%">{{ t('S DPH', 'With VAT') }} ({{ _cur }})</th>
+      <th class="num nowrap" style="width:16%">{{ t('Bez DPH', 'Without VAT') }} <span class="cur">({{ _cur }})</span></th>
+      <th class="num nowrap" style="width:17%">{{ t('S DPH', 'With VAT') }} <span class="cur">({{ _cur }})</span></th>
       {% else %}
       <th style="width:{{ _rownum ? '38' : '42' }}%">{{ t('Popis', 'Description') }}</th>
       <th class="num nowrap" style="width:9%">{{ t('Mn.', 'Qty') }}</th>
       <th class="nowrap" style="width:8%">{{ t('Jed.', 'Unit') }}</th>
-      <th class="num nowrap" style="width:18%">{{ t('Cena/j', 'Price/unit') }} ({{ _cur }})</th>
+      <th class="num nowrap" style="width:18%">{{ t('Cena/j', 'Price/unit') }} <span class="cur">({{ _cur }})</span></th>
       {# RC doklad neplátce/IO: částky jsou základ daně (samovyměří odběratel) —
          sloupec to musí říct, neutrální „Celkem" by byl nejednoznačný. #}
       {% if invoice.reverse_charge %}
-      <th class="num nowrap" style="width:23%">{{ t('Celkem bez DPH', 'Total excl. VAT') }} ({{ _cur }})</th>
+      <th class="num nowrap" style="width:23%">{{ t('Celkem bez DPH', 'Total excl. VAT') }} <span class="cur">({{ _cur }})</span></th>
       {% else %}
-      <th class="num nowrap" style="width:23%">{{ t('Celkem', 'Total') }} ({{ _cur }})</th>
+      <th class="num nowrap" style="width:23%">{{ t('Celkem', 'Total') }} <span class="cur">({{ _cur }})</span></th>
       {% endif %}
       {% endif %}
     </tr>
@@ -374,6 +377,10 @@
 <div class="legal-note">{{ legal_text|nl2br }}</div>
 {% endif %}
 
+{# FORK F8: rekapitulace DPH (spodní blok) přebírá per-sazbové řádky — v sumaci
+   by se duplikovaly a u 1-položkové faktury tlačily doklad na 2 strany. #}
+{% set _show_vat_recap = supplier.is_vat_payer and invoice.invoice_type != 'proforma'
+      and (invoice.vat_breakdown|default([])|length) > 0 %}
 {# ─── SUMACE + QR/BANK ─── #}
 <table class="totals">
   <tr>
@@ -382,7 +389,7 @@
     </td>
     <td class="right">
       <table class="totals-table">
-        {% if supplier.is_vat_payer and invoice.invoice_type != 'proforma' %}
+        {% if supplier.is_vat_payer and invoice.invoice_type != 'proforma' and not _show_vat_recap %}
         {% for b in invoice.vat_breakdown %}
         <tr>
           <td class="tot-label">{{ t('Základ', 'Base') }} {{ b.rate|number_format(b.rate == b.rate|round(0) ? 0 : 2, decimal_sep, thousand_sep) }}&nbsp;%</td>
@@ -428,7 +435,7 @@
         {% endif %}
         {# Částečné úhrady (#89): evidované platby snižují výzvu k platbě — znovu
            stažené PDF nesmí chtít celou částku (QR výše zní na tentýž zbytek). #}
-        {% if (invoice.paid_total ?? 0) > 0 and invoice.status != 'paid' %}
+        {% if (invoice.paid_total ?? 0) > 0 and invoice.status != 'paid' and not _has_pay %}
         <tr class="advance">
           <td class="tot-label">{{ t('Uhrazeno', 'Paid to date') }}</td>
           <td class="tot-num nowrap">−{{ invoice.paid_total|number_format(2, decimal_sep, thousand_sep) }} {{ _cur }}</td>
@@ -510,14 +517,12 @@
 {# ─── FORK F8: SPODNÍ BLOK — Razítko a podpis vlevo + Rekapitulace DPH vpravo ───
    Celý blok drží pohromadě (page-break-inside: avoid) — sumace ani rekapitulace
    nesmí zůstat osiřelé na nové straně. U neplátce DPH se rekapitulace celá skryje. #}
-{% set _show_vat_recap = supplier.is_vat_payer and invoice.invoice_type != 'proforma'
-      and (invoice.vat_breakdown|default([])|length) > 0 %}
 <table class="bottom-block">
   <tr>
     <td class="bb-sign">
       <div class="sign-label">{{ t('Razítko a podpis', 'Stamp and signature') }}</div>
       {% if signature_path %}
-        <div class="sign-img-wrap"><img src="{{ signature_path }}" alt="" style="max-width: 48mm; max-height: 24mm;"></div>
+        <div class="sign-img-wrap"><img src="{{ signature_path }}" alt="" style="max-width: 46mm; max-height: 20mm;"></div>
       {% else %}
         <div class="sign-space">&nbsp;</div>
       {% endif %}
@@ -553,12 +558,8 @@
   </tr>
 </table>
 
-<div class="footer">
-  <span class="footer-name">{{ supplier.company_name }}</span>{% if supplier.web %}<span class="footer-dot">&#160;·&#160;</span><a href="{{ supplier.web }}" class="footer-link">{{ supplier.web|replace({'https://': '', 'http://': ''})|trim('/') }}</a>{% endif %}{% if supplier.email %}<span class="footer-dot">&#160;·&#160;</span>{{ supplier.email }}{% endif %}
-</div>
-{% if supplier.commercial_register %}
-<div class="commercial-register">{{ supplier.commercial_register }}</div>
-{% endif %}
+{# FORK F8: patička dokladu (firma·web·email) odstraněna — kontakt je v bloku
+   DODAVATEL a spisová značka pod ním; ušetřený prostor drží fakturu na 1 straně. #}
 
 {# ─── VÝKAZ VÍCEPRACÍ + VÝKAZ MATERIÁLU — 2. stránka ─── #}
 {% set _has_work = work_report and (work_report.items|length) > 0 %}
