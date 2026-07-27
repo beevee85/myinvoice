@@ -793,7 +793,7 @@ final class PurchaseInvoiceRepository
         //   EU vendor s 0% → '24e' (přijetí služby z EU, ř.5) — typický pro Microsoft Ireland apod.
         //   non-EU vendor s 0% → '24' (přijetí služby ze 3. země, ř.12) — Anthropic, GitHub apod.
         $metaStmt = $pdo->prepare(
-            'SELECT pi.reverse_charge, co.iso2,
+            'SELECT pi.reverse_charge, pi.supplier_id, co.iso2,
                     COALESCE(pi.tax_date, pi.issue_date) AS doc_date
                FROM purchase_invoices pi
                JOIN clients c     ON c.id  = pi.vendor_id
@@ -809,6 +809,7 @@ final class PurchaseInvoiceRepository
         $docYear = !empty($meta['doc_date']) ? (int) substr((string) $meta['doc_date'], 0, 4) : (int) date('Y');
         $standardRate = $this->taxConstants->vatRateStandard($docYear);
 
+        $finalCodes = [];
         foreach (array_values($items) as $i => $item) {
             $vatRateId = (int) ($item['vat_rate_id'] ?? 0);
             $rate = $vatRates[$vatRateId] ?? 0.0;
@@ -818,6 +819,9 @@ final class PurchaseInvoiceRepository
             $code = $item['vat_classification_code'] ?? null;
             if ($code === null) {
                 $code = self::defaultClassificationCode($rate, $reverseCharge, $countryIso, $standardRate);
+            }
+            if ($code !== null && (string) $code !== '') {
+                $finalCodes[(string) $code] = true;
             }
             $stmt->execute([
                 $purchaseInvoiceId,
@@ -831,6 +835,30 @@ final class PurchaseInvoiceRepository
                 $code !== null ? (string) $code : null,
                 !empty($item['is_fixed_asset']) ? 1 : 0,
             ]);
+        }
+
+        // Konzistence hlavičky s položkami (audit 2026-07, doklad PF2602010): dostala-li
+        // položka RC klasifikaci — explicitně z importu, nebo defaultem 24e/24 pro
+        // zahraničního dodavatele s 0 % (větev výše nezávisí na RC flagu!) — musí mít
+        // hlavička reverse_charge = 1. Výkazy se řídí položkou, ale zařazení do období
+        // a fallbacky hlavičkou; rozpor se při změně klasifikace rozpadne. Jediné hrdlo
+        // pro VŠECHNY cesty (UI, AI import, ISDOC, iDoklad/Fakturoid). Opačný směr
+        // (RC flag bez RC kódů) je legitimní — kódy doplní default dle flagu.
+        if (!$reverseCharge && $finalCodes !== []) {
+            $codes = array_keys($finalCodes);
+            $placeholders = implode(',', array_fill(0, count($codes), '?'));
+            $rcStmt = $pdo->prepare(
+                "SELECT 1 FROM vat_classifications
+                  WHERE archived = 0 AND is_reverse_charge = 1
+                    AND code IN ({$placeholders})
+                    AND (supplier_id IS NULL OR supplier_id = ?)
+                  LIMIT 1"
+            );
+            $rcStmt->execute([...$codes, (int) ($meta['supplier_id'] ?? 0)]);
+            if ($rcStmt->fetchColumn() !== false) {
+                $pdo->prepare('UPDATE purchase_invoices SET reverse_charge = 1 WHERE id = ?')
+                    ->execute([$purchaseInvoiceId]);
+            }
         }
     }
 

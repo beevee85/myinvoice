@@ -23,14 +23,27 @@ final class DphPriznaniBuilder
         private readonly VatClassificationMapper $mapper,
     ) {}
 
+    /** Povolené formy podání (EPO XSD): B řádné, O opravné, D dodatečné, E dodatečné/opravné. */
+    public const FORMS = ['B', 'O', 'D', 'E'];
+    /** Formy, u kterých EPO vyžaduje datum zjištění důvodů (d_zjist) — dodatečná podání (§ 141 DŘ). */
+    public const FORMS_REQUIRING_DZJIST = ['D', 'E'];
+
     /**
      * Sestaví XML pro DPH přiznání za daný měsíc/kvartál.
      *
      * @param string $period 'monthly' (default) nebo 'quarterly' (sumuje celý kvartál)
+     * @param string $form dapdph_forma — viz FORMS; u D/E je $dZjist povinné
+     * @param string|null $dZjist datum zjištění důvodů pro podání (DD.MM.YYYY)
      * @return array{xml: string, summary: array<string, mixed>, warnings: list<string>}
      */
-    public function build(int $supplierId, int $year, int $month, ?string $period = null): array
+    public function build(int $supplierId, int $year, int $month, ?string $period = null, string $form = 'B', ?string $dZjist = null): array
     {
+        if (!in_array($form, self::FORMS, true)) {
+            throw new \InvalidArgumentException("Neplatná forma přiznání '{$form}' (povolené: " . implode(', ', self::FORMS) . ').');
+        }
+        if (in_array($form, self::FORMS_REQUIRING_DZJIST, true) && ($dZjist === null || $dZjist === '')) {
+            throw new \InvalidArgumentException('Dodatečné přiznání vyžaduje datum zjištění důvodů (d_zjist).');
+        }
         $supplier = $this->loadSupplier($supplierId);
         // Default period z supplier.vat_period, fallback 'monthly'
         if ($period === null) {
@@ -110,7 +123,13 @@ final class DphPriznaniBuilder
         } else {
             $vetaD->setAttribute('mesic', (string) $month);
         }
-        $vetaD->setAttribute('dapdph_forma', 'B'); // B = řádné (default), O/D/E = opravné/dodatečné
+        // B = řádné (default), O = opravné, D = dodatečné, E = dodatečné/opravné.
+        $vetaD->setAttribute('dapdph_forma', $form);
+        // Datum zjištění důvodů pro podání dodatečného přiznání (§ 141 DŘ) — EPO ho
+        // u D/E vyžaduje; u O je volitelné.
+        if ($dZjist !== null && $dZjist !== '') {
+            $vetaD->setAttribute('d_zjist', $dZjist);
+        }
         $vetaD->setAttribute('dokument', 'DP3');   // identifikace typu výkazu
         // P = plátce DPH (default), I = identifikovaná osoba (S = skupina, N = neplátce)
         $vetaD->setAttribute('typ_platce', $isIdentified ? 'I' : 'P');
@@ -319,11 +338,15 @@ final class DphPriznaniBuilder
             $deadlineMonth -= 12;
             $deadlineYear += 1;
         }
-        $deadline = sprintf('%04d-%02d-25', $deadlineYear, $deadlineMonth);
+        // § 33/4 daňového řádu: víkend/svátek → nejbližší následující pracovní den.
+        $deadline = CzechWorkingDays::shiftToWorkingDay(
+            new \DateTimeImmutable(sprintf('%04d-%02d-25', $deadlineYear, $deadlineMonth))
+        )->format('Y-m-d');
 
         $summary = [
             'period'                  => sprintf('%04d-%02d', $year, $month),
             'period_type'             => $period,
+            'form'                    => $form,
             'typ_platce'              => $isIdentified ? 'I' : 'P',
             'quarter'                 => $quarter,
             'lines'                   => $lines,

@@ -660,7 +660,8 @@
     },
     "warning": {
       "credit_note_positive_total": "Dobropis má kladný součet — má mít záporné částky. Záporné znaménko stačí na jedné straně (např. −1 ks × 1000, nebo 1 ks × −1000); pokud jsou záporné množství i cena zároveň, výkazy DPH/KH plnění přičtou místo odečtení. Zkontroluj prosím znaménka.",
-      "vendor_non_payer_deduction": "Dodavatel je neplátce DPH, ale je uplatněn nárok na odpočet. Od neplátce nelze DPH odpočítat — zkontroluj nastavení odpočtu."
+      "vendor_non_payer_deduction": "Dodavatel je neplátce DPH, ale je uplatněn nárok na odpočet. Od neplátce nelze DPH odpočítat — zkontroluj nastavení odpočtu.",
+      "reverse_charge_forced_by_classification": "Položka má klasifikaci v režimu přenesené povinnosti (reverse charge), proto byl na dokladu automaticky zapnut příznak reverse charge — hlavička a položky si jinak odporovaly."
     },
     "classification": {
       "title": "Klasifikace",
@@ -669,7 +670,7 @@
       "manage_categories": "Spravovat kategorie v Číselnících →",
       "vat_classification": "VAT klasifikace (DPH přiznání)",
       "no_vat_class": "(auto-default podle sazby)",
-      "vat_classification_hint": "Pokud nevyberete, systém auto-přiřadí kód podle sazby DPH (21%→40, 12%→41, 0%→42, reverse→5).",
+      "vat_classification_hint": "Pokud nevyberete, systém auto-přiřadí kód podle sazby DPH a země dodavatele: 21 % → 40, 12 % → 41 (tuzemský odpočet); reverse charge: tuzemsko → 5 (§ 92a, ř. 10), EU → 24e (služba, ř. 5), 3. země → 24 (služba, ř. 12). Pořízení ZBOŽÍ z EU (23, ř. 3) a dovoz zboží (25, ř. 7) auto-odhad nerozliší — zvolte ručně.",
       "vat_deduction": "Nárok na odpočet DPH",
       "vat_deduction_hint": "„Bez nároku“ = faktura nevstupuje do Knihy DPH ani DPHDP3/KH (jen účetní náklad). „Krácený“ = poměrný odpočet §75 — zadáš %, kterým se odpočet zkrátí.",
       "tax_deductible": "Daňově uznatelný náklad",
@@ -682,7 +683,9 @@
     },
     "vat_deduction_percent": "Odpočet %",
     "vat_deduction_percent_hint": "Procento, kterým se zkrátí odpočet DPH (např. auto 70 % pro ekonomickou činnost). Zbytek je nedaňová část.",
-    "force_edit": "Upravit (force)",
+    "force_edit": "Odemknout k editaci",
+    "force_edit_warning": "Odemčená editace přijaté faktury (admin)",
+    "force_edit_body": "Upravuješ fakturu mimo stav draft. Změny přepíšou uložené hodnoty a mohou ovlivnit už podané DPH výkazy i párování s bankou. Akce se ukládá do auditního logu.",
     "force_delete": "Smazat (force)",
     "force_edit_hint": "Admin only — úprava received/booked/paid faktury. U zaplacené pozor: po změně částky může přestat sedět s bankovní transakcí. Po uložení se přepočítají sumy.",
     "force_edit_confirm": "Opravdu upravit fakturu ve stavu '{status}'? U zaplacené faktury: změna částky může rozbít párování s bankovní transakcí. Pokračovat?",
@@ -1590,7 +1593,7 @@
       "title": "Klasifikace",
       "vat_classification": "VAT klasifikace (DPH přiznání)",
       "no_vat_class": "(auto-default podle sazby)",
-      "vat_classification_hint": "Auto-přiřazení podle sazby DPH (21%→1, 12%→2, 0%→3, reverse→20).",
+      "vat_classification_hint": "Auto-přiřazení podle sazby DPH a země odběratele: 21 % → 1, 12 % → 2; reverse charge: tuzemsko → 25s (§ 92, ř. 25 + KH A.1), EU → 20 (dodání zboží, ř. 20), 3. země → 26 (ř. 22). Služba do EU (22, ř. 21) se od zboží auto-odhadem nerozliší — zvolte ručně.",
       "revenue_category": "Kategorie tržby (volitelně)",
       "revenue_category_none": "bez kategorie",
       "revenue_category_placeholder": "např. konzultace, produkt, hosting",
@@ -3595,6 +3598,14 @@
   "reports": {
     "disclaimer_title": "Vygenerovaný XML je pouze pomůcka",
     "disclaimer_body": "Před odesláním na EPO portál MF ČR vždy ověřte správnost s vaší účetní nebo daňovým poradcem. Testováno na omezené sadě dat — aplikace nezaručuje regulatorní správnost.",
+    "form": {
+      "label": "Forma podání",
+      "b": "Řádné",
+      "o": "Opravné",
+      "n": "Následné",
+      "d": "Dodatečné",
+      "d_zjist": "Datum zjištění"
+    },
     "oss": {
       "title": "OSS přiznání",
       "subtitle": "Kvartální přehled One Stop Shop z ručně označených řádků vydaných faktur.",

@@ -6,6 +6,21 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-27 — OPRAVA DPH VÝKAZŮ: dobropisy, zahraniční RC, forma podání, termíny, konzistence RC (větev fix/vat-credit-note-sign)
+
+**Charakter: BUGFIX KANDIDÁT PRO UPSTREAM** — po přijetí autorem (radekhulan/myinvoice) celý blok z evidence odpadá. Podklad pro autora: `/root/vat-fix-snapshots/UPSTREAM-PROPOSAL.md` + diff report tamtéž.
+
+**Co se změnilo (5 chyb v4.51.0):**
+1. **BUG 1 — dobropisy se přičítaly:** `VatLedgerService::fetchPurchases` nově normalizuje přijaté dobropisy (`document_kind='credit_note'`) přes **-ABS()** na záporné částky (base/vat/inv_total) — v DB žijí obě znaménkové konvence (ruční/AI import záporně, část importů kladně — reálně PF2602004). Propíše se do DPHDP3/DPHKH1/DPHSHV/Knihy DPH. Vydané dobropisy (v DB záporné) beze změny. KH: dobropis nad 10 000 Kč jde přes `abs()` práh jako **samostatný záporný řádek B.2/A.4**. `IncomeTaxBuilder` náklady taktéž -ABS().
+2. **BUG 2 — zahraniční RC dostával tuzemský kód 5:** nákupní fallback klasifikace nově dle země (EU → `24e`, 3. země → `24`, tuzemsko → `5`) + příznak `code_estimated` → **adresný warning v KH preview** (zboží 23/25 nutno zvolit ručně).
+3. **BUG 3 — forma podání:** query param `form` — KH `B/O/N/E`, DP3 `B/O/D/E` + `d_zjist` (DD.MM.YYYY; povinné u N/E resp. D/E — `ReportFormParams`). UI: selectbox „Forma podání" + date picker v obou stránkách výkazů.
+4. **BUG 4 — termíny vs. víkend/svátek:** nový **`CzechWorkingDays`** (§ 33/4 DŘ, pevné svátky + Velikonoce) — `submission_deadline` v KH/DP3/SHV/income-tax i CRM dashboard termínech se posouvá na následující pracovní den (25.07.2026 sobota → 27.07.).
+5. **BUG 5 — rozpor hlavičky a klasifikace (PF2602010):** RC kód na položce vynucuje `reverse_charge=1` — hrdlo v `PurchaseInvoiceRepository::replaceItems` (kryje UI/AI/ISDOC/iDoklad importy) + Create/Update akce s warning toastem; **`api/bin/backfill-reverse-charge-consistency.php`** (dry-run default) dorovná historii; banner odemčené editace v purchase editoru, tlačítko „Odemknout k editaci".
+
+**Soubory:** api/src/Service/Report/{VatLedgerService, KontrolniHlaseniBuilder, DphPriznaniBuilder, SouhrnneHlaseniBuilder, IncomeTaxBuilder, VatClassificationDefaulter, **CzechWorkingDays** (nový), **ReportFormParams** (nový)}, Crm/CrmAggregationService, Action/Report/{KontrolniHlaseni,DphPriznani}Action, Action/PurchaseInvoice/{Create,Update}, Repository/PurchaseInvoiceRepository, bin/backfill-reverse-charge-consistency.php (nový); web: reports.ts, KontrolniHlaseniReport.vue, DphPriznaniReport.vue, purchase InvoiceEditor.vue, i18n cs/en. Testy: **VatLedgerServiceCreditNoteTest, CzechWorkingDaysTest, ReportFormParamsTest** (nové), KhDphTaxScenariosTest (+5 scénářů, SHV deadline 27.07.2099), MeActionTest (oprava po FÁZI 2 — 7. parametr).
+
+**Jak ověřit po merge:** `php vendor/bin/phpunit --filter 'CreditNote|CzechWorkingDays|ReportFormParams|KhDphTaxScenarios'` zelené; KH 02/2026 B.3 = 6 573,26/1 380,39; DP3 Q1/2026 Veta6 `dano_da="484"` (ne `dano_no`); KH 06/2026 termín 27.07.; stažení KH s formou N vyžaduje datum zjištění. Ostatní měsíce 2026 bit-identické (viz /root/vat-fix-snapshots/DIFF-REPORT.md).
+
 ## 2026-07-27 — REDESIGN Fáze 8: PDF šablona faktury (větev feature/redesign)
 
 **Co se změnilo (mPDF+Twig pipeline zachována; `invoice.twig`, `styles/invoice.css`, `InvoicePdfRenderer.php`, migrace **0903**):**

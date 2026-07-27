@@ -315,11 +315,17 @@ export const reportsApi = {
     return `/api/reports/income-tax?${params.toString()}`
   },
 
-  khDownloadUrl: (year: number, month: number, period?: 'monthly' | 'quarterly') => {
+  khDownloadUrl: (year: number, month: number, period?: 'monthly' | 'quarterly', form?: string, dZjist?: string) => {
     const sid = localStorage.getItem('myinvoice.current_supplier_id')
     const params = new URLSearchParams({ year: String(year), month: String(month) })
     if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
     if (period) params.set('period', period)
+    // Forma podání (B řádné / O opravné / N následné) + datum zjištění důvodů
+    // pro následné KH (DD.MM.YYYY, povinné u N) — viz KontrolniHlaseniAction.
+    if (form && form !== 'B') {
+      params.set('form', form)
+      if (dZjist) params.set('d_zjist', dZjist)
+    }
     return `/api/reports/dphkh1?${params.toString()}`
   },
 
@@ -382,11 +388,17 @@ export const reportsApi = {
   },
 
   /** URL na download endpoint — frontend ho otevírá v novém okně */
-  dphDownloadUrl: (year: number, month: number, period?: 'monthly' | 'quarterly') => {
+  dphDownloadUrl: (year: number, month: number, period?: 'monthly' | 'quarterly', form?: string, dZjist?: string) => {
     const sid = localStorage.getItem('myinvoice.current_supplier_id')
     const params = new URLSearchParams({ year: String(year), month: String(month) })
     if (period) params.set('period', period)
     if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
+    // Forma podání (B řádné / O opravné / D dodatečné) + datum zjištění důvodů
+    // pro dodatečné přiznání (DD.MM.YYYY, povinné u D) — viz DphPriznaniAction.
+    if (form && form !== 'B') {
+      params.set('form', form)
+      if (dZjist) params.set('d_zjist', dZjist)
+    }
     return `/api/reports/dphdp3?${params.toString()}`
   },
 }

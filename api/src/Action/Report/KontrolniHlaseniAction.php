@@ -63,12 +63,21 @@ final class KontrolniHlaseniAction
         if ($year === null) {
             return Json::error($response, 'validation_failed', 'Neplatný rok/měsíc.', 400);
         }
+        // Forma podání (B/O/N/E) + datum zjištění důvodů pro následné KH (§ 101f).
+        $fp = \MyInvoice\Service\Report\ReportFormParams::fromQuery(
+            $request->getQueryParams(),
+            KontrolniHlaseniBuilder::FORMS,
+            KontrolniHlaseniBuilder::FORMS_REQUIRING_DZJIST,
+        );
+        if ($fp['error'] !== null) {
+            return Json::error($response, 'validation_failed', $fp['error'], 400);
+        }
         try {
-            $result = $this->builder->build($supplierId, $year, $month, $period);
+            $result = $this->builder->build($supplierId, $year, $month, $period, $fp['form'], $fp['d_zjist']);
             // #238: doplň chybějící kurzy z ČNB a přebuildi; tvrdá chyba jen když ČNB nemá.
             if (!empty($result['missing_rates'])) {
                 $this->rateFiller->fill($supplierId, $result['missing_rates']);
-                $result = $this->builder->build($supplierId, $year, $month, $period);
+                $result = $this->builder->build($supplierId, $year, $month, $period, $fp['form'], $fp['d_zjist']);
                 if (!empty($result['missing_rates'])) {
                     $labels = \MyInvoice\Service\Report\VatLedgerService::missingExchangeRateLabels($result['missing_rates']);
                     return Json::error($response, 'exchange_rate_missing',

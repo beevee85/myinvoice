@@ -244,6 +244,35 @@ final class VatClassificationDefaulter
     }
 
     /**
+     * Je mezi kódy aspoň jeden s `is_reverse_charge = 1` v číselníku?
+     *
+     * Konzistenční pojistka (audit 2026-07, doklad PF2602010): položka s RC
+     * klasifikací (5/23/24/24e/25) při `reverse_charge = 0` na hlavičce si
+     * odporuje — výkazy se řídí položkou, ale zařazení do období a fallbacky
+     * hlavičkou. Ukládací akce přes tuto metodu flag na hlavičce vynutí.
+     *
+     * @param list<string> $codes klasifikační kódy (položek i hlavičky)
+     */
+    public function anyReverseChargeCode(array $codes, int $supplierId = 0): bool
+    {
+        $codes = array_values(array_unique(array_filter(array_map('strval', $codes), static fn ($c) => $c !== '')));
+        if ($codes === []) {
+            return false;
+        }
+        $placeholders = implode(',', array_fill(0, count($codes), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM vat_classifications
+              WHERE archived = 0
+                AND is_reverse_charge = 1
+                AND code IN ({$placeholders})
+                AND (supplier_id IS NULL OR supplier_id = ?)
+              LIMIT 1"
+        );
+        $stmt->execute([...$codes, $supplierId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
      * Aplikuje default na header faktury (pokud chybí).
      * Většinou se aplikuje při uložení (CreateAction / UpdateAction).
      *

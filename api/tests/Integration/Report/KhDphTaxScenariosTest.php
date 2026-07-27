@@ -1608,7 +1608,110 @@ final class KhDphTaxScenariosTest extends TestCase
         $result = $this->shv->build($this->supplierId, self::YEAR, 4, 'quarterly');
         $sh = (new \SimpleXMLElement($result['xml']))->DPHSHV;
         $this->assertSame('101', (string) $sh->VetaR[0]['pln_hodnota']);
-        $this->assertSame(sprintf('%04d-07-25', self::YEAR), $result['summary']['submission_deadline']);
+        // 25.07.2099 je sobota → § 33/4 DŘ posouvá lhůtu na pondělí 27.07. (CzechWorkingDays).
+        $this->assertSame(sprintf('%04d-07-27', self::YEAR), $result['summary']['submission_deadline']);
+    }
+
+    /**
+     * Oprava 2026-07 — přijatý dobropis je v DB uložen KLADNĚ (document_kind='credit_note'),
+     * evidence DPH mu musí obrátit znaménko: pár faktura + dobropis na stejnou částku
+     * se v KH B.3 i na ř. 40 přiznání vynuluje. Dřív se dobropis PŘIČETL (odpočet
+     * chybně vzrostl o dvojnásobek dobropisu).
+     */
+    public function testPurchaseCreditNotePairNetsToZero(): void
+    {
+        $vendor = $this->client('CZ dodavatel — dobropis pár', $this->czId, 'CZ55544433', vendor: true);
+        $d = sprintf('%04d-%02d-05', self::YEAR, self::MONTH);
+        $this->purchase('PCN-INV', $vendor, '40', false, 'invoice', $d, $d, [[2654.79, 557.51, 21.0]]);
+        $this->purchase('PCN-CN', $vendor, '40', false, 'credit_note', $d, $d, [[2654.79, 557.51, 21.0]]);
+
+        $kh = (new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHKH1;
+        $this->assertCount(1, $kh->VetaB3, 'oba doklady pod 10 000 → sumace B.3');
+        $this->assertSame('0.00', (string) $kh->VetaB3[0]['zakl_dane1'], 'faktura + dobropis = 0');
+        $this->assertSame('0.00', (string) $kh->VetaB3[0]['dan1']);
+
+        $dph = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
+        $this->assertSame('0', (string) $dph->Veta4[0]['pln23'], 'ř. 40: základ fakturou +, dobropisem − = 0');
+        $this->assertSame('0', (string) $dph->Veta4[0]['odp_tuz23_nar']);
+    }
+
+    /**
+     * Dobropis nad 10 000 Kč vč. DPH (abs hodnota) → samostatný ZÁPORNÝ řádek v B.2
+     * (opravy se v KH vykazují jednotlivě se znaménkem), ne sumace B.3.
+     */
+    public function testPurchaseCreditNoteOverLimitIsStandaloneNegativeB2Row(): void
+    {
+        $vendor = $this->client('CZ dodavatel — velký dobropis', $this->czId, 'CZ66655544', vendor: true);
+        $d = sprintf('%04d-%02d-12', self::YEAR, self::MONTH);
+        $this->purchase('PCN-BIG', $vendor, '40', false, 'credit_note', $d, $d, [[20000.0, 4200.0, 21.0]]);
+
+        $kh = (new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHKH1;
+        $this->assertCount(1, $kh->VetaB2, 'abs(−24 200) > 10 000 → samostatný řádek B.2');
+        $this->assertCount(0, $kh->VetaB3);
+        $this->assertSame('-20000.00', (string) $kh->VetaB2[0]['zakl_dane1']);
+        $this->assertSame('-4200.00', (string) $kh->VetaB2[0]['dan1']);
+        $this->assertSame('-20000.00', (string) $kh->VetaC[0]['pln23'], 'rekapitulace propisuje znaménko');
+    }
+
+    /**
+     * Vydaný dobropis je v DB už ZÁPORNÝ (záporné quantity, viz CancelInvoiceAction) —
+     * evidence ho NESMÍ negovat podruhé. Nad limit → samostatný záporný řádek A.4.
+     */
+    public function testIssuedCreditNoteKeepsNegativeSignInA4(): void
+    {
+        $customer = $this->client('CZ odběratel — vydaný dobropis', $this->czId, 'CZ77788899', customer: true);
+        $d = sprintf('%04d-%02d-18', self::YEAR, self::MONTH);
+        $this->sale('FCN-BIG', $customer, '1', false, $d, $d, [[-15000.0, -3150.0, 21.0]], invoiceType: 'credit_note');
+
+        $kh = (new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHKH1;
+        $this->assertCount(1, $kh->VetaA4, 'abs(−18 150) > 10 000 → samostatný řádek A.4');
+        $this->assertSame('-15000.00', (string) $kh->VetaA4[0]['zakl_dane1'], 'bez dvojité negace');
+        $this->assertSame('-3150.00', (string) $kh->VetaA4[0]['dan1']);
+
+        $dph = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
+        $this->assertSame('-15000', (string) $dph->Veta1[0]['obrat23'], 'ř. 1 nese záporný základ dobropisu');
+    }
+
+    /**
+     * Zálohová výzva (advance) není daňový doklad → zůstává mimo KH i přiznání,
+     * i po zavedení znaménkové logiky dobropisů.
+     */
+    public function testPurchaseAdvanceStaysExcludedFromReports(): void
+    {
+        $vendor = $this->client('CZ dodavatel — záloha', $this->czId, 'CZ88899900', vendor: true);
+        $d = sprintf('%04d-%02d-07', self::YEAR, self::MONTH);
+        $this->purchase('PADV-1', $vendor, '40', false, 'advance', $d, $d, [[3875.91, 813.94, 21.0]]);
+
+        $kh = (new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHKH1;
+        $this->assertCount(0, $kh->VetaB2);
+        $this->assertCount(0, $kh->VetaB3, 'záloha nesmí do B.3');
+    }
+
+    /**
+     * BUG 3 (2026-07) — následné KH (khdph_forma='N') s datem zjištění důvodů;
+     * dodatečné přiznání (dapdph_forma='D') analogicky. Bez d_zjist musí build selhat.
+     */
+    public function testSubmissionFormAttributesAndDzjist(): void
+    {
+        $khXml = new \SimpleXMLElement(
+            $this->kh->build($this->supplierId, self::YEAR, self::MONTH, 'monthly', 'N', '05.08.2099')['xml']
+        );
+        $this->assertSame('N', (string) $khXml->DPHKH1->VetaD['khdph_forma']);
+        $this->assertSame('05.08.2099', (string) $khXml->DPHKH1->VetaD['d_zjist']);
+
+        $dphXml = new \SimpleXMLElement(
+            $this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly', 'D', '05.08.2099')['xml']
+        );
+        $this->assertSame('D', (string) $dphXml->DPHDP3->VetaD['dapdph_forma']);
+        $this->assertSame('05.08.2099', (string) $dphXml->DPHDP3->VetaD['d_zjist']);
+
+        // Řádné podání d_zjist neemituje.
+        $regular = new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']);
+        $this->assertSame('B', (string) $regular->DPHKH1->VetaD['khdph_forma']);
+        $this->assertNull($regular->DPHKH1->VetaD['d_zjist']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->kh->build($this->supplierId, self::YEAR, self::MONTH, 'monthly', 'N');
     }
 
     /**
@@ -1745,8 +1848,10 @@ final class KhDphTaxScenariosTest extends TestCase
 
     /**
      * @param list<array{0:float,1:float,2:float}> $items [base, vat, vat_rate_snapshot]
+     * @param string $invoiceType 'invoice' (default) / 'credit_note' — vydaný dobropis
+     *   se vkládá se ZÁPORNÝMI items (konvence CancelInvoiceAction)
      */
-    private function sale(string $varsymbol, int $clientId, ?string $code, bool $rc, string $issue, string $tax, array $items, ?int $currencyId = null, ?float $exchangeRate = null): void
+    private function sale(string $varsymbol, int $clientId, ?string $code, bool $rc, string $issue, string $tax, array $items, ?int $currencyId = null, ?float $exchangeRate = null, string $invoiceType = 'invoice'): void
     {
         [$base, $vat, $with] = $this->sumItems($items);
         $stmt = $this->db->pdo()->prepare(
@@ -1754,10 +1859,10 @@ final class KhDphTaxScenariosTest extends TestCase
                 (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date,
                  currency_id, exchange_rate, reverse_charge, total_without_vat, total_vat, total_with_vat,
                  status, vat_classification_code, created_by)
-             VALUES (?, ?, "invoice", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "issued", ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "issued", ?, ?)'
         );
         $stmt->execute([
-            $this->supplierId, $varsymbol, $clientId, $issue, $tax, $issue,
+            $this->supplierId, $varsymbol, $invoiceType, $clientId, $issue, $tax, $issue,
             $currencyId ?? $this->currencyId, $exchangeRate, $rc ? 1 : 0, $base, $vat, $with, $code, $this->userId,
         ]);
         $id = (int) $this->db->pdo()->lastInsertId();

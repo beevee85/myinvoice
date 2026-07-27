@@ -94,6 +94,27 @@ final class UpdatePurchaseInvoiceAction
             $body['vat_deduction'] = 'none';
         }
 
+        // Konzistence hlavičky s položkami: explicitní RC klasifikace na položce/hlavičce
+        // (5/23/24/24e/25…) vynucuje reverse_charge = 1 — jinak si data odporují a při
+        // změně klasifikace se výkazy rozpadnou (viz VatClassificationDefaulter).
+        // PŘED auto-defaulty, aby se zbylé neoklasifikované položky defaultovaly už jako RC.
+        $rcForcedByClassification = false;
+        if (empty($body['reverse_charge'])) {
+            $explicitCodes = [];
+            foreach ((array) ($body['items'] ?? []) as $it) {
+                if (!empty($it['vat_classification_code'])) {
+                    $explicitCodes[] = (string) $it['vat_classification_code'];
+                }
+            }
+            if (!empty($body['vat_classification_code'])) {
+                $explicitCodes[] = (string) $body['vat_classification_code'];
+            }
+            if ($this->vatDefaulter->anyReverseChargeCode($explicitCodes, $supplierId)) {
+                $body['reverse_charge'] = 1;
+                $rcForcedByClassification = true;
+            }
+        }
+
         // Auto-default VAT klasifikace pokud uživatel nezadal — na header i items (s multi-tenant scope).
         $this->applyVatClassificationDefaults($body, $supplierId);
 
@@ -136,6 +157,9 @@ final class UpdatePurchaseInvoiceAction
         // samovyměří a smí ji odečíst (§ 72/73) — varování by tu bylo false positive.
         if ($vendorNonPayer && !PurchaseInvoiceValidation::isReverseCharge($invoice) && ($invoice['vat_deduction'] ?? 'full') !== 'none') {
             $warnings[] = 'vendor_non_payer_deduction';
+        }
+        if ($rcForcedByClassification) {
+            $warnings[] = 'reverse_charge_forced_by_classification';
         }
         if (!empty($warnings)) {
             $invoice['_warnings'] = $warnings;
