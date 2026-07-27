@@ -2455,6 +2455,7 @@
     "upcoming": "Before due",
     "upcoming_none": "no unpaid",
     "section_issued": "Issued invoices",
+    "revenue_chart_title": "Revenue by period", "period_months": "Months", "period_quarters": "Quarters", "period_years": "Years",
     "section_purchase": "Received invoices",
     "work_reports": {
       "title": "Work reports",

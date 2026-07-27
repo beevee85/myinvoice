@@ -6,6 +6,16 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-27 — REDESIGN Fáze 6: Přehled (větev feature/redesign)
+
+**Co se změnilo:**
+1. **`Dashboard.vue`**: KPI dlaždice — label 13 muted / hodnota 32/700 / kontext 12, na `--surface-muted` bez borderů; „Po splatnosti" (a přijaté po splatnosti / dnes splatné) s jemným červeným/oranžovým podbarvením místo borderu, jen při nenulové hodnotě. Grid 12 sloupců s gap 24 (`--grid-gap`), mobil 1 sloupec — nahrazuje dřívější `kpiGridCols` mapping i `singleCurrency` layout. Sekční hlavičky = h2 (Nunito 20) místo barevných uppercase pilulek. Tabulky (po splatnosti / nezaplacené / top klienti) → `.ui-table`; cash-flow, koláč a draft karty na muted kartách; pilulková tlačítka.
+2. **Nový graf obratu** `components/charts/RevenueBarsChart.vue`: osy, gridlines, tooltip, sloupce zaoblené nahoře (radius 6) s vertikálním gradientem primary; barvy z `useChartColors` (dark mode ready). **SegmentedControl Měsíce/Kvartály/Roky** — agregace client-side z existujícího 12M `revenue_by_month` datasetu (`revenueSeries()`), **API beze změny**. Graf per měna s nenulovými daty; revenue KPI dlaždice už nemá sparkline (graf ho nahrazuje).
+3. **`ActionItemsWidget.vue`** („Akce pro tebe"): místo list řádků karty v gridu s ikonou v kruhu dle závažnosti (výstraha/hodiny/info); dismiss menu (den/týden/historické/navždy) i restore zachovány 1:1.
+4. i18n: + `dashboard.revenue_chart_title`, `dashboard.period_months/quarters/years` (cs+en).
+
+**Proč:** Fáze 6 redesignu. **Jak ověřit po merge:** build ✓ testy 50/50 ✓; Přehled: dlaždice 32/700, červená „Po splatnosti" bez borderu, plný graf obratu s přepínačem období (Kvartály = součty Q), Akce pro tebe jako karty. Deep-linky dlaždic (year/currency/overdue/unpaid query) beze změny.
+
 ## 2026-07-27 — REDESIGN Fáze 5: detail faktury (větev feature/redesign)
 
 **Co se změnilo (`web/src/pages/invoices/InvoiceDetail.vue` — cílené úpravy sekcí, logika+ActionBar tiery beze změny):**
