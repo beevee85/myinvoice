@@ -6,6 +6,19 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-27 — UPDATE z upstreamu: v4.49.2 → v4.51.0
+
+Merge 49 commitů (mj. passkeys + obecné MFA + zámek session — migrace 0145–0147, branding profily e-mailů — 0141–0144, přehled dávky AI importu, MONETA e-mailová avíza, paušální daň 2026, upstream PWA #231; migrace 0140–0147). Šest konfliktů:
+
+1. `api/openapi.yaml` — upstream přešel z `nullable: true` na `type: [string, "null"]`; naše `internal_note` zachována a převedena na nový styl.
+2. `api/src/Action/Admin/UserAdminAction.php` — náš `UserSupplierAccess` (FÁZE 2) + upstream `SessionManager` (revokace sessions při změně hesla/deaktivaci): sloučeny importy, constructor i obě větve `update()` (náš `if (!empty($sets))` guard zůstal — supplier_ids může přijít samo); FORK metoda `normalizeSupplierIds` + upstream docblock u `log()`.
+3. `api/src/Action/Auth/MeAction.php` — sloučeny constructor závislosti: naše `UserSupplierAccess` + upstream passkey/MFA/lock (PasskeyCredentialRepository, MfaPolicyService, SessionLockPolicy, Clock).
+4. `api/src/Middleware/SupplierScopeMiddleware.php` — upstream early-bypass pro `/api/auth/webauthn|mfa|session/` PŘED naším allowed-set enforcementem (obojí).
+5. `api/src/Repository/InvoiceRepository.php` — `supportsInternalNote` (FÁZE 6) + upstream `branding_profile_id` resolve v `update()` — oba bloky vedle sebe.
+6. `web/index.html` — **FÁZE 4 (vlastní PWA přes `styles/`) nahrazena upstream PWA #231**: převzat `manifest.webmanifest` + `/pwa/` ikony + service worker (nginx aliasy z upstreamu je servírují — důvod našeho workaroundu padl); zachována naše theme-color `#4F46E5`. Odstraněny `styles/manifest.json`, `styles/icon-*.png`, `styles/apple-touch-icon.png`, `tools/generatePwaIcons.php`; v `web/public/manifest.webmanifest` sladěna `theme_color` na `#4F46E5` (jediný in-place zásah do upstream souboru — při dalším merge ohlídat). Sekce 5.3.1 manuálu je generická, platí dál. iOS/Android instalace z plochy dle staré FÁZE 4 zůstávají funkční (manifest je při instalaci zakešovaný), nové instalace jedou přes upstream manifest.
+
+Checklist FÁZE 1–7 prošel (supportsInternalNote ×3, pay-band, cash-documents v RoleMiddleware+Routes, UserSupplierAccess, custom-theme import, party-label, createCashDoc, i18n `cash` sekce cs+en, migrace 0900–0902). Fialové hexy v nových upstream souborech (BrandingProfilesSettings.vue) jsou e-mail branding pro klienty — dle FÁZE 3 záměrně nedotčeno. PHP soubory syntax-check OK. Migrace 0140–0147 + 0900–0902 aplikované, 0 pending; HTTP 200, VERSION 4.51.0, log čistý; `/manifest.webmanifest`, `/pwa/icon-192.png` i `/service-worker.js` vrací 200. Zálohy: `/root/backup-myinvoice-db-2026-07-27-1554.sql`, `/root/backup-myinvoice-data-2026-07-27-1554.tar.gz`.
+
 ## 2026-07-03 — ROZHODNUTÍ: update watcher (§ 19.4 manuálu) NEnasazovat
 
 Watcher = jednoklikový upgrade z UI (Systém → Aktualizace → tlačítko), určený pro standardní GHCR instalace. Tato instalace jede fork s buildem ze zdrojáku — update vyžaduje řízený proces (záloha → merge tagu → checklist úprav → řešení konfliktů → rebuild → verifikace). Watcher by proces obešel a mohl přepsat customizovaný build čistým upstream image (ztráta všech FÁZÍ do rebuildu). Denní kontrola verzí (cron-version-check) běží a stačí — o nových verzích informuje badge ve footeru; upgrade se provádí vědomě přes Claude. Watcher nasadit JEN pokud by se instalace někdy vrátila na čisté GHCR image.
