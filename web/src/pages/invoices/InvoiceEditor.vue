@@ -21,11 +21,15 @@ import { evalMath } from '@/directives/vMath'
 import { apiErrorMessage } from '@/api/errors'
 import { useSupplierStore } from '@/stores/supplier'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import Modal from '@/components/ui/Modal.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
 import { priceListApi, type PriceListItem } from '@/api/priceList'
+import { useAuthStore } from '@/stores/auth'
 
 const supplierStore = useSupplierStore()
+const auth = useAuthStore()
+const isAdmin = computed(() => auth.user?.role === 'admin')
 
 const route = useRoute()
 const router = useRouter()
@@ -37,7 +41,19 @@ const loaded = ref(false)
 const submitting = ref(false)
 const loadedRate = ref<{ rate: number; date: string; currency: string } | null>(null)
 const error = ref('')
-const isForce = computed(() => route.query.force === '1')
+// Odemčení uzamčeného (non-draft) dokladu — POUZE pro tuto návštěvu editoru.
+// Nastavuje se vědomým potvrzením v modalu (checkbox s následky); ?force=1
+// z URL se záměrně ignoruje a příznak nepřežije reload (žádná persistence).
+const forceEdit = ref(false)
+const unlockModalOpen = ref(false)
+const unlockAck = ref(false)
+// Uzamčený doklad: vystavená/odeslaná/zaplacená faktura bez odemčení.
+const isLocked = computed(() => editedStatus.value !== 'draft' && !forceEdit.value)
+function confirmUnlock() {
+  forceEdit.value = true
+  unlockModalOpen.value = false
+  unlockAck.value = false
+}
 
 // Předvolba typu dokladu z URL (`/invoices/new?type=proforma`). Whitelist — nesmí
 // projít nic jiného než povolené typy, jinak fallback na běžnou vydanou fakturu.
@@ -52,7 +68,7 @@ const editedVarsymbol = ref<string | null>(null)
 const editedType = ref<string>('invoice')
 // True, když u VYSTAVENÉ faktury (force-edit) uživatel přepnul typ → backend přečísluje.
 const typeWillRenumber = computed(() =>
-  isForce.value && editedStatus.value !== 'draft' && form.value.invoice_type !== editedType.value)
+  forceEdit.value && editedStatus.value !== 'draft' && form.value.invoice_type !== editedType.value)
 // Náhled čísla, které dostane faktura při Vystavení (pokud user nezadá ruční override).
 // Naplní se z API na změnu invoice_type / issue_date — per-supplier per-period live preview.
 const varsymbolAutoPreview = ref<string>('')
@@ -1046,7 +1062,7 @@ async function deleteWorkReport() {
   // Pokud je faktura už uložená, smaž i z DB; jinak jen lokálně.
   if (invoiceId.value) {
     try {
-      await invoicesApi.deleteWorkReport(invoiceId.value, isForce.value)
+      await invoicesApi.deleteWorkReport(invoiceId.value, forceEdit.value)
     } catch (e: any) {
       // 404 = výkaz v DB neexistuje (nový), pokračuj s lokálním clear
       if (e?.response?.status !== 404) {
@@ -1199,7 +1215,7 @@ async function deleteMaterial() {
         material_title: matTitle.value || t('invoice.wr_material_title'),
         material_vat_rate_id: matVatRateId.value,
         materials: [],
-      }, isForce.value)
+      }, forceEdit.value)
     } catch (e: any) {
       if (e?.response?.status !== 404) {
         error.value = apiErrorMessage(e, t('invoice.wr_delete_failed'))
@@ -1286,6 +1302,9 @@ function onAttachmentDrop(e: DragEvent) {
 }
 
 async function submit() {
+  // Uzamčený doklad: fieldset[disabled] blokuje UI, ale ctrl+s hotkey volá
+  // submit() přímo — guard tu musí být taky.
+  if (isLocked.value) return
   // Tiše vyhoď prázdné řádky (bez popisu i bez ceny) — uživatel přidal řádek a nezapsal ho.
   // Zároveň smaž z form.value.items, ať checkWorkReportSync vidí stejnou množinu jako payload.
   form.value.items = form.value.items.filter(it =>
@@ -1358,7 +1377,7 @@ async function submit() {
 
     let saved: Invoice
     if (isEdit.value && invoiceId.value) {
-      saved = await invoicesApi.update(invoiceId.value, payload, isForce.value)
+      saved = await invoicesApi.update(invoiceId.value, payload, forceEdit.value)
     } else {
       saved = await invoicesApi.create(payload)
     }
@@ -1391,7 +1410,7 @@ async function submit() {
             rate: Number(it.rate) || 0,
             order_index: i,
           })),
-        }, isForce.value)
+        }, forceEdit.value)
       } catch (e: any) {
         // Faktura je uložená, výkaz ne — nepokračuj v redirectu, ať uživatel nepřijde o data ve formuláři
         error.value = apiErrorMessage(e, t('invoice.wr_save_failed'))
@@ -1412,7 +1431,7 @@ async function submit() {
             unit_price: Number(m.unit_price) || 0,
             order_index: i,
           })),
-        }, isForce.value)
+        }, forceEdit.value)
       } catch (e: any) {
         error.value = apiErrorMessage(e, t('invoice.wr_save_failed'))
         return
@@ -1474,8 +1493,23 @@ async function deleteDraft() {
       </button>
     </div>
 
-    <!-- Banner pro úpravu vystavené faktury (admin force=1) -->
-    <div v-if="isForce && editedStatus !== 'draft'" class="mb-4 rounded-md border border-warning-500/50 bg-warning-50 p-4">
+    <!-- Uzamčený doklad (issued/sent/paid…): admin má tlačítko k odemčení, ostatní jen info -->
+    <div v-if="isLocked" class="mb-4 rounded-md border border-warning-500/50 bg-warning-50 p-4">
+      <div class="flex items-start gap-3">
+        <svg class="w-5 h-5 text-warning-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2zm10-10V7a4 4 0 0 0-8 0v4h8z"/></svg>
+        <div class="text-sm text-warning-600 flex-1">
+          <div class="font-semibold mb-1">{{ t('invoice.locked_title', { status: editedStatus }) }}</div>
+          <p>{{ isAdmin ? t('invoice.locked_body') : t('invoice.locked_body_nonadmin') }}</p>
+        </div>
+        <button v-if="isAdmin" type="button" @click="unlockModalOpen = true"
+          class="cursor-pointer shrink-0 h-9 px-4 bg-warning-500 hover:bg-warning-600 text-white text-sm font-medium rounded-md">
+          {{ t('invoice.unlock_button') }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Banner odemčené editace vystavené faktury (po potvrzení v modalu) -->
+    <div v-else-if="forceEdit && editedStatus !== 'draft'" class="mb-4 rounded-md border border-warning-500/50 bg-warning-50 p-4">
       <div class="flex items-start gap-3">
         <svg class="w-5 h-5 text-warning-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 0 0-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/></svg>
         <div class="text-sm text-warning-600">
@@ -1486,6 +1520,9 @@ async function deleteDraft() {
     </div>
 
     <form @submit.prevent="submit" class="space-y-4">
+      <!-- Uzamčený doklad: fieldset[disabled] vypne všechny vstupy i submit;
+           display:contents nechává grid/spacing layout beze změny. -->
+      <fieldset :disabled="isLocked" class="contents">
       <!-- Klient + zakázka + datumy -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
@@ -2426,7 +2463,33 @@ async function deleteDraft() {
           {{ submitting ? t('common.saving') : (isEdit ? t('common.save') : t('common.create')) }}
         </button>
       </div>
+      </fieldset>
     </form>
+
+    <!-- Potvrzení odemčení uzamčeného dokladu — vyžaduje zaškrtnutí, ne jen OK -->
+    <Modal v-if="unlockModalOpen" :title="t('invoice.unlock_modal_title')" width-class="max-w-lg" @close="unlockModalOpen = false; unlockAck = false">
+      <p class="text-sm text-neutral-700">{{ t('invoice.unlock_modal_intro', { varsymbol: editedVarsymbol ?? '—', status: editedStatus }) }}</p>
+      <ul class="mt-3 text-sm text-neutral-700 list-disc list-inside space-y-1">
+        <li>{{ t('invoice.unlock_c_varsymbol') }}</li>
+        <li>{{ t('invoice.unlock_c_snapshots') }}</li>
+        <li>{{ t('invoice.unlock_c_vat_reports') }}</li>
+        <li>{{ t('invoice.unlock_c_audit') }}</li>
+      </ul>
+      <label class="mt-4 flex items-start gap-2 text-sm text-neutral-800 cursor-pointer">
+        <input v-model="unlockAck" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-primary-600" />
+        <span>{{ t('invoice.unlock_ack') }}</span>
+      </label>
+      <template #footer>
+        <button type="button" @click="unlockModalOpen = false; unlockAck = false"
+          class="cursor-pointer h-9 px-4 border border-neutral-300 text-neutral-700 text-sm font-medium rounded-md hover:bg-neutral-50">
+          {{ t('common.cancel') }}
+        </button>
+        <button type="button" :disabled="!unlockAck" @click="confirmUnlock"
+          class="cursor-pointer h-9 px-4 bg-warning-500 hover:bg-warning-600 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md">
+          {{ t('invoice.unlock_button') }}
+        </button>
+      </template>
+    </Modal>
 
     <!-- Inline create modaly — neopouštějí editor, po save se entita auto-vybere -->
     <ClientFormModal v-if="clientModalOpen"

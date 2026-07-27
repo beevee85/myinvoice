@@ -304,9 +304,9 @@ const canForceEdit = computed(() =>
 
 function confirmForceEdit() {
   if (!invoice.value) return
-  const status = t('purchase_invoice.status.' + invoice.value.status)
-  if (!confirm(t('purchase_invoice.force_edit_confirm', { status }))) return
-  router.push(`/purchase-invoices/${invoice.value.id}/edit?force=1`)
+  // Bez ?force=1 — editor se otevře uzamčený a odemyká se až potvrzovacím
+  // modalem s checkboxem přímo v něm (příznak nepřežije reload).
+  router.push(`/purchase-invoices/${invoice.value.id}/edit`)
 }
 const canDelete = computed(() => invoice.value?.status === 'draft')
 
@@ -413,7 +413,7 @@ function actionBadgeClass(action: string): string {
   if (short.startsWith('transitioned')) return 'bg-primary-50 text-primary-700 border border-primary-500/40'
   if (short.includes('pdf'))            return 'bg-neutral-100 text-neutral-600 border border-neutral-200'
   if (short.includes('deleted') || short.includes('cancelled')) return 'bg-danger-50 text-danger-500 border border-danger-500/40'
-  if (short.includes('updated'))        return 'bg-warning-50 text-warning-600 border border-warning-500/40'
+  if (short.includes('updated') || short.includes('force'))     return 'bg-warning-50 text-warning-600 border border-warning-500/40'
   return 'bg-neutral-100 text-neutral-600 border border-neutral-200'
 }
 

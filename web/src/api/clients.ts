@@ -147,7 +147,10 @@ export interface BankLookupResult {
 
 export interface ViesLookupResult {
   valid: boolean
-  source: 'cache' | 'rest' | 'soap' | 'ares' | 'error'
+  // 'crpdph' = česká skupinová registrace (CZ699…) ověřená v registru plátců DPH, ne ve VIES
+  source: 'cache' | 'rest' | 'soap' | 'ares' | 'crpdph' | 'error'
+  /** True u DIČ skupinové registrace (CZ699…) — skupiny ve VIES nejsou. */
+  group_registration?: boolean
   name?: string
   address?: string
   parsed?: {

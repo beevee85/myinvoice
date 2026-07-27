@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { reportsApi, type DphPriznaniPreview, type DphSettings, type DphTrendRow, type DphDraftsPrediction } from '@/api/reports'
 import { apiErrorMessage } from '@/api/errors'
@@ -18,6 +19,8 @@ const trend = ref<DphTrendRow[]>([])
 const draftsPrediction = ref<DphDraftsPrediction | null>(null)
 const loading = ref(false)
 const error = ref('')
+// Chybějící EPO identifikace z 422 epo_identity_incomplete (BUG 6)
+const epoMissing = ref<Array<{ field: string; label: string; why: string }> | null>(null)
 
 // Period override (jinak default ze settings.vat_period)
 const periodOverride = ref<'monthly' | 'quarterly' | ''>('')
@@ -34,6 +37,7 @@ const currentQuarter = computed(() => Math.ceil(month.value / 3))
 async function loadAll() {
   loading.value = true
   error.value = ''
+  epoMissing.value = null
   try {
     const [s, p, tr, dp] = await Promise.all([
       reportsApi.dphSettings(),
@@ -46,7 +50,15 @@ async function loadAll() {
     trend.value = tr
     draftsPrediction.value = dp
   } catch (e) {
-    error.value = apiErrorMessage(e)
+    // 422 epo_identity_incomplete → speciální blok místo generické chyby (BUG 6)
+    const errObj = (e as any)?.response?.data?.error
+    if (errObj?.code === 'epo_identity_incomplete') {
+      epoMissing.value = errObj.missing ?? []
+      error.value = ''
+    } else {
+      epoMissing.value = null
+      error.value = apiErrorMessage(e)
+    }
   } finally {
     loading.value = false
   }
@@ -204,6 +216,18 @@ onMounted(loadAll)
 
     <div v-if="loading" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-8 text-center text-neutral-400">
       {{ t('common.loading') }}…
+    </div>
+
+    <!-- Nekompletní EPO identifikace — bez povinných polí XML na portálu neprojde (BUG 6) -->
+    <div v-else-if="epoMissing" class="bg-danger-50 border-2 border-danger-500 rounded-lg p-4">
+      <p class="font-semibold text-danger-700 mb-1">{{ t('reports.epo.incomplete_title') }}</p>
+      <p class="text-sm text-danger-700 mb-2">{{ t('reports.epo.incomplete_body') }}</p>
+      <ul class="text-sm text-danger-700 list-disc list-inside space-y-0.5">
+        <li v-for="m in epoMissing" :key="m.field"><strong>{{ m.label }}</strong> — {{ m.why }}</li>
+      </ul>
+      <RouterLink to="/admin/settings#epo" class="inline-flex items-center gap-1 mt-3 text-sm font-medium text-primary-700 hover:underline">
+        {{ t('reports.epo.open_settings') }} →
+      </RouterLink>
     </div>
 
     <div v-else-if="error" class="bg-danger-50 border border-danger-500/40 text-danger-500 rounded-md p-3 text-sm">
