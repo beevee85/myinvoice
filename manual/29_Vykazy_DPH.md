@@ -199,6 +199,9 @@ nebo v ARES. Builder ho normalizuje (odstraní `CZ-NACE ` prefix, padne na 6
 
 - **Toggle Měsíčně / Kvartálně** — override podle `supplier.vat_period`
 - **Month / Year picker** — pro měsíční; **Q1/Q2/Q3/Q4 picker** pro kvartální
+- **Forma podání** — Řádné (výchozí) / Opravné (§ 138 DŘ) / Dodatečné (§ 141 DŘ).
+  U dodatečného je povinné **Datum zjištění** důvodů pro podání (date picker se
+  zobrazí u ne-řádných forem) — do XML se propíše jako `dapdph_forma` + `d_zjist`.
 - **Stáhnout XML** — generuje DPHDP3 verze 03.01 pro EPO portál
 
 #### 4 KPI karty
@@ -206,7 +209,11 @@ nebo v ARES. Builder ho normalizuje (odstraní `CZ-NACE ` prefix, padne na 6
 - **DPH na výstupu** — z vydaných faktur (řádky 1-29)
 - **DPH na vstupu** — z přijatých faktur (řádky 40+)
 - **Daň k odvodu** NEBO **Nadměrný odpočet** (color coded)
-- **Termín podání** — 25. den následujícího měsíce (po kvartálu) s **countdown** (kolik dní zbývá, červené pokud po termínu)
+- **Termín podání** — 25. den následujícího měsíce (po kvartálu) s **countdown**
+  (kolik dní zbývá, červené pokud po termínu). Připadne-li 25. na sobotu, neděli
+  nebo státní svátek (vč. Velikonoc), termín se dle **§ 33 odst. 4 daňového řádu**
+  posouvá na nejbližší následující pracovní den — např. 25. 7. 2026 (sobota)
+  → pondělí 27. 7. 2026.
 
 #### Trend graf
 
@@ -236,7 +243,8 @@ pro kontrolu proti seznamu faktur i pro účetní.
 | Filtr | Pravidlo |
 |---|---|
 | **Období** | **Vystavené** se řadí podle **DUZP** (`COALESCE(tax_date, issue_date)`) — daň na výstupu vzniká k datu plnění. **Přijaté tuzemské** se řadí podle **pozdějšího z dat DUZP / vystavení** — nárok na odpočet nelze uplatnit dříve, než plátce drží daňový doklad (§ 73 odst. 1 písm. a ZDPH), takže faktura se zpětným DUZP, ale vystavená v pozdějším měsíci, spadá do měsíce vystavení. **Přijaté zahraniční reverse charge** (příznak RC + dodavatel mimo CZ — pořízení zboží z JČS, služby z EU/3. země, dovoz) se řadí **podle DUZP** — povinnost přiznat daň (ř. 3–13) vzniká k DUZP bez ohledu na to, kdy doklad dorazil (§ 25 odst. 1, § 24), a pozdní doklad neblokuje ani zrcadlový odpočet ř. 43 (§ 73 odst. 1 písm. b — nárok lze prokázat jiným způsobem). Tuzemský RC (kód 5) zůstává konzervativně na pozdějším z dat. (Zobrazené *Datum plnění* dál nese skutečné DUZP, mění se jen příslušnost k období.) Doklad bez vyplněného DUZP nevypadne. |
-| **Stav** | Vylučují se `draft` a `cancelled`. U vystavených navíc `proforma` (zálohová faktura není daňový doklad). |
+| **Stav** | Vylučují se `draft` a `cancelled`. U vystavených navíc `proforma`, u přijatých `advance` (zálohová výzva není daňový doklad). |
+| **Dobropisy** | Přijatý dobropis (`document_kind='credit_note'`) snižuje nárok na odpočet (ř. 40/41) — do výpočtu vstupuje vždy záporně, bez ohledu na znaménko uložení. Vydaný dobropis (uložen záporně) snižuje daň na výstupu (ř. 1/2) — viz i § 42 upozornění v náhledu. |
 | **Klasifikace** | Řádek se zařadí podle `vat_classification_code` (item-level override → header → auto-default podle sazby + RC + směru). Řádek bez výsledného kódu se do přiznání nedostane. |
 
 #### Přepočet měny
@@ -250,10 +258,10 @@ faktur je kurz 1. Přiznání je vždy v korunách, částky se zaokrouhlují na
 |---|---|---|
 | **1 / 2** | Tuzemská zdanitelná plnění na výstupu 21 % / 12 % | 1 / 2 |
 | **3 / 4** | Pořízení zboží z JČS (samovyměření) 21 % / 12 % | 23 |
-| **5 / 6** | Přijetí služby z EU | 24 |
+| **5 / 6** | Přijetí služby z EU (§ 9 odst. 1) | 24e |
 | **7 / 8** | Dovoz zboží ze 3. země | 25 |
 | **10 / 11** | Tuzemský reverse charge (příjemce) | 5 |
-| **12 / 13** | Přijetí služby ze 3. země | (custom) |
+| **12 / 13** | Přijetí služby ze 3. země / od osoby neusazené v tuzemsku | 24 |
 | **20-26** (oddíl C) | Dodání zboží do EU, vývoz, služby do JČS — **osvobozená plnění s nárokem na odpočet, jen základ bez daně** | 20 / 22 / 26 |
 | **40 / 41** | Nárok na odpočet — tuzemsko 21 % / 12 % | 40 / 41 |
 | **43** | Nárok na odpočet u samovyměřené daně (zrcadlo ř. 3-13) | (secondary) |
@@ -295,7 +303,9 @@ Každá faktura (nebo její řádek) má `vat_classification_code` (např. "1", 
 | **3** — Osvobozeno (řádek 3) | **42** — Bez nároku na odpočet |
 | **20** — EU dodání zboží (řádek 20) | **5** — Tuzemský reverse charge (řádek 10) |
 | **22** — EU služby | **23** — EU acquisition zboží (řádek 3) |
-| **26** — Export do 3. země | **24** — Přijatá služba z EU (řádek 5) |
+| **26** — Export do 3. země | **24e** — Přijatá služba z EU (řádek 5) |
+| | **24** — Přijatá služba ze 3. země (řádek 12) |
+| | **25** — Dovoz zboží ze 3. země (řádek 7) |
 
 ### Auto-default klasifikace
 
@@ -306,6 +316,20 @@ Pokud na fakturu/řádek manuálně nevybereš kód, systém **automaticky při�
 - Tax date faktury (pro budoucí změny sazby)
 
 Mapování čte z databáze `vat_classifications` table. Pokud admin v Codebooks tabu **Klasifikace DPH** upraví sazbu (např. 21% → 20% k 1.1.2027), defaulter automaticky chytne novou hodnotu.
+
+U **zahraničního reverse charge** bez výslovné klasifikace se auto-default řídí
+zemí dodavatele: **EU → 24e** (služba § 9/1, ř. 5), **3. země → 24** (ř. 12),
+tuzemsko → 5 (ř. 10). Zboží od služby ale z dat spolehlivě rozlišit nejde —
+default předpokládá **službu** a náhled Kontrolního hlášení u takového dokladu
+zobrazí adresné upozornění. Jde-li o **pořízení zboží z EU**, zvol ručně kód
+**23** (ř. 3); u **dovozu zboží ze 3. země** kód **25** (ř. 7).
+
+Má-li položka klasifikaci v režimu přenesené povinnosti (24e/23/24/25/5…),
+aplikace při uložení **automaticky zapne příznak reverse charge na hlavičce**
+dokladu (s upozorněním) — hlavička a položky si jinak odporují a doklad by se
+mohl zařadit do špatného období. Historická data srovná skript
+`php api/bin/backfill-reverse-charge-consistency.php` (výchozí režim dry-run,
+zápis až s `--apply`).
 
 U vystavených řádků se sazbou **0 %** se klasifikace záměrně nedoplňuje automaticky.
 Nulová sazba sama nerozlišuje osvobození bez nároku, vývoz, plnění mimo předmět
@@ -364,7 +388,14 @@ KH se podává **vždy měsíčně** s sekcemi:
 - **B.2** — Přijatá tuzemská plnění nad 10 000 Kč
 - **B.3** — Přijatá tuzemská plnění do 10 000 Kč (sumace)
 
-UI ukazuje **count řádků per sekce** + deadline countdown.
+UI ukazuje **count řádků per sekce** + deadline countdown (termín se stejně jako
+u přiznání posouvá z víkendu/svátku na nejbližší pracovní den, § 33/4 DŘ).
+
+V topbaru lze zvolit **Formu podání**: Řádné (výchozí) / **Opravné** (§ 101f
+odst. 1 — nahrazuje řádné KH před uplynutím lhůty) / **Následné** (§ 101f
+odst. 2 — po zjištění nesprávných údajů po lhůtě; podává se do 5 pracovních
+dnů, **kompletní znovu se všemi údaji**, ne jen rozdíl). U následného je
+povinné **Datum zjištění** důvodů — do XML jde jako `khdph_forma` + `d_zjist`.
 
 ### Pravidla zařazení do sekcí
 
@@ -376,6 +407,7 @@ Aby v reálně podaném KH seděly sekce, řídí se zařazení dokladů těmito
 | **Období** | `COALESCE(tax_date, issue_date)` v daném měsíci — DUZP, fallback datum vystavení. Doklad **bez DUZP** se zařadí podle data vystavení (nevypadne). |
 | **Stav** | Bez `draft` a `cancelled` (storno je součást auditní stopy, do KH nepatří). |
 | **Práh 10 000 Kč** | Porovnává se **`abs()` celkové částky vč. DPH** — záporný dobropis nad limit (např. −25 000 Kč) jde tedy správně do A.4/B.2 jednotlivě, ne do sumace. |
+| **Dobropisy** | **Přijatý dobropis** (`document_kind='credit_note'`) vstupuje do evidence **vždy záporně** — snižuje odpočet i sumace B.3, bez ohledu na to, s jakým znaménkem je v DB uložen (normalizace `-ABS()`; starší importy ukládaly kladně). **Vydaný dobropis** je uložen záporně a znaménko se zachovává. Dobropis nad 10 000 Kč vč. DPH tvoří **samostatný záporný řádek B.2/A.4** dle metodiky KH. |
 | **DIČ protistrany** | Do A.4/B.2 patří jen plnění **nad limit a s DIČ** plátce. Plnění **bez DIČ** (B2C, doklad od neplátce) jde do sumace **A.5/B.3 bez ohledu na částku** — dříve se nad limit bez DIČ tiše zahazovalo. |
 | **Jen zdanitelná plnění** | Do A.4/A.5/B.2/B.3 patří jen plnění se **zdanitelným základem 21/12 %**. Osvobozená, EU dodání, vývoz a reverse charge (kde je uložená sazba 0) se sem **nezařazují** (netvoří nulové řádky). |
 

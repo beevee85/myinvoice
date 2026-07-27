@@ -3546,11 +3546,16 @@ paths:
         - { in: query, name: year, required: true, schema: { type: integer } }
         - { in: query, name: month, schema: { type: integer } }
         - { in: query, name: quarter, schema: { type: integer } }
+        - { in: query, name: form, schema: { type: string, enum: [B, O, D, E], default: B },
+            description: 'Forma podání (dapdph_forma): B řádné, O opravné, D dodatečné, E dodatečné/opravné (§ 138, § 141 DŘ)' }
+        - { in: query, name: d_zjist, schema: { type: string, pattern: '^\d{2}\.\d{2}\.\d{4}$' },
+            description: 'Datum zjištění důvodů pro podání (DD.MM.YYYY) — povinné u form=D/E, volitelné u O' }
       responses:
         '200':
           description: XML download
           content:
             application/xml: {}
+        '400': { description: Neplatná forma podání nebo chybějící/neplatné d_zjist }
         '403': { description: Pouze admin/accountant }
 
   /api/v1/reports/dphkh1/preview:
@@ -3575,11 +3580,16 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: year,  required: true, schema: { type: integer } }
         - { in: query, name: month, required: true, schema: { type: integer } }
+        - { in: query, name: form, schema: { type: string, enum: [B, O, N, E], default: B },
+            description: 'Forma podání (khdph_forma): B řádné, O opravné, N následné, E následné/opravné (§ 101e–101f ZDPH)' }
+        - { in: query, name: d_zjist, schema: { type: string, pattern: '^\d{2}\.\d{2}\.\d{4}$' },
+            description: 'Datum zjištění důvodů pro podání (DD.MM.YYYY) — povinné u form=N/E, volitelné u O' }
       responses:
         '200':
           description: XML download
           content:
             application/xml: {}
+        '400': { description: Neplatná forma podání nebo chybějící/neplatné d_zjist }
 
   /api/v1/reports/dphshv/preview:
     get:
