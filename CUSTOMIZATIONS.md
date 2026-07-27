@@ -6,6 +6,14 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-28 — FORK RELEASE 4.51.1 + BUG 7: CZ-NACE (EPO chyba 30) a warning zaokrouhlení (chyba 49)
+
+**Charakter: BUGFIX KANDIDÁT PRO UPSTREAM** (součást jednoho PR `pr/vat-report-fixes`, commit BUG 7 cherry-picknut; VERSION bump je fork-only). VERSION 4.51.0 → **4.51.1** (propisuje se do verzeSW EPO výkazů).
+
+1. **CZ-NACE / c_okec:** ukládání normalizuje na 6místný kód číselníku MFČR (73.11/7311 → 731100, 62020 → 620200); pod 4 číslice (oddíl z ARES, např. „74") → 422 a neuloží se. ARES prefill bere NEJDELŠÍ kód z czNace, u pouhého oddílu nechává pole prázdné + `cz_nace_note` pro UI (Settings toast). Build (normalizeOkec) neúplný kód VYNECHÁ (c_okec optional — dřív by šel ven a EPO hlásilo propustnou chybu 30). UI: placeholder 731100, nový hint, inline validace, normalizace na blur. EpoIdentityValidator u DP3 varuje i na neúplný kód s odkazem na chybu 30. **Data: PROPSOL cz_nace_code opraveno „74" → „731100".**
+2. **Propustná chyba 49:** DP3 preview porovnává součet daně z dokladů na ř. 40/41 s round(zaokrouhlený základ × sazba) a rozdíl hlásí warningem („…neupravuj ji" — hodnota odpovídá KH B.2/B.3). XML se nikdy nepřepisuje, generování se neblokuje. Ověřeno na Q1/2026: rozdíl 1 Kč na ř. 40 (5227 vs 5228).
+3. Testy: CzNaceNormalizationTest, CzNaceAndRoundingTest (nové), AresNormalizeNaceTest přepsán na novou sémantiku (nejdelší kód; oddíl → prázdno+note). Manuál kap. 29 (tabulka c_okec, troubleshooting chyb 30/49). Suita 1942 zelených.
+
 ## 2026-07-27 — ZÁMEK DOKLADU V UI + EPO IDENTIFIKACE + VIES CZ699 (přímo na custom, 6 commitů 9c90c80f..e1395c0e)
 
 **Charakter: BUGFIX KANDIDÁT PRO UPSTREAM** — sloučeno s 1. dávkou do JEDNOHO PR: větev `pr/vat-report-fixes` na forku (11 commitů), podklad `/root/vat-fix-snapshots/GITHUB-ISSUE.md` + `GITHUB-PR.md`; po přijetí autorem blok odpadá.
