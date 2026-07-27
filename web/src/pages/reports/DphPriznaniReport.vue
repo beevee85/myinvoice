@@ -52,9 +52,20 @@ async function loadAll() {
   }
 }
 
+// Forma podání: B řádné / O opravné (§ 138 DŘ) / D dodatečné (§ 141 DŘ).
+// U dodatečného EPO vyžaduje datum zjištění důvodů (d_zjist) — datepicker níže.
+const form = ref<'B' | 'O' | 'D'>('B')
+const dZjist = ref('') // ISO (YYYY-MM-DD) z <input type="date">
+const dZjistRequired = computed(() => form.value === 'D')
+const dZjistEpo = computed(() => {
+  if (!dZjist.value) return ''
+  const [y, m, d] = dZjist.value.split('-')
+  return `${d}.${m}.${y}` // EPO formát DD.MM.YYYY
+})
+
 function downloadXml() {
   if (!preview.value) return
-  window.open(reportsApi.dphDownloadUrl(year.value, month.value, periodOverride.value || undefined), '_blank')
+  window.open(reportsApi.dphDownloadUrl(year.value, month.value, periodOverride.value || undefined, form.value, dZjistEpo.value), '_blank')
 }
 
 const monthOptions = computed(() =>
@@ -171,7 +182,19 @@ onMounted(loadAll)
         <select v-model.number="year" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
         </select>
-        <button type="button" @click="downloadXml" :disabled="loading || !preview"
+        <!-- Forma přiznání (řádné/opravné/dodatečné) + datum zjištění důvodů u dodatečného -->
+        <select v-model="form" :title="t('reports.form.label')"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+          <option value="B">{{ t('reports.form.b') }}</option>
+          <option value="O">{{ t('reports.form.o') }}</option>
+          <option value="D">{{ t('reports.form.d') }}</option>
+        </select>
+        <label v-if="form !== 'B'" class="inline-flex items-center gap-1.5 text-sm text-neutral-600">
+          <span>{{ t('reports.form.d_zjist') }}<span v-if="dZjistRequired" class="text-danger-500">*</span></span>
+          <input v-model="dZjist" type="date"
+            class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm" />
+        </label>
+        <button type="button" @click="downloadXml" :disabled="loading || !preview || (dZjistRequired && !dZjist)"
           class="cursor-pointer h-9 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md inline-flex items-center gap-1.5">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
           {{ t('reports.dph.download_xml') }}

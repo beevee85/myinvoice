@@ -660,7 +660,8 @@
     },
     "warning": {
       "credit_note_positive_total": "Credit note has a positive total — it should have negative amounts. A negative sign on one side is enough (e.g. −1 pc × 1000, or 1 pc × −1000); if both quantity and price are negative, VAT/control-statement reports will add the amount instead of subtracting it. Please check the signs.",
-      "vendor_non_payer_deduction": "The vendor is not a VAT payer, yet a VAT deduction is claimed. VAT cannot be deducted from a non-payer — please check the deduction setting."
+      "vendor_non_payer_deduction": "The vendor is not a VAT payer, yet a VAT deduction is claimed. VAT cannot be deducted from a non-payer — please check the deduction setting.",
+      "reverse_charge_forced_by_classification": "An item carries a reverse-charge VAT classification, so the reverse-charge flag was enabled on the document automatically — the header and items were contradictory otherwise."
     },
     "classification": {
       "title": "Classification",
@@ -669,7 +670,7 @@
       "manage_categories": "Manage categories in Codebooks →",
       "vat_classification": "VAT classification (VAT return)",
       "no_vat_class": "(auto-default by rate)",
-      "vat_classification_hint": "If unset, system auto-assigns code by VAT rate (21%→40, 12%→41, 0%→42, reverse→5).",
+      "vat_classification_hint": "If unset, the system auto-assigns a code by VAT rate and vendor country: 21% → 40, 12% → 41 (domestic deduction); reverse charge: domestic → 5 (§ 92a, row 10), EU → 24e (service, row 5), non-EU → 24 (service, row 12). GOODS acquired from the EU (23, row 3) or imported (25, row 7) cannot be auto-detected — pick manually.",
       "vat_deduction": "VAT deduction entitlement",
       "vat_deduction_hint": "“None” = invoice is excluded from the VAT ledger and DPHDP3/KH (accounting cost only). “Proportional” = partial deduction §75 — enter the % the deduction is reduced to.",
       "tax_deductible": "Tax-deductible expense",
@@ -682,7 +683,9 @@
     },
     "vat_deduction_percent": "Deduction %",
     "vat_deduction_percent_hint": "Percentage the VAT deduction is reduced to (e.g. car 70 % for business). The rest is a non-deductible part.",
-    "force_edit": "Edit (force)",
+    "force_edit": "Unlock for editing",
+    "force_edit_warning": "Unlocked editing of a received invoice (admin)",
+    "force_edit_body": "You are editing an invoice outside the draft state. Changes overwrite stored values and may affect already-filed VAT reports and bank matching. The action is recorded in the audit log.",
     "force_delete": "Delete (force)",
     "force_edit_hint": "Admin only — edit received/booked/paid invoice. For paid invoices, beware: changing the amount may break matching with the bank transaction. Totals will be recomputed.",
     "force_edit_confirm": "Really edit invoice with status '{status}'? For paid invoices: changing the amount may break the bank-transaction match. Continue?",
@@ -1590,7 +1593,7 @@
       "title": "Classification",
       "vat_classification": "VAT classification (VAT return)",
       "no_vat_class": "(auto-default by rate)",
-      "vat_classification_hint": "Auto-assigned by VAT rate (21%→1, 12%→2, 0%→3, reverse→20).",
+      "vat_classification_hint": "Auto-assigned by VAT rate and customer country: 21% → 1, 12% → 2; reverse charge: domestic → 25s (§ 92, row 25 + KH A.1), EU → 20 (goods supply, row 20), non-EU → 26 (row 22). A SERVICE supplied to the EU (22, row 21) cannot be auto-detected — pick manually.",
       "revenue_category": "Revenue category (optional)",
       "revenue_category_none": "no category",
       "revenue_category_placeholder": "e.g. consulting, product, hosting",
@@ -3595,6 +3598,14 @@
   "reports": {
     "disclaimer_title": "Generated XML is only a helper",
     "disclaimer_body": "Before submitting to the MF ČR EPO portal, always verify with your accountant or tax advisor. Tested on limited dataset — the app does not guarantee regulatory correctness.",
+    "form": {
+      "label": "Submission form",
+      "b": "Regular",
+      "o": "Corrective",
+      "n": "Follow-up",
+      "d": "Supplementary",
+      "d_zjist": "Discovery date"
+    },
     "oss": {
       "title": "OSS return",
       "subtitle": "Quarterly One Stop Shop overview from manually marked issued invoice rows.",
