@@ -352,3 +352,16 @@ Akce s přijatými fakturami jsou logované v aktivním logu (Systém → Log):
 Všechny operace jsou dostupné i přes REST API (`/api/v1/purchase-invoices/*`) —
 viz [Swagger UI](/api/docs) nebo [Redoc](/api/reference). PAT token musí mít scope
 `read_write` pro mutace.
+
+## 17.9 Koš a mazání přijatých dokladů
+
+Přijaté faktury mají stejný koš jako vydané (viz [§ 9.7](09_Faktury.md)):
+**Do koše** (vratné, admin i účetní, povinný důvod) → **Smazat trvale**
+(jen admin, jen z koše, s opsáním čísla dokladu). Typický případ je chybný
+doklad z AI importu — dřív šel jen stornovat, teď ho lze bez stopy v
+přehledech uklidit do koše a definitivně smazat.
+
+Do koše se přepneš tlačítkem **Koš** v pravém horním rohu seznamu. Platí
+stejná blokující pravidla (uzavřené DPH období, vazby na zálohy a párování,
+export) i stejné chování číselné řady (poslední číslo se uvolní, jinak
+vznikne mezera).
