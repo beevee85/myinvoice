@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.52.1] — 2026-07-28
+
+### Fixed
+
+- **Sestavení v4.52.0 neprošlo v CI kvůli testovací fixture.** Integrační test přístupu k firmám (`SupplierMembershipTest`) zakládal uživatele s doslovným bcrypt řetězcem o 61 znacích, přestože `users.password_hash` je `CHAR(60)`. Lokální MariaDB běží bez STRICT režimu a přebytečný znak tiše uřízne, CI ho má zapnutý — a tam se stejný zápis změní v `SQLSTATE[22001] 1406 Data too long`, takže celá třída (10 testů) skončila chybou. Fixture nově hash generuje přes `password_hash(..., PASSWORD_BCRYPT)`, čímž má vždy přesně 60 znaků; heslo v testu stejně nikdo nepoužívá, session i tokeny se vytvářejí přímo. **Běhového kódu se oprava netýká** — chování aplikace je shodné s v4.52.0, upgrade je čistě formální a nevyžaduje žádnou akci. (#246)
+
 ## [4.52.0] — 2026-07-28
 
 ### Added
