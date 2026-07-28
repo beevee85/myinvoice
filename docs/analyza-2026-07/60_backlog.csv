@@ -1,14 +1,13 @@
 id;nazev;domena;persona;priorita;narocnost;zdroj_inspirace
 N-001;Adopce hotovych funkci (banka, cenik, ucet ucetni, vat_period, recurring);pruvodni/provozni;A+B;Must;S;interni zjisteni instance (50_fork_odchylky.md par. 5)
-N-002;Automaticky DDKPZ po uhrade zalohovky + hlidani 15denni lhuty;Prodej/DPH;A+B;Must;M;https://www.fakturoid.cz/podpora/faktury/danovy-doklad-k-platbe + https://www.idoklad.cz/podpora/danove-doklady-k-platbe
+N-002;Automaticky DDKPZ po uhrade zalohovky + hlidani 15denni lhuty (vydana strana);Prodej/DPH;A+B;Must;M;https://www.fakturoid.cz/podpora/faktury/danovy-doklad-k-platbe + https://www.idoklad.cz/podpora/danove-doklady-k-platbe
 N-003;Napojeni Fio banky (avizo parser + API fetcher);Finance/Banka;A+B;Must;M;https://www.fakturoid.cz/podpora/parovani/fio-api
-N-008;Dokoncit DDKPZ na prijate strane (migrace 0904, in-flight);Nakup/DPH;B;Must;M;interni rozdelana prace + docs/dph-zalohy.md
 N-004;Samoobsluzny pristup pro ucetni (pozvanka e-mailem);Dane a ucetni;B;Should;M;https://www.fakturoid.cz/podpora/pro-ucetni/pristup-pro-ucetni
 N-005;Zamykani obdobi + notifikace zmen v uzavrenem obdobi;Dane a ucetni;B;Should;L;https://www.fakturoid.cz/podpora/ucetnictvi/zamykani-dokladu
 N-006;Balicek obdobi - stav predani podkladu a kontrola uplnosti;Dane a ucetni/Exporty;B;Should;L;https://www.fakturoid.cz/podpora/pro-ucetni/fakturoid-pro-ucetni-funkce
 N-007;E-mailovy inbox pro prijate doklady (IMAP);Nakup;A+B;Should;M;https://www.fakturoid.cz/podpora/naklady/krabice-na-naklady + https://www.idoklad.cz/podpora/inbox
 N-011;Onboarding checklist "Objevte" + kontextova napoveda z obrazovek;System a UX;A;Should;M;https://www.fakturoid.cz/podpora/nastaveni/obrazovka-objevte
-N-019;Rozsireni zadane feature kose (retence, mezery v rade, vazby DDKPZ);Prodej/System;A+B;Should;S;https://www.fakturoid.cz/podpora/faktury/kos + https://podpora.redbit.cz/navod/smazani-storno-archivace-faktury/
+N-020;Dopocet rozdilu pro dodatecne priznani DPH (par. 141/2 DR) - re-enable forem D/E;Dane a ucetni;B;Should;M;interni dluh po commitu 247867e4 (nikdo z konkurence to neumi)
 N-009;Cenove nabidky s online prijetim;Prodej;A;Could;L;https://podpora.redbit.cz/navod/cenove-nabidky/ + https://www.fakturoid.cz/podpora/faktury/webnabidka
 N-013;Pripominka pred splatnosti + podklad pro penale;Finance/Upominky;A;Could;M;https://www.fakturoid.cz/podpora/automatizace/upominky
 N-012;Inline naseptavani polozek v editoru + klavesove zkratky;Prodej/UX;A;Could;M;https://podpora.redbit.cz/navod/naseptavac-radku-faktur/ + https://www.fakturoid.cz/podpora/nastaveni/tipy-ke-zrychleni

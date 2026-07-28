@@ -1,6 +1,6 @@
 # 20 · Persona A — běžný uživatel (majitel malého s.r.o. / OSVČ)
 
-Průchod ročním cyklem fakturace v MyInvoice (stav fork 4.51.1, instance faktury.betka.eu)
+Průchod ročním cyklem fakturace v MyInvoice (stav fork ⟳ 4.52.1, instance faktury.betka.eu)
 a srovnání s tím, jak stejný krok řeší iDoklad, Vyfakturuj a Fakturoid. Konkrétní kontext
 instance: 2 firmy (BEKRON, PROPSOL — obě s.r.o., plátci DPH), fakturuje jednatel sám,
 platby označuje ručně (banka nenapojena), účetnictví zpracovává externí účetní.
