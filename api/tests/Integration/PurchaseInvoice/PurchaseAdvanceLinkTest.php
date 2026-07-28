@@ -242,16 +242,17 @@ final class PurchaseAdvanceLinkTest extends TestCase
 
     /**
      * Seznam přijatých faktur — měsíční mezisoučet v hlavičce (totals_per_currency)
-     * NESMÍ dvojitě počítat spárované/zaplacené zálohy. Řádky se i tak všechny zobrazí.
+     * vylučuje VŠECHNY zálohy (migrace 0906: záloha není nositelem nákladu), stejně
+     * jako costs_by_month, dashboard i CRM. Řádky se i tak všechny zobrazí.
      */
-    public function testListMonthHeaderTotalsExcludeSettledAndPaidAdvance(): void
+    public function testListMonthHeaderTotalsExcludeAllAdvances(): void
     {
         $vendor = $this->vendor('Dodavatel I', 'CZ10000009');
         $final  = $this->purchase($vendor, 'invoice', 'LH-FAK',     'received', 20000.0, $this->d(10));
         $paired = $this->purchase($vendor, 'advance', 'LH-ZAL-P',   'received',  5000.0, $this->d(9));
         $this->repo->linkAdvance($final, $paired, $this->supplierId);                       // → vyloučena
         $this->purchase($vendor, 'advance', 'LH-ZAL-PAID', 'paid',     7000.0, $this->d(8)); // → vyloučena
-        $this->purchase($vendor, 'advance', 'LH-ZAL-OPEN', 'received', 3000.0, $this->d(7)); // → započítána
+        $this->purchase($vendor, 'advance', 'LH-ZAL-OPEN', 'received', 3000.0, $this->d(7)); // → vyloučena (0906)
 
         $res = $this->repo->listGroupedByMonth(
             ['supplier_id' => $this->supplierId, 'vendor_id' => $vendor, 'year' => self::YEAR]
@@ -268,8 +269,9 @@ final class PurchaseAdvanceLinkTest extends TestCase
             if ($tc['currency'] === 'CZK') { $czk = $tc; break; }
         }
         self::assertNotNull($czk, 'CZK mezisoučet existuje');
-        self::assertEqualsWithDelta(23000.0, (float) $czk['with_vat'], 0.01,
-            'mezisoučet = faktura 20000 + otevřená záloha 3000; spárovaná (5000) a zaplacená (7000) vyloučeny');
+        self::assertEqualsWithDelta(20000.0, (float) $czk['with_vat'], 0.01,
+            'mezisoučet = jen řádná faktura 20000; všechny zálohy (spárovaná 5000, zaplacená 7000 '
+            . 'i otevřená 3000) jsou vyloučené — shodně s costs_by_month, dashboardem i CRM');
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
