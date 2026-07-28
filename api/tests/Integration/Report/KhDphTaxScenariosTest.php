@@ -1932,6 +1932,45 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->assertFalse($final['vat_sign_mismatch']);
     }
 
+    /**
+     * BOD 5 audit (2026-07-28) — round-trip link → unlink musí vrátit PŘESNĚ původní
+     * rozklad základ/daň, i když ho z hrubé částky nelze zrekonstruovat koeficientem
+     * (475 992,00 → 393 381,82/82 610,18 ≠ doklad dodavatele 393 381,83/82 610,17).
+     * Snapshot rekapitulace drží migrace 0907.
+     */
+    public function testSettlementUnlinkRestoresExactVendorRecap(): void
+    {
+        $container = Bootstrap::buildApp()->getContainer();
+        $svc = $container->get(\MyInvoice\Service\Invoice\PurchaseSettlementService::class);
+        $vendor = $this->client('CZ dodavatel — unlink restore', $this->czId, 'CZ699003841', vendor: true);
+        $d = sprintf('%04d-%02d-18', self::YEAR, self::MONTH);
+        $this->purchase('FV-UNLINK', $vendor, '40', false, 'invoice', $d, $d, [[393381.83, 82610.17, 21.0]]);
+        $finalId = end($this->purchaseIds);
+        // Rekapitulace DPH dle dokladu dodavatele (§ 73) — tak fakturu ukládá i AI import;
+        // bez ní by přepočet vždy vyrobil 82 610,18 (round(393 381,83 × 21 %)).
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET vat_overrides = ? WHERE id = ?')
+            ->execute([json_encode([['rate' => 21.0, 'base' => 393381.83, 'vat' => 82610.17]]), $finalId]);
+        $this->purchase('ZD-UNLINK-1', $vendor, '40', false, 'tax_document', $d, $d, [[16528.93, 3471.07, 21.0]]);
+        $zd1 = end($this->purchaseIds);
+        $this->purchase('ZD-UNLINK-2', $vendor, '40', false, 'tax_document', $d, $d, [[376852.89, 79139.11, 21.0]]);
+        $zd2 = end($this->purchaseIds);
+
+        $svc->link($finalId, $zd1, $this->supplierId);
+        $svc->link($finalId, $zd2, $this->supplierId);
+        $paired = $this->piRepo->find($finalId, $this->supplierId);
+        $this->assertEqualsWithDelta(0.00, (float) $paired['total_without_vat'], 0.001, 'po párování § 37a rozdíl 0');
+
+        $svc->unlink($finalId, $zd2, $this->supplierId);
+        $svc->unlink($finalId, $zd1, $this->supplierId);
+        $restored = $this->piRepo->find($finalId, $this->supplierId);
+        $this->assertEqualsWithDelta(393381.83, (float) $restored['total_without_vat'], 0.001, 'unlink vrací základ dle dokladu');
+        $this->assertEqualsWithDelta(82610.17, (float) $restored['total_vat'], 0.001, 'unlink vrací daň dle dokladu');
+        $this->assertSame([], $restored['settlement_documents']);
+        $this->assertNotNull($restored['vat_overrides'], 'původní rekapitulace § 73 se vrátila');
+        $this->assertEqualsWithDelta(82610.17, (float) $restored['vat_overrides'][0]['vat'], 0.001,
+            'obnovený override nese hodnoty dokladu, ne settlementový cíl');
+    }
+
     /** BOD 1 — regresní invariant: rozpis DPH se základem a daní s opačným znaménkem = ke kontrole. */
     public function testVatSignMismatchFlagged(): void
     {

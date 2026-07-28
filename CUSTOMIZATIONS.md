@@ -13,6 +13,7 @@ Uživatel chce tyto fork funkce navrhnout autorovi. Detailní checklist „před
 | Opravy DPH výkazů + zámek dokladu + EPO identifikace + CZ-NACE | 2026-07-27/28 | **odesláno** — issue #244, PR #245 | čeká na autora |
 | Koš + tvrdé mazání dokladů (0905) | 2026-07-28 | čeká na ověření v provozu | breaking DELETE (nutná zpětná kompatibilita), fork-only DDKPZ vazby v policy, přečíslovat migraci |
 | Omezení uživatele na vybrané firmy (0900) | 2026-07-02 FÁZE 2 | **připraveno, nejsnazší kandidát** | jen přečíslovat migraci; jinak zpětně kompatibilní, otestované, zdokumentované |
+| Daňový doklad k přijaté záloze (DDKPZ) + § 37a na přijaté straně (0904, 0906) | 2026-07-28 (obě dávky) | **kandidát — potvrdil uživatel 28. 7. 2026** | přečíslovat migrace 0904/0906 do upstream řady; oddělit od fork-only koše (DocumentTrashPolicy, TrashGuard v settlement akcích) a od sazby CZ-NA, pokud ji upstream nechce; doplnit kapitolu manuálu + openapi (endpointy settlement-doc-candidates / final-candidates / link-settlement-doc) |
 
 Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jednu z těchto funkcí upstream nemá.
 
@@ -32,7 +33,14 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 7. **Prefix `ZA`** pro zálohové faktury (dřív `NU` dle daňového uplatnění); nápovědy v editoru i v nastavení číselné řady vyjmenovávají všechny prefixy (PF/PN, KU/KN, NU/NN, DZ, ZA).
 8. **Cizí migrace 0905 (koš) — oprava FK:** `deleted_document_snapshots.supplier_id` byl `TINYINT UNSIGNED` proti `supplier.id INT UNSIGNED` → `ALTER` selhal s errno 150 a migrace by shodila nasazení. Opraveno na `INT UNSIGNED`.
 
-**Testy:** +9 v `KhDphTaxScenariosTest` (§ 37a: plná záloha na nulu vč. slevy v mínusu, doplatek, přeplatek se sazbou zálohy, dvě sazby se zálohou jen k jedné, invariant znamének, zaplacená záloha mimo DPH/KH/DzP, 15denní lhůty ve 4 scénářích). `PurchaseAdvanceLinkTest` srovnán na novou sémantiku nákladů. Suita **1975 zelených**, type-check OK. Pozn.: testy vyžadují v `cfg.php` sekci `varsymbol.templates` (jinak 6 chyb v `RecurringGeneratorTest`).
+**Exporty (ověřeno na izolovaném klonu, XSD EPO i ISDOC prošly) — viz kapitola „Exporty a výkazy" v `docs/dph-zalohy.md`:**
+- KH: DDKPZ v B.2 (DIČ dodavatele, ev. číslo dokladu dodavatele, DPPD = den přijetí úplaty), konečná faktura s nulovým rozdílem se **neuvádí**, zálohy nikde (ověřeno i ve stavu `received`). DP3 ř. 40 sedí v obou měsících záloh.
+- ISDOC: DDKPZ `DocumentType 5` + `VATApplicable true`; **nově se generuje `<TaxedDeposits>` + `AlreadyClaimed*`/`Difference*`** (dřív odešla konečná faktura jako doklad se samými nulami a dvěma záhadnými minusovými řádky). Auto-odpočtové řádky se do `InvoiceLines` nevypisují. Zálohová faktura (typ 4) má nulovou rekapitulaci DPH a **žádné `TaxPointDate`** (dřív se DUZP dopočítalo z data vystavení — `PurchaseInvoiceExportService`).
+- Pohoda: DDKPZ = `receivedInvoice` (v `invoiceTypeType` typ pro přijatý daňový doklad k záloze neexistuje), zálohy `receivedAdvanceInvoice`.
+- `unlink()` vrací **přesně** předchozí rekapitulaci — snapshot `settlement_recap_backup` (migrace **0907**); z hrubé částky ji zrekonstruovat nelze (475 992,00 → vždy 393 381,82/82 610,18, i když doklad nesl …,83/…,17).
+- `buildVatBreakdown` zaokrouhluje (dřív 0,00 vycházelo jako 5.8e-11 v JSON API).
+
+**Testy:** +10 v `KhDphTaxScenariosTest` (§ 37a: plná záloha na nulu vč. slevy v mínusu, doplatek, přeplatek se sazbou zálohy, dvě sazby se zálohou jen k jedné, invariant znamének, zaplacená záloha mimo DPH/KH/DzP, 15denní lhůty ve 4 scénářích). `PurchaseAdvanceLinkTest` srovnán na novou sémantiku nákladů. Suita **1975 zelených**, type-check OK. Pozn.: testy vyžadují v `cfg.php` sekci `varsymbol.templates` (jinak 6 chyb v `RecurringGeneratorTest`).
 
 **Jak ověřit po merge:** `vendor/bin/phpunit --filter 'Settlement37a|VatSignMismatch|TaxDocumentDeadline|PaidAdvanceNever'`; v editoru přijaté faktury má typ „Záloha" skryté DUZP a položky sazbu „Mimo DPH"; detail konečné faktury s DDKPZ nezobrazuje prázdný panel zálohy.
 

@@ -110,8 +110,43 @@ final class PurchaseInvoiceExportService
                 'total_without_vat'      => (float) ($it['total_without_vat'] ?? 0),
                 'total_vat'              => (float) ($it['total_vat'] ?? 0),
                 'total_with_vat'         => (float) ($it['total_with_vat'] ?? 0),
+                // Auto-odpočtový řádek § 37a — ISDOC ho nevypisuje mezi InvoiceLines,
+                // odpočet zdaněných záloh se komunikuje přes <TaxedDeposits>.
+                'is_settlement_deduction' => !empty($it['settlement_source_purchase_invoice_id']),
             ];
         }, $pi['items'] ?? []);
+
+        // Zúčtované daňové doklady k přijaté záloze (§ 37a) — pro ISDOC <TaxedDeposits>
+        // a trojici AlreadyClaimed*/Difference* v rekapitulaci.
+        $taxedDeposits = [];
+        foreach ($pi['settlement_documents'] ?? [] as $doc) {
+            $full = $this->repo->find((int) $doc['id'], $supplierId);
+            if ($full === null || ($full['status'] ?? '') === 'cancelled') {
+                continue;
+            }
+            $perRate = [];
+            foreach ($full['items'] ?? [] as $it) {
+                $rate = (float) ($it['vat_rate_snapshot'] ?? 0);
+                $key  = number_format($rate, 2, '.', '');
+                $perRate[$key] ??= ['rate' => $rate, 'base' => 0.0, 'vat' => 0.0];
+                $perRate[$key]['base'] += (float) ($it['total_without_vat'] ?? 0);
+                $perRate[$key]['vat']  += (float) ($it['total_vat'] ?? 0);
+            }
+            foreach ($perRate as $g) {
+                $base = round($g['base'], 2);
+                $vat  = round($g['vat'], 2);
+                if ($base === 0.0 && $vat === 0.0) {
+                    continue;
+                }
+                $taxedDeposits[] = [
+                    'id'              => (string) ($full['vendor_invoice_number'] ?? $full['varsymbol'] ?? ('#' . $doc['id'])),
+                    'variable_symbol' => (string) ($full['payment_variable_symbol'] ?? $full['vendor_invoice_number'] ?? ''),
+                    'rate'            => $g['rate'],
+                    'base'            => $base,
+                    'vat'             => $vat,
+                ];
+            }
+        }
 
         return [
             'id'              => $pi['id'],
@@ -126,7 +161,11 @@ final class PurchaseInvoiceExportService
             'internal_document_number' => $pi['varsymbol'] ?? null,
             'varsymbol'       => $pi['varsymbol'] ?? $pi['vendor_invoice_number'] ?? ('P-' . $pi['id']),
             'issue_date'      => $pi['issue_date'],
-            'tax_date'        => $pi['tax_date'] ?? $pi['issue_date'],
+            // Zálohová faktura není daňový doklad → DUZP nemá a NESMÍ se dopočítat
+            // z data vystavení (jinak ho ISDOC/Pohoda vyexportují jako TaxPointDate).
+            'tax_date'        => ($pi['document_kind'] ?? '') === 'advance'
+                ? null
+                : ($pi['tax_date'] ?? $pi['issue_date']),
             'due_date'        => $pi['due_date'],
             'currency'        => $pi['currency'] ?? 'CZK',
             'exchange_rate'   => $pi['exchange_rate'] ?? null,
@@ -151,6 +190,7 @@ final class PurchaseInvoiceExportService
             // (bez nich byly summary/TaxTotal nulové). Repo je dodává ve find(), ale jiným
             // klíčováním než vydané → přemapovat na kanonický tvar `rate`/`base`/`vat`.
             'vat_breakdown'     => self::normalizeVatBreakdown($pi['vat_breakdown'] ?? []),
+            'taxed_deposits'    => $taxedDeposits,
             'totals'            => $pi['totals'] ?? [
                 'without_vat' => (float) ($pi['total_without_vat'] ?? 0),
                 'vat'         => (float) ($pi['total_vat'] ?? 0),

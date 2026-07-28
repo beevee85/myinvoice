@@ -142,6 +142,13 @@ final class PurchaseSettlementService
             }
 
             if ($applyDeduction) {
+                // Snapshot rekapitulace před PRVNÍM párováním — odpojení posledního
+                // dokladu pak vrátí přesně původní rozklad základ/daň (z hrubé částky
+                // ho zrekonstruovat nelze, viz migrace 0907).
+                if (($final['settlement_documents'] ?? []) === []
+                    && ($final['settlement_recap_backup'] ?? null) === null) {
+                    $this->repo->setSettlementRecapBackup($finalId, $supplierId, $final['vat_overrides'] ?? null);
+                }
                 $this->applyDeductionRows($final, $doc, $finalId, $taxDocId, $supplierId);
             }
 
@@ -204,20 +211,34 @@ final class PurchaseSettlementService
                 // dodavatele, kterou by přirozený dopočet z řádků mohl minout o haléř).
                 $beforeByRate = $this->breakdownByRate($final['items'] ?? []);
                 $docByRate    = $this->breakdownByRate($doc['items'] ?? []);
-                $targets = [];
-                foreach ($docByRate as $key => $g) {
-                    $before = $beforeByRate[$key] ?? ['base' => 0.0, 'vat' => 0.0];
-                    $targets[$key] = [
-                        'rate'  => $g['rate'],
-                        'gross' => round(
-                            round((float) $before['base'] + (float) $before['vat'], 2)
-                            + round($g['base'] + $g['vat'], 2),
-                            2
-                        ),
-                    ];
+                $remaining = array_filter(
+                    $final['settlement_documents'] ?? [],
+                    static fn (array $d) => (int) $d['id'] !== $taxDocId
+                );
+                $backup = $final['settlement_recap_backup'] ?? null;
+                if ($remaining === [] && is_array($backup) && array_key_exists('overrides', $backup)) {
+                    // Poslední doklad odpojen → vrátit přesně stav před párováním
+                    // (vč. rekapitulace § 73 dle dokladu dodavatele) a snapshot zahodit.
+                    $restored = is_array($backup['overrides']) ? $backup['overrides'] : null;
+                    $this->repo->setVatOverrides($finalId, $supplierId, $restored);
+                    $this->repo->setSettlementRecapBackup($finalId, $supplierId, false);
+                    $this->calculator->recompute($finalId);
+                } else {
+                    $targets = [];
+                    foreach ($docByRate as $key => $g) {
+                        $before = $beforeByRate[$key] ?? ['base' => 0.0, 'vat' => 0.0];
+                        $targets[$key] = [
+                            'rate'  => $g['rate'],
+                            'gross' => round(
+                                round((float) $before['base'] + (float) $before['vat'], 2)
+                                + round($g['base'] + $g['vat'], 2),
+                                2
+                            ),
+                        ];
+                    }
+                    $this->applyGrossTargets($finalId, $supplierId, $final['vat_overrides'] ?? null, $targets);
+                    $this->pinAllSettlementRows($finalId, $supplierId);
                 }
-                $this->applyGrossTargets($finalId, $supplierId, $final['vat_overrides'] ?? null, $targets);
-                $this->pinAllSettlementRows($finalId, $supplierId);
             }
 
             if ($started) {

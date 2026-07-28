@@ -488,6 +488,21 @@ final class PurchaseInvoiceRepository
         }
     }
 
+    /**
+     * Uloží / zahodí snapshot rekapitulace DPH pořízený před prvním párováním § 37a
+     * (migrace 0907). `$overrides === false` snapshot smaže; jinak se uloží obálka
+     * `{"overrides": …}`, aby šlo odlišit uložené NULL od chybějícího snapshotu.
+     *
+     * @param list<array<string,mixed>>|null|false $overrides
+     */
+    public function setSettlementRecapBackup(int $id, int $supplierId, array|null|false $overrides): void
+    {
+        $json = $overrides === false ? null : json_encode(['overrides' => $overrides]);
+        $this->db->pdo()->prepare(
+            'UPDATE purchase_invoices SET settlement_recap_backup = ? WHERE id = ? AND supplier_id = ?'
+        )->execute([$json, $id, $supplierId]);
+    }
+
     /** Smaže auto-generované odpočtové řádky § 37a daného zdroje z konečné faktury. */
     public function deleteSettlementRows(int $finalId, int $sourceTaxDocId): void
     {
@@ -2358,6 +2373,13 @@ final class PurchaseInvoiceRepository
             $buckets[$key]['vat']         += (float) ($item['total_vat'] ?? 0);
             $buckets[$key]['with_vat']    += (float) ($item['total_with_vat'] ?? 0);
         }
+        // Sčítání floatů nechává smetí (0,00 vyjde jako 5.8e-11) — do exportů to
+        // neteče (number_format), ale do JSON API a UI ano.
+        foreach ($buckets as $k => $b) {
+            $buckets[$k]['without_vat'] = round($b['without_vat'], 2);
+            $buckets[$k]['vat']         = round($b['vat'], 2);
+            $buckets[$k]['with_vat']    = round($b['with_vat'], 2);
+        }
         ksort($buckets);
         return array_values($buckets);
     }
@@ -2396,6 +2418,13 @@ final class PurchaseInvoiceRepository
             $raw = $row['vat_overrides'];
             $decoded = (is_string($raw) && $raw !== '') ? json_decode($raw, true) : null;
             $row['vat_overrides'] = (is_array($decoded) && $decoded !== []) ? $decoded : null;
+        }
+        // Snapshot rekapitulace před prvním párováním § 37a (migrace 0907):
+        // {"overrides": <hodnota|null>} — samotné NULL = snapshot neexistuje.
+        if (array_key_exists('settlement_recap_backup', $row)) {
+            $raw = $row['settlement_recap_backup'];
+            $decoded = (is_string($raw) && $raw !== '') ? json_decode($raw, true) : null;
+            $row['settlement_recap_backup'] = is_array($decoded) ? $decoded : null;
         }
         return $row;
     }

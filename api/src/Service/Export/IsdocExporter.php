@@ -273,7 +273,13 @@ final class IsdocExporter
 
         // Invoice lines
         $lines = $dom->createElementNS(self::NS, 'InvoiceLines');
-        $items = $invoice['items'] ?? [];
+        // Auto-odpočtové řádky § 37a mezi InvoiceLines NEPATŘÍ — odúčtování zdaněných
+        // záloh se v ISDOC komunikuje kolekcí <TaxedDeposits> a částkami AlreadyClaimed*.
+        // Ponechat je zde by odpočet započetlo dvakrát.
+        $items = array_values(array_filter(
+            $invoice['items'] ?? [],
+            static fn (array $it) => empty($it['is_settlement_deduction'])
+        ));
         foreach ($items as $i => $item) {
             $line = $dom->createElementNS(self::NS, 'InvoiceLine');
             $this->el($dom, $line, 'ID', (string) ($i + 1));
@@ -327,14 +333,69 @@ final class IsdocExporter
         }
         $root->appendChild($lines);
 
+        // TaxedDeposits — odúčtování ZDANĚNÝCH záloh (daňových zálohových listů /
+        // daňových dokladů k přijaté záloze). ISDOC pro ně má vlastní kolekci hned za
+        // InvoiceLines; jejich peněžním projevem je trojice AlreadyClaimed* v rekapitulaci
+        // (viz níže), NIKOLI PaidDepositsAmount (ta patří jen NEdaňovým zálohám).
+        $taxedDeposits = $invoice['taxed_deposits'] ?? [];
+        if ($taxedDeposits !== []) {
+            $depositsEl = $dom->createElementNS(self::NS, 'TaxedDeposits');
+            foreach ($taxedDeposits as $dep) {
+                $depBase = (float) ($dep['base'] ?? 0);
+                $depVat  = (float) ($dep['vat'] ?? 0);
+                $d = $dom->createElementNS(self::NS, 'TaxedDeposit');
+                $this->el($dom, $d, 'ID', (string) ($dep['id'] ?? ''));
+                $this->el($dom, $d, 'VariableSymbol', (string) ($dep['variable_symbol'] ?? ''));
+                // XSD: kladné částky (odečítají se výpočtem přes AlreadyClaimed*).
+                $this->elAmountCurr($dom, $d, 'TaxableDepositAmount', abs($depBase), true);
+                $this->elAmountCurr($dom, $d, 'TaxInclusiveDepositAmount', abs($depBase + $depVat), true);
+                $cat = $dom->createElementNS(self::NS, 'ClassifiedTaxCategory');
+                $this->el($dom, $cat, 'Percent', $this->fmt((float) ($dep['rate'] ?? 0)));
+                $this->el($dom, $cat, 'VATCalculationMethod', '0');
+                $d->appendChild($cat);
+                $depositsEl->appendChild($d);
+            }
+            $root->appendChild($depositsEl);
+        }
+
         // VAT breakdown
         $taxTotal = $dom->createElementNS(self::NS, 'TaxTotal');
         $vatBreakdown = $invoice['vat_breakdown'] ?? [];
         $totalVat = 0.0;
+        // Zdaněné zálohy per sazba (§ 37a) — „na záloze již uplatněno".
+        $claimedByRate = [];
+        foreach ($taxedDeposits as $dep) {
+            $key = number_format((float) ($dep['rate'] ?? 0), 2, '.', '');
+            $claimedByRate[$key] ??= ['base' => 0.0, 'vat' => 0.0];
+            $claimedByRate[$key]['base'] += abs((float) ($dep['base'] ?? 0));
+            $claimedByRate[$key]['vat']  += abs((float) ($dep['vat'] ?? 0));
+        }
+        $claimedBaseTotal = 0.0;
+        $claimedGrossTotal = 0.0;
+
         foreach ($vatBreakdown as $row) {
             $rate = (float) $row['rate'];
-            $base = (float) $row['base'];
-            $vat  = (float) $row['vat'];
+            // `vat_breakdown` nese ROZDÍL podle § 37a (odpočtové řádky jsou v součtu);
+            // ISDOC chce v `TaxableAmount` PŘEDPIS (celé plnění), v `AlreadyClaimed*`
+            // zdaněné zálohy a v `Difference*` rozdíl. Předpis proto dopočteme zpět.
+            $diffBase = (float) $row['base'];
+            $diffVat  = (float) $row['vat'];
+            $key = number_format($rate, 2, '.', '');
+            $claimedBase = (float) ($claimedByRate[$key]['base'] ?? 0.0);
+            $claimedVat  = (float) ($claimedByRate[$key]['vat'] ?? 0.0);
+            $base = round($diffBase + $claimedBase, 2);
+            $vat  = round($diffVat + $claimedVat, 2);
+            $claimedBaseTotal  += $claimedBase;
+            $claimedGrossTotal += $claimedBase + $claimedVat;
+            // Nedaňový doklad (zálohová faktura, neplátce): rekapitulace nesmí nést daň —
+            // jinak doklad tvrdí „nejsem předmětem DPH" a zároveň vykazuje DPH.
+            if (!$isTaxDocument) {
+                $base = round($base + $vat, 2);
+                $vat  = 0.0;
+                $diffBase = round($diffBase + $diffVat, 2);
+                $diffVat  = 0.0;
+                $rate = 0.0;
+            }
             $totalVat += $vat;
 
             // TaxSubTotal řadí <…Curr> PŘED base sourozence (viz XSD sekvence).
@@ -342,13 +403,12 @@ final class IsdocExporter
             $this->elAmountCurr($dom, $sub, 'TaxableAmount', $base, true);
             $this->elAmountCurr($dom, $sub, 'TaxAmount', $vat, true);
             $this->elAmountCurr($dom, $sub, 'TaxInclusiveAmount', $base + $vat, true);
-            // Required by ISDOC schema (zálohové odpočty — pro běžnou fakturu = 0)
-            $this->elAmountCurr($dom, $sub, 'AlreadyClaimedTaxableAmount', 0.0, true);
-            $this->elAmountCurr($dom, $sub, 'AlreadyClaimedTaxAmount', 0.0, true);
-            $this->elAmountCurr($dom, $sub, 'AlreadyClaimedTaxInclusiveAmount', 0.0, true);
-            $this->elAmountCurr($dom, $sub, 'DifferenceTaxableAmount', $base, true);
-            $this->elAmountCurr($dom, $sub, 'DifferenceTaxAmount', $vat, true);
-            $this->elAmountCurr($dom, $sub, 'DifferenceTaxInclusiveAmount', $base + $vat, true);
+            $this->elAmountCurr($dom, $sub, 'AlreadyClaimedTaxableAmount', $claimedBase, true);
+            $this->elAmountCurr($dom, $sub, 'AlreadyClaimedTaxAmount', $claimedVat, true);
+            $this->elAmountCurr($dom, $sub, 'AlreadyClaimedTaxInclusiveAmount', $claimedBase + $claimedVat, true);
+            $this->elAmountCurr($dom, $sub, 'DifferenceTaxableAmount', $diffBase, true);
+            $this->elAmountCurr($dom, $sub, 'DifferenceTaxAmount', $diffVat, true);
+            $this->elAmountCurr($dom, $sub, 'DifferenceTaxInclusiveAmount', $diffBase + $diffVat, true);
 
             // V TaxSubTotal se používá <TaxCategory> (ne <ClassifiedTaxCategory>!) —
             // sekvence: Percent + TaxScheme? + VATApplicable? + LocalReverseChargeFlag?
@@ -378,16 +438,20 @@ final class IsdocExporter
         // LegalMonetaryTotal řadí <…Curr> AŽ ZA base sourozence (opačně než
         // InvoiceLine / TaxTotal — viz XSD sekvence).
         $mon = $dom->createElementNS(self::NS, 'LegalMonetaryTotal');
-        $this->elAmountCurr($dom, $mon, 'TaxExclusiveAmount', $base, false);
-        $this->elAmountCurr($dom, $mon, 'TaxInclusiveAmount', $tot, false);
+        // U dokladu se zúčtovanými daňovými zálohami je „předpis" celé plnění
+        // (rozdíl § 37a + zdaněné zálohy); Difference* pak nese samotný rozdíl.
+        $grossBase = round($base + $claimedBaseTotal, 2);
+        $grossTot  = round($tot + $claimedGrossTotal, 2);
+        $this->elAmountCurr($dom, $mon, 'TaxExclusiveAmount', $grossBase, false);
+        $this->elAmountCurr($dom, $mon, 'TaxInclusiveAmount', $grossTot, false);
         // Záloha je NEDAŇOVÁ proforma — DPH se přiznává až na tomto konečném dokladu,
         // takže `AlreadyClaimed*` (= již daňově zúčtováno z daňových záloh) jsou 0 a
         // `Difference*` = plná hodnota dokladu. Odečtení uhrazené zálohy se komunikuje
         // POUZE přes `PaidDepositsAmount` (snižuje `PayableAmount`). Dřív se sem dávala
         // záloha do AlreadyClaimedTaxInclusive, což bylo vnitřně rozporné (základ 0,
         // ale částka s DPH = celá záloha → nesmyslná implikovaná DPH).
-        $this->elAmountCurr($dom, $mon, 'AlreadyClaimedTaxExclusiveAmount', 0.0, false);
-        $this->elAmountCurr($dom, $mon, 'AlreadyClaimedTaxInclusiveAmount', 0.0, false);
+        $this->elAmountCurr($dom, $mon, 'AlreadyClaimedTaxExclusiveAmount', round($claimedBaseTotal, 2), false);
+        $this->elAmountCurr($dom, $mon, 'AlreadyClaimedTaxInclusiveAmount', round($claimedGrossTotal, 2), false);
         $this->elAmountCurr($dom, $mon, 'DifferenceTaxExclusiveAmount', $base, false);
         $this->elAmountCurr($dom, $mon, 'DifferenceTaxInclusiveAmount', $tot, false);
         $this->elAmountCurr($dom, $mon, 'PayableRoundingAmount', $rounding, false);

@@ -212,6 +212,105 @@ Přijata úplata (záloha) před uskutečněním plnění
         — vracení „od konce").
 ```
 
+---
+
+## Exporty a výkazy — jak se DDKPZ propisuje (ověřeno 28. 7. 2026)
+
+Aplikace sama kontrolní hlášení nepodává, správnost tedy stojí na exportech.
+Níže je ověřený stav (testovací scénář: DDKPZ 20 000 Kč v 05/2026, DDKPZ
+455 992 Kč v 06/2026, konečná faktura 475 992 Kč v 07/2026, dvě zálohové
+faktury; XSD validace EPO i ISDOC prošly).
+
+### Kontrolní hlášení a přiznání
+
+| Doklad | KH | Přiznání |
+|---|---|---|
+| DDKPZ nad 10 000 Kč vč. daně | **B.2** — DIČ dodavatele, ev. číslo dokladu dodavatele, DPPD = den přijetí úplaty | ř. 40 (základ + daň) |
+| DDKPZ do 10 000 Kč vč. daně | **B.3** kumulativně | ř. 40 |
+| Konečná faktura, rozdíl § 37a ≠ 0 | B.2/B.3 podle **absolutní hodnoty rozdílu** | ř. 40 rozdílem |
+| Konečná faktura, rozdíl § 37a = 0 | **neuvádí se** | nevstupuje |
+| Zálohová faktura (`advance`) | nikdy | nikdy |
+
+**Nulový rozdíl se do KH neuvádí.** Vyplývá to z konstrukce KH: do A.4/A.5 se
+uvádí, co plátce přiznává na ř. 1/2, do B.2/B.3, z čeho uplatňuje odpočet na
+ř. 40/41 (Metodická informace GFŘ ke KH, kap. 1.1 a 1.10). Číselně to potvrzují
+[Časté dotazy FS, oddíl VI](https://financnisprava.gov.cz/cs/dane/dane/dan-z-pridane-hodnoty/kontrolni-hlaseni-dph/caste-dotazy-a-odpovedi):
+u plnění za 60 500 Kč vč. daně jde do KH pouze doplatek 8 470 Kč (a to do A.5,
+protože limit se posuzuje z hodnoty **doplatku**, ne z hodnoty plnění); přeplatek
+se uvádí v záporné hodnotě. Nulový rozdíl proto nemá co vykázat.
+
+⚠ **Pozor na výjimku:** tohle platí jen tam, kde byl na zálohu skutečně vystaven
+daňový doklad. Pokud DDKPZ neexistuje (plnění nebylo při přijetí úplaty známo
+dostatečně určitě — § 20a odst. 3), § 37a se nepoužije a do KH vstupuje **celá**
+hodnota konečné faktury. Systém se řídí existencí spárovaného DDKPZ, ne vzhledem
+tisku faktury.
+
+### ISDOC
+
+| Typ dokladu | `<DocumentType>` | `VATApplicable` |
+|---|---|---|
+| Faktura (i vyúčtovací) | 1 | true |
+| Opravný doklad (dobropis) | 2 | true |
+| **Zálohová faktura (nedaňový zálohový list)** | **4** | **false** |
+| **Daňový doklad k přijaté záloze (daňový zálohový list)** | **5** | **true** |
+| Dobropis k DZL | 6 | true |
+| Zjednodušený daňový doklad | 7 | true |
+
+Odpočet zdaněných záloh se v ISDOC **nevyjadřuje** přes `PaidDepositsAmount` —
+ta patří výhradně **nedaňovým** zálohám a snižuje jen `PayableAmount`. Zdaněné
+zálohy mají vlastní kolekci `<TaxedDeposits>/<TaxedDeposit>` (ID dokladu,
+variabilní symbol, částka bez daně, částka s daní, sazba) a peněžně se projeví
+trojicí `AlreadyClaimed*` v `TaxSubTotal` i `LegalMonetaryTotal`:
+
+```
+TaxableAmount              = celé plnění (předpis)
+AlreadyClaimedTaxableAmount = základ ze zdaněných záloh
+DifferenceTaxableAmount    = rozdíl podle § 37a  (obdobně TaxAmount / TaxInclusive)
+```
+
+Náš export konečné faktury s plně zúčtovanou zálohou tedy vypadá takto
+(předpis 393 381,82 + 82 610,18, zálohy tytéž, rozdíl nula):
+
+```xml
+<TaxedDeposits>
+  <TaxedDeposit><ID>ZD915260089</ID><VariableSymbol>815260087</VariableSymbol>
+    <TaxableDepositAmount>16528.93</TaxableDepositAmount>
+    <TaxInclusiveDepositAmount>20000.00</TaxInclusiveDepositAmount>
+    <ClassifiedTaxCategory><Percent>21.00</Percent><VATCalculationMethod>0</VATCalculationMethod></ClassifiedTaxCategory>
+  </TaxedDeposit>
+  …
+</TaxedDeposits>
+<TaxSubTotal>
+  <TaxableAmount>393381.82</TaxableAmount><TaxAmount>82610.18</TaxAmount>
+  <AlreadyClaimedTaxableAmount>393381.82</AlreadyClaimedTaxableAmount>
+  <AlreadyClaimedTaxAmount>82610.18</AlreadyClaimedTaxAmount>
+  <DifferenceTaxableAmount>0.00</DifferenceTaxableAmount><DifferenceTaxAmount>0.00</DifferenceTaxAmount>
+</TaxSubTotal>
+```
+
+Auto-odpočtové řádky § 37a se do `<InvoiceLines>` **nevypisují** (jinak by se
+odpočet započítal dvakrát) a zálohová faktura (typ 4) nese nulovou rekapitulaci
+DPH a žádné `TaxPointDate` — nedaňový doklad DUZP nemá.
+
+### Pohoda XML
+
+Pohoda v číselníku `invoiceTypeType` typ „přijatý daňový doklad k záloze" nemá.
+DDKPZ proto jde jako **`receivedInvoice`** (daňový doklad na vstupu) — nikoli
+jako `receivedAdvanceInvoice`, ta je vyhrazená nedaňové záloze. Rozpis DPH
+(`homeCurrency`) nese DDKPZ v plné výši, konečná faktura s nulovým rozdílem
+samé nuly. Zálohové faktury se exportují jako `receivedAdvanceInvoice`.
+
+### Praktická past při ručním pořízení DDKPZ
+
+Kalkulátor počítá daň řádku ze sazby (16 528,93 × 21 % = **3 471,08**), doklad
+dodavatele ale nese daň spočtenou shora z úplaty (20 000 × 21/121 = **3 471,07**).
+Rozdíl haléře by se objevil v KH proti údaji dodavatele a rozbil párování na
+finanční správě. Systém proto u DDKPZ používá rekapitulaci dle dokladu
+(`vat_overrides`, § 73) a při párování § 37a přišpendlí odpočtovým řádkům
+hodnoty **doslova z DDKPZ**; haléřový rozdíl se přesune na nejsilnější řádek
+téže sazby, takže součet dokladu i výkazy zůstávají přesné. **Při ručním
+pořízení DDKPZ vždy vyplňte rekapitulaci DPH přesně podle dokladu dodavatele.**
+
 ## Korekce vstupního zadání (zjištěno rešerší)
 
 1. Lhůta 15 dnů je v § 28 **odst. 8** (ne odst. 5 — přečíslováno novelami).
