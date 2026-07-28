@@ -37,6 +37,9 @@ final class InvoicePaymentService
         private readonly Connection $db,
         private readonly InvoicePdfRenderer $pdf,
         private readonly StatsRecomputer $stats,
+        // FORK 0920: režim 'auto' zakládá koncept DDKPZ i mimo bankovní cesty.
+        // Nullable kvůli izolované konstrukci v testech (vzor: StatementMatcher).
+        private readonly ?PaymentTaxDocumentCreator $taxDocs = null,
     ) {}
 
     /**
@@ -199,6 +202,30 @@ final class InvoicePaymentService
 
             $transition = $this->recomputeLocked($pdo, $invoiceId);
 
+            // FORK 0920: režim 'auto' — koncept DDKPZ rovnou po zaevidování ČÁSTEČNÉ
+            // úhrady zálohy (§ 28 odst. 1 písm. d). Plná úhrada se vědomě vynechává:
+            // tam vzniká vyúčtovací faktura, jejíž odpočet § 37a se počítá jen
+            // z NEkonceptových DDKPZ — koncept vedle konceptu finálu by po vystavení
+            // obojího zdanil touž úplatu dvakrát. Lhůtu u plné úhrady hlídá připomínka
+            // v „Akce pro tebe". Guardy (plátce, RC, existující finál, idempotence)
+            // drží PaymentTaxDocumentCreator, proto je catch tichý — shodně
+            // s StatementMatcher a BankStatementAction.
+            $taxDocumentId = null;
+            if ($this->taxDocs !== null
+                && (string) $invoice['invoice_type'] === 'proforma'
+                && !$transition['became_paid']
+                && $this->advanceTaxDocMode((int) $invoice['supplier_id']) === 'auto'
+            ) {
+                try {
+                    $taxDocumentId = $this->taxDocs->createForPayment(
+                        $paymentId,
+                        isset($opts['created_by']) ? (int) $opts['created_by'] : 0
+                    );
+                } catch (\RuntimeException) {
+                    // Neplátce DPH / reverse charge / existující finál — doklad se nevystavuje.
+                }
+            }
+
             if ($ownsTransaction) {
                 $pdo->commit();
             }
@@ -212,10 +239,28 @@ final class InvoicePaymentService
         $this->afterTransition($invoiceId, $transition);
 
         return [
-            'payment_id'  => $paymentId,
-            'became_paid' => $transition['became_paid'],
-            'remaining'   => $transition['remaining'],
+            'payment_id'      => $paymentId,
+            'became_paid'     => $transition['became_paid'],
+            'remaining'       => $transition['remaining'],
+            // FORK 0920: id konceptu DDKPZ, pokud ho režim 'auto' právě založil.
+            'tax_document_id' => $taxDocumentId,
         ];
+    }
+
+    /**
+     * FORK 0920: režim vystavování DDKPZ. Neproběhlá migrace nesmí shodit evidenci
+     * platby — chybějící sloupec se chová jako vypnutá funkce.
+     */
+    private function advanceTaxDocMode(int $supplierId): string
+    {
+        try {
+            $stmt = $this->db->pdo()->prepare('SELECT advance_tax_doc_mode FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+
+            return (string) ($stmt->fetchColumn() ?: 'offer');
+        } catch (\Throwable) {
+            return 'none';
+        }
     }
 
     /**

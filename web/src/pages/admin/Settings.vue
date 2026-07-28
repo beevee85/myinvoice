@@ -340,6 +340,8 @@ async function saveSupplier() {
       // FORK 0905: koš pro doklady
       doc_trash_enabled: supplier.value.doc_trash_enabled,
       doc_trash_retention_days: supplier.value.doc_trash_retention_days,
+      // FORK 0920: režim DDKPZ po úhradě zálohy
+      advance_tax_doc_mode: supplier.value.advance_tax_doc_mode,
       pohoda_account_code: supplier.value.pohoda_account_code,
       pohoda_centre_code: supplier.value.pohoda_centre_code,
       pohoda_activity_code: supplier.value.pohoda_activity_code,
@@ -678,6 +680,21 @@ async function removeLogo() {
 
       <!-- FORK F8: Vzhled PDF dokladu (patička, právní věta, razítko, čárový kód) + živý náhled -->
       <DocumentAppearanceSettings />
+
+      <!-- FORK 0920 — Daňový doklad k přijaté záloze (§ 28 odst. 1 písm. d, odst. 8 ZDPH) -->
+      <section v-if="supplier.is_vat_payer" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.advance_tax_doc_section') }}</h2>
+        <div class="max-w-xl">
+          <label class="block text-sm text-neutral-700 mb-1">{{ t('settings.advance_tax_doc_mode') }}</label>
+          <select v-model="supplier.advance_tax_doc_mode"
+                  class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="none">{{ t('settings.advance_tax_doc_mode_none') }}</option>
+            <option value="offer">{{ t('settings.advance_tax_doc_mode_offer') }}</option>
+            <option value="auto">{{ t('settings.advance_tax_doc_mode_auto') }}</option>
+          </select>
+          <p class="text-xs text-neutral-500 mt-1">{{ t('settings.advance_tax_doc_mode_hint') }}</p>
+        </div>
+      </section>
 
       <!-- Číslování faktur — samostatný box -->
       <!-- FORK 0905 — Koš pro doklady (vydané i přijaté faktury) -->

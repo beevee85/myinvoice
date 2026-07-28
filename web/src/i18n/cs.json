@@ -2807,6 +2807,12 @@
     "field_balance": "Disponibilní zůstatek"
   },
   "settings": {
+    "advance_tax_doc_section": "Daňový doklad k přijaté záloze",
+    "advance_tax_doc_mode": "Po úhradě zálohové faktury",
+    "advance_tax_doc_mode_none": "Nic nehlídat",
+    "advance_tax_doc_mode_offer": "Připomenout lhůtu 15 dnů (doporučeno)",
+    "advance_tax_doc_mode_auto": "Připomenout a u částečné úhrady rovnou založit koncept",
+    "advance_tax_doc_mode_hint": "Plátce DPH musí vystavit daňový doklad do 15 dnů od přijetí úplaty (§ 28 ZDPH). Připomínka se drží v „Akce pro tebe“, dokud k platbě není daňový doklad nebo vystavená vyúčtovací faktura. Zálohy v přenesené daňové povinnosti se nehlídají.",
     "doc_trash_section": "Koš pro doklady",
     "doc_trash_enabled": "Používat koš pro doklady (vydané i přijaté faktury)",
     "doc_trash_enabled_hint": "Smazané doklady se nejdřív přesunou do koše a jdou obnovit. Když je koš vypnutý, „Do koše“ maže rovnou nevratně (se stejným dialogem i auditem).",

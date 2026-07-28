@@ -311,7 +311,24 @@ final class SettingsAction
             'pdf_attribution_enabled', 'pdf_legal_text', 'pdf_barcode_enabled',
             // FORK (beevee85): koš pro doklady (migrace 0905)
             'doc_trash_enabled', 'doc_trash_retention_days',
+            // FORK (beevee85): režim DDKPZ po úhradě zálohy (migrace 0920)
+            'advance_tax_doc_mode',
         ];
+
+        // FORK 0920: režim DDKPZ — prázdná hodnota spadne na výchozí 'offer'.
+        // Neplátce DPH neblokujeme (nastavení je neškodné, běhová logika si
+        // plátcovství hlídá sama v CrmAggregationService i PaymentTaxDocumentCreator).
+        if (array_key_exists('advance_tax_doc_mode', $body)) {
+            $mode = trim((string) ($body['advance_tax_doc_mode'] ?? ''));
+            if ($mode === '') {
+                $mode = 'offer';
+            }
+            if (!in_array($mode, ['none', 'offer', 'auto'], true)) {
+                return Json::error($response, 'validation_failed',
+                    "advance_tax_doc_mode musí být 'none', 'offer' nebo 'auto'.", 400);
+            }
+            $body['advance_tax_doc_mode'] = $mode;
+        }
 
         // FORK 0905: retence koše — celé dny 0–3650 (0 = neomezeně)
         if (array_key_exists('doc_trash_retention_days', $body)) {
@@ -679,6 +696,8 @@ final class SettingsAction
         // FORK 0905: koš pro doklady
         $row['doc_trash_enabled']        = (bool) ($row['doc_trash_enabled'] ?? true);
         $row['doc_trash_retention_days'] = (int) ($row['doc_trash_retention_days'] ?? 30);
+        // FORK 0920: režim DDKPZ po úhradě zálohové faktury
+        $row['advance_tax_doc_mode']     = (string) ($row['advance_tax_doc_mode'] ?? 'offer');
         $row['payment_thanks_enabled']        = (bool) ($row['payment_thanks_enabled'] ?? false);
         $row['payment_thanks_auto_send']      = (bool) ($row['payment_thanks_auto_send'] ?? false);
         $row['payment_thanks_default_checked']= (bool) ($row['payment_thanks_default_checked'] ?? false);

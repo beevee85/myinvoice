@@ -358,7 +358,47 @@ Workflow:
 4. Vytvoří se **daňový doklad** typu „Faktura" s automatickým **odečtem
    zaplacené zálohy** (záporná položka „Odpočet zálohy 92605001").
 
-### 10.8.1 Zpětné propojení už existujících dokladů
+### 10.8.1 Hlídání lhůty pro daňový doklad k přijaté záloze
+
+Plátce DPH musí k přijaté úplatě vystavit daňový doklad **do 15 dnů** ode dne, kdy
+úplatu přijal (§ 28 odst. 1 písm. d a odst. 8 zákona o DPH). Aplikace lhůtu hlídá
+sama: jakmile se u zálohové faktury zaeviduje platba, objeví se v **Přehled → Akce
+pro tebe** položka „Vystav daňový doklad k přijaté záloze" s termínem podle
+nejbližší lhůty. Po jejím uplynutí zčervená.
+
+Připomínka zmizí, jakmile nastane kterákoli z těchto situací:
+
+- k platbě je **vystaven** daňový doklad k platbě (tlačítko v detailu zálohové
+  faktury) — rozpracovaný koncept nestačí, lhůta běží dál,
+- k záloze je **vystavena** vyúčtovací faktura, jejíž DUZP spadá do 15 dnů od úplaty
+  **a do stejného zdaňovacího období** — pak povinnost splní jediný doklad. Když
+  vyúčtování přeteče do dalšího měsíce (u čtvrtletního plátce čtvrtletí), daň
+  z úplaty patří do dřívějšího období a připomínka zůstává.
+
+Nehlídají se zálohy v **přenesené daňové povinnosti** (z úplaty se daň nepřiznává)
+a připomínka se negeneruje **neplátcům DPH**. Připomínka nemá časový limit — dokud
+povinnost trvá, drží se v seznamu; pro uklizení starších případů použij u položky
+volbu skrytí.
+
+Aplikace nepozná případ, kdy plnění **není ke dni úplaty dostatečně určité**
+(§ 20a odst. 2 — neznámá sazba, druh plnění nebo místo plnění; typicky paušální
+zálohy na energie). Tam se daň z úplaty nepřiznává a daňový doklad se nevystavuje —
+připomínku u takové zálohy skryj, nebo hlídání vypni.
+
+Chování se nastavuje v **Nastavení → Daňový doklad k přijaté záloze**:
+
+| Volba | Co dělá |
+|---|---|
+| Nic nehlídat | Vypne připomínku. |
+| Připomenout lhůtu 15 dnů | Výchozí — jen upozorní, doklad vystavíš sám. |
+| Připomenout a u částečné úhrady rovnou založit koncept | Navíc po částečné úhradě sám založí koncept daňového dokladu; zkontroluješ ho a vystavíš. |
+
+Poslední volba se vědomě neuplatní u **plné** úhrady zálohy — tam se zakládá
+koncept vyúčtovací faktury a dva souběžné koncepty by vedly ke dvojímu zdanění
+téže úplaty. U plné úhrady tedy vystav buď vyúčtovací fakturu, nebo daňový doklad
+k platbě; lhůtu i tak hlídá připomínka.
+
+### 10.8.2 Zpětné propojení už existujících dokladů
 
 Pokud už máš v systému **oba doklady samostatně** (typicky po importu) — zálohovou
 i daňovou fakturu — lze je spárovat zpětně, z **kterékoli** strany:

@@ -7188,6 +7188,14 @@ components:
         default_branding_profile_id: { type: [integer, "null"], readOnly: true }
         auto_send_reminders: { type: boolean }
         reminder_days_after_due: { type: integer, minimum: 1, maximum: 365 }
+        advance_tax_doc_mode:
+          type: string
+          enum: [none, offer, auto]
+          description: |
+            Chování po úhradě zálohové faktury (plátce DPH, § 28 odst. 1 písm. d
+            a odst. 8 ZDPH — 15 dnů od přijetí úplaty): `none` nehlídá nic,
+            `offer` (výchozí) drží připomínku v CRM action items, `auto` navíc
+            u částečné úhrady rovnou založí koncept daňového dokladu k platbě.
 
     SupplierFull:
       type: object
@@ -7254,6 +7262,10 @@ components:
             reminders: { type: string, enum: ["off", cc, bcc] }
             approvals: { type: string, enum: ["off", cc, bcc] }
           example: { documents: cc, approvals: bcc }
+        advance_tax_doc_mode:
+          type: string
+          enum: [none, offer, auto]
+          description: "Chování po úhradě zálohové faktury — hlídání lhůty pro daňový doklad k přijaté platbě (§ 28 ZDPH)."
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 

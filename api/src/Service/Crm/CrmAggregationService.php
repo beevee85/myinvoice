@@ -1137,6 +1137,14 @@ final class CrmAggregationService
             ];
         }
 
+        // 3c. FORK (0920): daňový doklad k přijaté záloze (DDKPZ) — § 28 odst. 1 písm. d)
+        // ukládá plátci vystavit doklad do 15 dnů od přijetí úplaty (odst. 8). Lhůta je
+        // HMOTNĚPRÁVNÍ a běží v KALENDÁŘNÍCH dnech — na rozdíl od termínů podání se
+        // NEposouvá přes CzechWorkingDays (posun by ji falešně prodloužil).
+        foreach ($this->advanceTaxDocItems($supplierId, $nowDt, $dismissals) as $taxDocItem) {
+            $items[] = $taxDocItem;
+        }
+
         // 4. Reports deadlines — DPH přiznání + Kontrolní hlášení se podávají 25. dne
         // po skončení zdaňovacího období. Respektuje periodicitu dodavatele
         // (supplier.vat_period + taxpayer_type) — viz taxDeadlineItems().
@@ -1324,6 +1332,178 @@ final class CrmAggregationService
         return $items;
     }
 
+    /** FORK (0920): 1 → den, 2–4 → dny, 0 a 5+ → dní. */
+    private static function dayWord(int $days): string
+    {
+        return match (true) {
+            $days === 1              => 'den',
+            $days >= 2 && $days <= 4 => 'dny',
+            default                  => 'dní',
+        };
+    }
+
+    /**
+     * FORK (0920): kolik z dotčených plateb má rozpracovaný (konceptový) DDKPZ.
+     *
+     * @param list<int> $paymentIds
+     */
+    private function advanceTaxDocDraftCount(int $supplierId, array $paymentIds): int
+    {
+        if ($paymentIds === []) {
+            return 0;
+        }
+        $in   = implode(',', array_fill(0, count($paymentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM invoice_payments p
+               JOIN invoices td ON td.id = p.tax_document_invoice_id
+              WHERE p.supplier_id = ? AND p.id IN ({$in}) AND td.status = 'draft'"
+        );
+        $stmt->execute([$supplierId, ...$paymentIds]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * FORK (0920): režim vystavování DDKPZ. Když migrace neproběhla, funkce se
+     * chová jako vypnutá — dashboard nesmí spadnout na chybějícím sloupci.
+     */
+    private function advanceTaxDocMode(int $supplierId): string
+    {
+        try {
+            $stmt = $this->db->pdo()->prepare('SELECT advance_tax_doc_mode FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $mode = (string) ($stmt->fetchColumn() ?: 'offer');
+        } catch (\Throwable) {
+            return 'none';
+        }
+        return in_array($mode, ['none', 'offer', 'auto'], true) ? $mode : 'offer';
+    }
+
+    /**
+     * FORK (0920): platby zálohových faktur, ke kterým chybí daňový doklad k přijaté
+     * záloze. Predikát je sdílený s `snapshotCurrentIds()` — jakýkoli rozdíl by
+     * způsobil, že se po „skrýt historické" tytéž platby vynoří jako nové.
+     *
+     * Povinnost je splněná až VYSTAVENÝM dokladem — koncept ji neplní. Platí to
+     * symetricky pro DDKPZ i pro vyúčtovací fakturu; koncept DDKPZ přitom vzniká
+     * i automaticky (částečná úhrada z výpisu, režim 'auto'), takže kdyby se bral
+     * jako splnění, funkce by mlčela právě v nejběžnějším toku.
+     *
+     * Výjimky dle `docs/dph-zalohy.md`: reverse charge (z úplaty se daň nepřiznává)
+     * a jednodokladový postup — ten ale platí jen tehdy, když se plnění do 15 dnů
+     * skutečně uskutečnilo (DUZP finálu, ne jen datum vystavení) A spadá do TÉHOŽ
+     * zdaňovacího období jako úplata; jinak daň z úplaty patří do dřívějšího období
+     * a jedním dokladem ji vykázat nelze (kap. 3 rešerše).
+     *
+     * Okno se vědomě neomezuje: povinnost vystavit doklad nezaniká a tiché zmizení
+     * staré položky by budilo dojem, že je vyřešená. Šum řeší „skrýt historické".
+     */
+    private function advanceTaxDocPendingSql(): string
+    {
+        $days = \MyInvoice\Service\Validation\PurchaseInvoiceValidation::TAX_DOCUMENT_DEADLINE_DAYS;
+
+        return "SELECT p.id, p.paid_on
+                  FROM invoice_payments p
+                  JOIN invoices i ON i.id = p.invoice_id
+                 WHERE p.supplier_id = ?
+                   AND i.invoice_type = 'proforma'
+                   AND i.deleted_at IS NULL
+                   AND i.status <> 'cancelled'
+                   AND i.reverse_charge = 0
+                   AND (p.tax_document_invoice_id IS NULL
+                        OR EXISTS (SELECT 1 FROM invoices td
+                                    WHERE td.id = p.tax_document_invoice_id
+                                      AND (td.status IN ('draft','cancelled') OR td.deleted_at IS NOT NULL)))
+                   AND NOT EXISTS (SELECT 1 FROM invoices ch
+                                    WHERE ch.parent_invoice_id = i.id
+                                      AND ch.invoice_type = 'invoice'
+                                      AND ch.deleted_at IS NULL
+                                      AND ch.status NOT IN ('draft','cancelled')
+                                      AND ch.issue_date <= DATE_ADD(p.paid_on, INTERVAL {$days} DAY)
+                                      AND ch.tax_date IS NOT NULL
+                                      AND ch.tax_date <= DATE_ADD(p.paid_on, INTERVAL {$days} DAY)
+                                      AND CASE WHEN COALESCE((SELECT s.vat_period FROM supplier s
+                                                               WHERE s.id = p.supplier_id), 'monthly') = 'quarterly'
+                                               THEN YEAR(ch.tax_date) = YEAR(p.paid_on)
+                                                    AND QUARTER(ch.tax_date) = QUARTER(p.paid_on)
+                                               ELSE DATE_FORMAT(ch.tax_date, '%Y-%m') = DATE_FORMAT(p.paid_on, '%Y-%m')
+                                          END)
+                 ORDER BY p.paid_on";
+    }
+
+    /**
+     * FORK (0920): připomínka lhůty pro vystavení DDKPZ (§ 28 odst. 1 písm. d, odst. 8
+     * ZDPH — 15 dnů od přijetí úplaty). Lhůta je hmotněprávní a běží v KALENDÁŘNÍCH
+     * dnech, takže se — na rozdíl od termínů podání — neposouvá přes CzechWorkingDays.
+     *
+     * @param array<string,array<string,mixed>> $dismissals
+     * @return list<array<string,mixed>>
+     */
+    private function advanceTaxDocItems(int $supplierId, \DateTimeImmutable $now, array $dismissals): array
+    {
+        if ($this->advanceTaxDocMode($supplierId) === 'none' || !$this->isVatPayer($supplierId)) {
+            return [];
+        }
+
+        $today = $now->format('Y-m-d');
+        $stmt  = $this->db->pdo()->prepare($this->advanceTaxDocPendingSql());
+        $stmt->execute([$supplierId]);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        if ($rows === []) {
+            return [];
+        }
+
+        $ids = $this->filterByDismissal(
+            array_map(static fn(array $r): int => (int) $r['id'], $rows),
+            $dismissals,
+            'advance_tax_doc_due'
+        );
+        if ($ids === []) {
+            return [];
+        }
+
+        // Termín ukazuj podle NEJTĚSNĚJŠÍ lhůty; počítej z půlnoci, jinak by diff
+        // ořezával dolů a den před koncem lhůty by hlásil „0 dní".
+        $deadlineDays = \MyInvoice\Service\Validation\PurchaseInvoiceValidation::TAX_DOCUMENT_DEADLINE_DAYS;
+        $base    = new \DateTimeImmutable($today);
+        $minDays = null;
+        foreach ($rows as $row) {
+            if (!in_array((int) $row['id'], $ids, true)) {
+                continue;
+            }
+            $deadline = (new \DateTimeImmutable((string) $row['paid_on']))->modify("+{$deadlineDays} days");
+            $days     = (int) $base->diff($deadline)->format('%r%a');
+            if ($minDays === null || $days < $minDays) {
+                $minDays = $days;
+            }
+        }
+        if ($minDays === null) {
+            return [];
+        }
+
+        $count = count($ids);
+        $what  = $count === 1 ? 'záloha' : ($count < 5 ? 'zálohy' : 'záloh');
+        // Koncept DDKPZ povinnost neplní — v hintu to pojmenuj, ať uživatel ví,
+        // že stačí rozpracovaný doklad vystavit (ne zakládat nový).
+        $stav = $this->advanceTaxDocDraftCount($supplierId, $ids) > 0
+            ? 'čeká na vystavení daňového dokladu'
+            : 'bez daňového dokladu';
+
+        return [[
+            'type'     => 'advance_tax_doc_due',
+            'severity' => $minDays <= 2 ? 'high' : 'medium',
+            'title'    => 'Vystav daňový doklad k přijaté záloze',
+            'hint'     => $minDays < 0
+                ? sprintf('Lhůta 15 dnů uplynula (%d %s zpět) — %d %s %s',
+                    abs($minDays), self::dayWord(abs($minDays)), $count, $what, $stav)
+                : sprintf('%d %s %s, nejbližší lhůta za %d %s',
+                    $count, $what, $stav, $minDays, self::dayWord($minDays)),
+            'link'     => '/invoices?type=proforma&year=all',
+            'count'    => $count,
+            'days'     => $minDays,
+        ]];
+    }
+
     /**
      * Sestaví action item pro daňový termín, nebo null mimo okno −3..+7 dní.
      *
@@ -1462,7 +1642,9 @@ final class CrmAggregationService
     public function dismissActionItem(int $supplierId, int $userId, string $itemType, string $mode): void
     {
         $validTypes = ['overdue_invoices', 'bank_unmatched', 'recurring_due', 'overdue_payables',
-            'purchase_drafts', 'tax_deadline', 'kh_deadline', 'shv_deadline', 'churn_risk'];
+            'purchase_drafts', 'tax_deadline', 'kh_deadline', 'shv_deadline', 'churn_risk',
+            // FORK 0920: lhůta pro DDKPZ
+            'advance_tax_doc_due'];
         $validModes = ['day', 'week', 'forever', 'historical'];
         if (!in_array($itemType, $validTypes, true)) {
             throw new \InvalidArgumentException("Invalid item_type: {$itemType}");
@@ -1607,6 +1789,12 @@ final class CrmAggregationService
                 $stmt = $pdo->prepare(
                     "SELECT id FROM purchase_invoices WHERE supplier_id = ? AND deleted_at IS NULL AND status = 'draft'"
                 );
+                $stmt->execute([$supplierId]);
+                break;
+            // FORK 0920: musí být BAJT PO BAJTU stejný predikát jako v actionItems(),
+            // jinak se po „skrýt historické" tytéž platby vynoří jako nové.
+            case 'advance_tax_doc_due':
+                $stmt = $pdo->prepare($this->advanceTaxDocPendingSql());
                 $stmt->execute([$supplierId]);
                 break;
             case 'churn_risk':

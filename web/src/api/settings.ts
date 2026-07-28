@@ -45,6 +45,8 @@ export interface Supplier {
   doc_trash_enabled?: boolean
   /** Retence koše ve dnech pro cron-cleanup (0 = neomezeně). */
   doc_trash_retention_days?: number
+  /** FORK 0920: chování po úhradě zálohy — hlídání lhůty § 28/8 pro DDKPZ. */
+  advance_tax_doc_mode?: 'none' | 'offer' | 'auto'
   is_vat_payer: boolean
   /** Identifikovaná osoba (§ 6g–6l ZDPH, issue #94) — neplátce v tuzemsku
    *  s přeshraničními povinnostmi. Nelze kombinovat s is_vat_payer. */

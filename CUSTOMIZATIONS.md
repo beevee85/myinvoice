@@ -15,7 +15,95 @@ Uživatel chce tyto fork funkce navrhnout autorovi. Detailní checklist „před
 | Omezení uživatele na vybrané firmy (0900) | 2026-07-02 FÁZE 2 | ✅ **PŘEVZATO JINAK** — PR #247 zavřen, autor vydal vlastní implementaci (`user_suppliers` + role per firmu) ve **v4.52.0**; naše verze odstraněna migrací 0908 | hotovo |
 | Daňový doklad k přijaté záloze (DDKPZ) + § 37a na přijaté straně (0904, 0906–0911) | 2026-07-28 (tři dávky) | **kandidát — ODLOŽENO na později** (rozhodnutí 28. 7. 2026: nejdřív provozní ověření, ideálně po podání KH za 05–07/2026; pořadí: nejdřív koš, pak DDKPZ, ať se nemusí odstřihávat) | přečíslovat migrace 0904/0906 do upstream řady; oddělit od fork-only koše (DocumentTrashPolicy, TrashGuard v settlement akcích) a od sazby CZ-NA, pokud ji upstream nechce; doplnit kapitolu manuálu + openapi (endpointy settlement-doc-candidates / final-candidates / link-settlement-doc) |
 
+| Hlídání lhůty DDKPZ na vydané straně + režim po úhradě zálohy (0920) | 2026-07-29 | **kandidát — spolu s DDKPZ** (stejný důvod odkladu: nejdřív provozní ověření) | závisí na `PurchaseInvoiceValidation::TAX_DOCUMENT_DEADLINE_DAYS` (konstanta z přijaté strany); přečíslovat migraci 0920 do upstream řady |
+
 Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jednu z těchto funkcí upstream nemá.
+
+---
+
+## 2026-07-29 — Hlídání lhůty pro daňový doklad k přijaté záloze (§ 28 ZDPH), migrace 0920
+
+**Charakter: FORK FEATURE** — realizace návrhu **N-002** ze srovnávací analýzy
+(`docs/analyza-2026-07/40_navrhy.md`). Právní opora: `docs/dph-zalohy.md`.
+Větev `feat/advance-tax-doc-auto`.
+
+**Co se změnilo:**
+1. **Připomínka lhůty v „Akce pro tebe"** (`CrmAggregationService`): nový typ action itemu
+   **`advance_tax_doc_due`**. Vyjmenuje platby zálohových faktur, ke kterým chybí daňový
+   doklad k platbě, s termínem **úplata + 15 KALENDÁŘNÍCH dnů** (§ 28 odst. 8). Lhůta je
+   hmotněprávní, takže se — na rozdíl od termínů podání — **neposouvá** přes `CzechWorkingDays`.
+   Výjimky dle rozhodovacího stromu: reverse charge, neplátce DPH a jednodokladový postup
+   (vyúčtovací faktura **vystavená** do 15 dnů; pouhý koncept lhůtu neplní). Okno 12 měsíců.
+   Predikát je vytažen do `advanceTaxDocPendingSql()` a sdílený se `snapshotCurrentIds()`,
+   aby se po „skrýt historické" tytéž platby nevynořily jako nové; typ je doplněn
+   i do allowlistu `dismissActionItem()` (dvě místa mimo generátor — historicky zdroj chyby).
+2. **Nastavení `advance_tax_doc_mode`** (migrace **0920**, ENUM `none|offer|auto`, default
+   `offer`): `none` vypíná, `offer` jen připomíná, `auto` navíc po **částečné** úhradě
+   založí koncept DDKPZ i mimo bankovní cesty (`InvoicePaymentService::recordPayment()` —
+   jediné místo, kde vzniká řádek `invoice_payments`, takže pokrývá ruční úhradu,
+   „označit zaplacenou" i bankovní párování). Návratová hodnota `recordPayment()` je
+   aditivně rozšířena o `tax_document_id`.
+3. **`auto` se vědomě NEuplatní u plné úhrady:** tam vzniká koncept vyúčtovací faktury,
+   jejíž odpočet § 37a se počítá jen z NEkonceptových DDKPZ (`FinalFromProformaCreator`).
+   Koncept DDKPZ vedle konceptu finálu by dal fakturu bez odpočtů a po vystavení obojího
+   by se táž úplata zdanila dvakrát. U plné úhrady tedy zůstává jednodokladový postup
+   a lhůtu hlídá připomínka.
+4. **Srozumitelnější chyba** v `PaymentTaxDocumentCreator`: existuje-li k záloze pouhý
+   **koncept** vyúčtovací faktury (vzniká i automaticky po plné úhradě z výpisu), hláška
+   nově radí cestu ven („vystav ho, nebo koncept smaž") místo obecného „už existuje finální doklad".
+
+**Které soubory:** `db/migrations/0920_advance_tax_doc_mode.sql` (nová),
+`api/src/Service/Crm/CrmAggregationService.php` (+3 metody, allowlist, snapshot case),
+`api/src/Service/Invoice/InvoicePaymentService.php` (nullable `PaymentTaxDocumentCreator`
+v ctoru + hook), `api/src/Service/Invoice/PaymentTaxDocumentCreator.php` (hláška),
+`api/src/Action/Settings/SettingsAction.php` (whitelist, ENUM validace, `respondSupplier`),
+`api/openapi.yaml` (SupplierUpdate + SupplierFull), `web/src/api/settings.ts`,
+`web/src/pages/admin/Settings.vue` (nová sekce, jen pro plátce DPH),
+`web/src/i18n/cs.json` + `en.json` (6 klíčů, vloženo chirurgicky na začátek bloku `settings`),
+`manual/10_Faktura_editor.md` (nová sekce 10.8.1, přečíslování 10.8.2),
+`api/tests/Integration/Crm/CrmAdvanceTaxDocTest.php` (nový, 10 testů).
+
+**Jak ověřit po merge:** migrace 0920 aplikovaná (`advance_tax_doc_mode` na `supplier`);
+`vendor/bin/phpunit --filter CrmAdvanceTaxDoc` zelené; v Nastavení je u plátce DPH sekce
+„Daňový doklad k přijaté záloze"; po zaevidování platby k zálohové faktuře se do dne
+objeví položka v „Akce pro tebe" s termínem +15 dnů a po jeho uplynutí zčervená;
+u zálohy v RC a u neplátce se položka neobjeví.
+
+**Opraveno adversariální kontrolou vlastní změny (3 potvrzené chyby před commitem):**
+- **Koncept DDKPZ se bral jako splněná povinnost** — predikát požadoval jen vyplněné
+  `tax_document_invoice_id`. Jenže koncept vzniká automaticky při bankovní částečné úhradě,
+  takže by funkce mlčela právě v nejběžnějším toku. Nově se koncept (`status='draft'`)
+  počítá jako NEsplněno, symetricky s vyúčtovací fakturou; hint to pojmenuje
+  („čeká na vystavení daňového dokladu"). Test `testKonceptDdkpzPripominkuNezavre`.
+- **PHP-DI nenaplňuje volitelné parametry konstruktoru** (`ReflectionBasedAutowiring`
+  optional parametry přeskakuje) → `InvoicePaymentService::$taxDocs` byl vždy null
+  a režim `auto` byl mrtvý kód. Doplněna explicitní definice v `Bootstrap.php`;
+  ověřeno reflexí, že se závislost injektuje.
+- **Jednodokladový postup se posuzoval jen podle data vystavení finálu.** Výjimka teď
+  vyžaduje i DUZP do 15 dnů a **shodu zdaňovacího období** úplaty a DUZP (měsíc/čtvrtletí
+  dle `supplier.vat_period`) — jinak by úplata z 29. 6. vyúčtovaná 3. 7. zmizela z hlídání,
+  ačkoli daň patří do června. Testy `testFinalVJinemZdanovacimObdobiPripominkuNezavre`,
+  `testFinalBezDuzpPripominkuNezavre`.
+- Drobné: 12měsíční okno zrušeno (povinnost nezaniká, tiché zmizení klamalo; šum řeší
+  „skrýt historické"), české tvary v hintu (1 záloha; 1 den / 2–4 dny / 0 a 5+ dní),
+  test lhůty přepsán na termín padnoucí na SOBOTU (dřív procházel i s chybným posunem
+  na pracovní den), vrácen rozbitý docblock `buildDeadlineItem()`.
+
+**Známé dluhy k této oblasti (NEřešeno tímto commitem):**
+- Koncept DDKPZ je pro `FinalFromProformaCreator` neviditelný (počítá jen s vystavenými),
+  takže vyúčtovací faktura vytvořená nad rozpracovaným DDKPZ nese odpočet zálohy bez
+  řádků § 37a. Existuje i dnes (bankovní částečná úhrada zakládá koncept DDKPZ) —
+  proto `auto` u plné úhrady vědomě nevystupuje. Řešení = přepočet finálu při vystavení
+  DDKPZ, nebo guard při vystavení finálu.
+- Guard „existuje finál" bere i koncept, takže po plné bankovní úhradě nejde DDKPZ vystavit,
+  dokud se koncept nevystaví/nesmaže (nově aspoň s návodnou hláškou).
+- **§ 20a odst. 2 (plnění není ke dni úplaty dostatečně určité)** — z dat to nelze poznat
+  (chybí per-doklad příznak), takže u paušálních záloh bez rozpadu sazeb připomínka vyzve
+  k dokladu, který se vystavovat nemá. Obchází se volbou „Nic nehlídat" nebo skrytím
+  položky. Řešení = příznak na zálohové faktuře.
+- **Finál opravený plným dobropisem** zůstává `issued`, takže jednodokladová výjimka platí
+  dál a připomínka se nevrátí, i když daň z úplaty trvá. Řešení = zohlednit opravné doklady
+  navázané na finál.
 
 ---
 

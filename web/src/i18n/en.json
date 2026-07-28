@@ -2807,6 +2807,12 @@
     "field_balance": "Available balance"
   },
   "settings": {
+    "advance_tax_doc_section": "Tax document for advance payment",
+    "advance_tax_doc_mode": "After an advance invoice is paid",
+    "advance_tax_doc_mode_none": "Do not track",
+    "advance_tax_doc_mode_offer": "Remind about the 15-day deadline (recommended)",
+    "advance_tax_doc_mode_auto": "Remind and create a draft on partial payment",
+    "advance_tax_doc_mode_hint": "A VAT payer must issue a tax document within 15 days of receiving the payment (Section 28 of the Czech VAT Act). The reminder stays in “Action items” until a tax document or an issued settlement invoice exists. Advances under the reverse charge regime are not tracked.",
     "doc_trash_section": "Document trash",
     "doc_trash_enabled": "Use trash for documents (issued and received invoices)",
     "doc_trash_enabled_hint": "Deleted documents go to the trash first and can be restored. With trash disabled, “Move to trash” deletes permanently right away (same dialog and audit).",

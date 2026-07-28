@@ -129,6 +129,16 @@ final class Bootstrap
                 $c->get(Connection::class),
                 self::bankEmailNoticeParsers($c, $config),
             ),
+            // FORK 0920: PHP-DI autowiring VOLITELNÉ parametry přeskakuje, takže
+            // nullable PaymentTaxDocumentCreator by zůstal null a režim 'auto'
+            // (koncept DDKPZ po částečné úhradě zálohy) by byl mrtvý kód.
+            \MyInvoice\Service\Invoice\InvoicePaymentService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Invoice\InvoicePaymentService(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\Pdf\InvoicePdfRenderer::class),
+                $c->get(\MyInvoice\Service\Stats\StatsRecomputer::class),
+                $c->get(\MyInvoice\Service\Invoice\PaymentTaxDocumentCreator::class),
+            ),
+
             \MyInvoice\Service\Bank\StatementMatcher::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\StatementMatcher(
                 $c->get(Connection::class),
                 $c->get(\MyInvoice\Service\Invoice\FinalFromProformaCreator::class),

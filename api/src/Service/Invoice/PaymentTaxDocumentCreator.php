@@ -125,14 +125,18 @@ final class PaymentTaxDocumentCreator
         // finální doklad, jeho odpočtové řádky (§ 37a) jsou zafixované — dodatečný
         // daňový doklad k platbě by stejnou úplatu zdanil podruhé.
         $finalExists = $pdo->prepare(
-            "SELECT 1 FROM invoices
+            "SELECT status FROM invoices
               WHERE parent_invoice_id = ? AND invoice_type = 'invoice' AND status <> 'cancelled'
               LIMIT 1"
         );
         $finalExists->execute([(int) $proforma['id']]);
-        if ($finalExists->fetchColumn() !== false) {
-            throw new \RuntimeException(
-                'K zálohové faktuře už existuje finální doklad — daňový doklad k platbě by úplatu zdanil podruhé.'
+        $finalStatus = $finalExists->fetchColumn();
+        if ($finalStatus !== false) {
+            // FORK 0920: koncept finálu vzniká i automaticky (plná úhrada z výpisu),
+            // takže uživatel často netuší, proč doklad nejde vystavit — poraď mu ven.
+            throw new \RuntimeException((string) $finalStatus === 'draft'
+                ? 'K zálohové faktuře existuje koncept vyúčtovací faktury — vystav ho (pak daňový doklad k platbě není potřeba), nebo koncept smaž.'
+                : 'K zálohové faktuře už existuje finální doklad — daňový doklad k platbě by úplatu zdanil podruhé.'
             );
         }
         if (!empty($proforma['reverse_charge'])) {
