@@ -415,11 +415,15 @@ final class SupplierMembershipTest extends TestCase
     private function mkUser(string $role): int
     {
         $email = '__test_membership_' . bin2hex(random_bytes(6)) . '@example.com';
+        // users.password_hash je CHAR(60) — hash generujeme, ať má vždy přesnou
+        // délku bcryptu. Literál o znak delší projde jen na serveru bez STRICT
+        // režimu (lokálně), v CI spadne na 1406 Data too long. Heslem se stejně
+        // nikdo nepřihlašuje, session i tokeny vytváříme přímo.
         $stmt = $this->db->pdo()->prepare(
-            "INSERT INTO users (email, password_hash, name, role, locale, is_active)
-             VALUES (?, '\$2y\$10\$abcdefghijklmnopqrstuvABCDEFGHIJKLMNOPQRSTUVWXYZ01234', '__TEST membership', ?, 'cs', 1)"
+            'INSERT INTO users (email, password_hash, name, role, locale, is_active)
+             VALUES (?, ?, \'__TEST membership\', ?, \'cs\', 1)'
         );
-        $stmt->execute([$email, $role]);
+        $stmt->execute([$email, password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT), $role]);
         $id = (int) $this->db->pdo()->lastInsertId();
         $this->userIds[] = $id;
         return $id;
