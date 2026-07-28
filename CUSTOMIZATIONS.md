@@ -4,6 +4,18 @@ Instalace: `faktury.betka.eu`, VPS, `/opt/myinvoice`. Pravidla práce viz `CLAUD
 
 Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná úprava tiše nevypadla.
 
+## Plán: co nabídnout do oficiální větve (upstream `radekhulan/myinvoice`)
+
+Uživatel chce tyto fork funkce navrhnout autorovi. Detailní checklist „před odesláním upstreamu" je vždy u příslušné sekce níže.
+
+| Funkce | Sekce | Stav | Hlavní překážka před PR |
+|---|---|---|---|
+| Opravy DPH výkazů + zámek dokladu + EPO identifikace + CZ-NACE | 2026-07-27/28 | **odesláno** — issue #244, PR #245 | čeká na autora |
+| Koš + tvrdé mazání dokladů (0905) | 2026-07-28 | čeká na ověření v provozu | breaking DELETE (nutná zpětná kompatibilita), fork-only DDKPZ vazby v policy, přečíslovat migraci |
+| Omezení uživatele na vybrané firmy (0900) | 2026-07-02 FÁZE 2 | **připraveno, nejsnazší kandidát** | jen přečíslovat migraci; jinak zpětně kompatibilní, otestované, zdokumentované |
+
+Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jednu z těchto funkcí upstream nemá.
+
 ---
 
 ## 2026-07-28 (2. dávka) — DDKPZ: § 37a na úrovni součtů, invariant znamének, záloha mimo DPH
@@ -308,6 +320,14 @@ Navíc: `fix(dashboard)` — gradient hlavičky widgetu „Akce pro tebe" použ�
 3. Po upstream merge zkontrolovat: `main.ts` (import řádek přežil), `useTheme.ts` (konflikt palety řešit ve prospěch indigo verze) a nové tokeny v upstream `main.css` (případně doplnit jejich override).
 
 ## 2026-07-02 — FÁZE 2: omezení uživatele na vybrané dodavatele
+
+**Charakter: FEATURE — KANDIDÁT PRO UPSTREAM** (uživatel 2026-07-28 potvrdil, že funkci chce nabídnout autorovi). Ze všech fork funkcí je na PR nejlépe připravená: **žádná breaking změna** (žádný záznam = uživatel vidí vše, takže se stávajících instalací nedotkne), **žádné fork-only závislosti** (pracuje jen s upstream tabulkami `users` a `supplier`), integrační test i kapitola manuálu 36.2.3 existují, openapi se nemění.
+
+**Před odesláním upstreamu vyřešit:**
+1. **Přečíslovat migraci** `0900_user_supplier_access.sql` do upstream řady (upstream je k 2026-07-28 na 0147 → dát 0148+) a smazat komentář o fork rozsahu 0900.
+2. **Rebasovat na aktuální upstream/master** a hlídat `SupplierScopeMiddleware.php` — nejrizikovější soubor, upstream ho mění (webauthn/mfa/session early-bypass); náš enforcement musí zůstat AŽ ZA ním.
+3. Dle `CONTRIBUTING.md`: `php tools/generateManualHtml.php` po úpravě manuálu; projít `phpunit` + `pnpm type-check` + `build`.
+4. V PR zdůraznit případ užití (externí účetní / klient vidí jen svoji firmu) a zpětnou kompatibilitu — to je hlavní argument pro přijetí.
 
 **Co se změnilo:** admin může uživateli (role `accountant`/`readonly`) přiřadit povolené dodavatele. Omezený uživatel vidí v přepínači firem jen povolené a k jiným se nedostane ani přímým API voláním (403). Žádný záznam = vidí vše (zpětná kompatibilita). Role `admin` vidí vždy vše.
 
