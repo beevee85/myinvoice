@@ -6,6 +6,24 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ---
 
+## 2026-07-28 (2. dávka) — DDKPZ: § 37a na úrovni součtů, invariant znamének, záloha mimo DPH
+
+**Charakter: FORK FEATURE/BUGFIX** — navazuje na DDKPZ z téhož dne (commit 6506ca72). Právní opora: `docs/dph-zalohy.md`.
+
+**Co se změnilo:**
+1. **§ 37a haléřové zaokrouhlení (bug na PF2607001):** rozdíl se počítá z HRUBÉHO rozdílu per sazba (dosavadní hrubá hodnota sazby − hrubá hodnota DDKPZ), základ a daň se z něj odvodí koeficientem § 37 (`PurchaseSettlementService::applyGrossTargets`). Dřív se odečítaly zvlášť základy a zvlášť daně dvou nezávisle zaokrouhlených řad → základ +0,01 / daň −0,01. Plná záloha teď dá 0,00/0,00/0,00.
+2. **Odpočtové řádky doslova dle DDKPZ** (`PurchaseInvoiceRepository::pinSettlementRowTotals`): kalkulátor by daň řádku spočetl ze sazby (16 528,93 × 21 % = 3 471,08), doklad ale nese daň shora z úplaty (20 000 × 21/121 = 3 471,07). Řádek se přišpendlí a haléř se přesune na nejsilnější NEodpočtový řádek téže sazby — součet dokladu (a tím DP3/KH) zůstává nedotčený. Přišpendlení se obnovuje po KAŽDÉM přepočtu (`pinAllSettlementRows`) — druhé párování dřív rozhodilo první.
+3. **Invariant znamének** `vat_sign_mismatch` (`PurchaseInvoiceValidation::hasVatSignMismatch` + flag v `find()` + banner v detailu): u nenulové sazby nesmí mít základ a daň opačné znaménko → jinak „doklad ke kontrole". Platí pro všechny přijaté doklady.
+4. **UI:** prázdný panel „Vyúčtování zálohy — Není propojeno" se nezobrazuje, je-li doklad vyúčtován přes § 37a nebo jde-li o DDKPZ.
+5. **Záloha (advance) — sazba a DUZP:** nová položka číselníku **CZ-NA „Mimo DPH"** (migrace **0906**) místo „0 % osvobozeno" (osvobozené plnění se vykazuje v přiznání, mimo DPH ne); položka se sazbou CZ-NA nikdy nedostane klasifikační kód (`replaceItems`) → nikdy nespadne do DP3/KH. DUZP se u typu `advance` v editoru skrývá, při přetypování se čistí (`updateDocumentKind`, `create`/`updateDraft`).
+6. **Náklady:** záloha se z nákladových agregací vylučuje **vždy** (dashboard, /purchase-stats, CRM service i procedura 0906, karta klienta, seznam klientů) — náklad nese DDKPZ nebo konečná faktura. Cash princip daňové evidence zůstává v `TaxProfileRepository::monthExpenses` (zaplacená záloha = výdaj, DDKPZ se tam naopak nikdy nesčítá).
+7. **Prefix `ZA`** pro zálohové faktury (dřív `NU` dle daňového uplatnění); nápovědy v editoru i v nastavení číselné řady vyjmenovávají všechny prefixy (PF/PN, KU/KN, NU/NN, DZ, ZA).
+8. **Cizí migrace 0905 (koš) — oprava FK:** `deleted_document_snapshots.supplier_id` byl `TINYINT UNSIGNED` proti `supplier.id INT UNSIGNED` → `ALTER` selhal s errno 150 a migrace by shodila nasazení. Opraveno na `INT UNSIGNED`.
+
+**Testy:** +9 v `KhDphTaxScenariosTest` (§ 37a: plná záloha na nulu vč. slevy v mínusu, doplatek, přeplatek se sazbou zálohy, dvě sazby se zálohou jen k jedné, invariant znamének, zaplacená záloha mimo DPH/KH/DzP, 15denní lhůty ve 4 scénářích). `PurchaseAdvanceLinkTest` srovnán na novou sémantiku nákladů. Suita **1975 zelených**, type-check OK. Pozn.: testy vyžadují v `cfg.php` sekci `varsymbol.templates` (jinak 6 chyb v `RecurringGeneratorTest`).
+
+**Jak ověřit po merge:** `vendor/bin/phpunit --filter 'Settlement37a|VatSignMismatch|TaxDocumentDeadline|PaidAdvanceNever'`; v editoru přijaté faktury má typ „Záloha" skryté DUZP a položky sazbu „Mimo DPH"; detail konečné faktury s DDKPZ nezobrazuje prázdný panel zálohy.
+
 ## 2026-07-28 — DAŇOVÝ DOKLAD K PŘIJATÉ ZÁLOZE (DDKPZ) v modulu přijatých faktur (přímo na custom)
 
 **Charakter: FORK FEATURE — kandidát pro upstream po ověření v provozu.** Právní rešerše s odkazy: `docs/dph-zalohy.md` (§ 20a, § 28/8, § 37a, § 72/73 ZDPH + Metodická informace GFŘ ke KH; vč. rozhodovacího stromu).
@@ -42,6 +60,8 @@ Tři oddělené operace: **storno/dobropis** (beze změny, primární cesta) →
 **Které soubory:** db/migrations/0905_document_trash.sql; api/src/Service/Invoice/DocumentTrashPolicy+DocumentTrashService; api/src/Http/TrashGuard.php; api/src/Action/Invoice/{Delete,Restore,ForceDelete,TrashPreflight,EmptyInvoiceTrash}…Action; api/src/Action/PurchaseInvoice/{Delete,Restore,ForceDelete,PurchaseTrashPreflight,EmptyPurchaseInvoiceTrash}…Action; Routes.php; SettingsAction; cron-cleanup + cron-send-reminders; sweep 33 souborů (viz git log); web: DocumentTrashModal.vue, ActionBar.vue, oba InvoiceList/InvoiceDetail, invoices/InvoiceEditor, admin/Settings.vue, api/{invoices,purchaseInvoices,settings}.ts, i18n cs+en; manual 09+17; api/openapi.yaml.
 
 **Testy:** `tests/Integration/Invoice/DocumentTrashTest.php` + `tests/Integration/PurchaseInvoice/PurchaseDocumentTrashTest.php` (role 403, DPH blokace i pro admina, counter release poslední vs. prostřední, koš mimo list+VatLedger, obnova se stejným číslem, snapshot+audit, vysypání přeskočí blokované).
+
+**Po merge s DDKPZ (audit 2026-07-28, commity 4507aae8 + 92b15562):** párovací cesta § 37a vznikala paralelně, takže ji sweep koše minul — doplněno: `PurchaseSettlementService::link()/unlink()` a `PurchaseInvoiceRepository::linkAdvance()` odmítají doklad v koši (kontrola OBOU stran — protistrana přichází z těla požadavku, kam TrashGuard v akci nedosáhne), `TrashGuard` v Link/UnlinkSettlementDoc a obou Dismiss akcích, `AND pi.deleted_at IS NULL` v settlementDocCandidates/finalCandidates i v obou EXISTS flagech ve `find()`, a v purchase detailu `canMutate = canWrite && !inTrash` pro všechny mutační prvky. Bez toho šlo DDKPZ v koši napárovat na živou fakturu → odpočet § 37a bez protistrany ve výkazech. Zároveň srovnán měsíční mezisoučet v seznamu přijatých (`listGroupedByMonth`) se sémantikou migrace 0906 — dřív ukazoval nad týmiž doklady 23 000, zatímco dashboard/CRM/karta klienta 20 000.
 
 **Jak ověřit po merge:** phpunit suita zelená; v UI: vydané → tab Koš; přijaté → tlačítko Koš; smazat testovací koncept (vyžaduje důvod), obnovit, smazat trvale (opsání čísla); doklad v koši nesmí být v Přehledu/Tržbách/Knize DPH; Nastavení ukazuje sekci Koš pro doklady; `php api/bin/cron-cleanup.php` proběhne bez chyby a reportuje `doc_trash_autopurged`.
 
