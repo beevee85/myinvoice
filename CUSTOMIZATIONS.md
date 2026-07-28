@@ -13,9 +13,59 @@ Uživatel chce tyto fork funkce navrhnout autorovi. Detailní checklist „před
 | Opravy DPH výkazů + zámek dokladu + EPO identifikace + CZ-NACE | 2026-07-27/28 | ✅ **PŘIJATO** — PR #245 mergnut, vydáno v **v4.52.0** | hotovo — bloky níže přeznačeny na PŘIJATO |
 | Koš + tvrdé mazání dokladů (0905) | 2026-07-28 | čeká na ověření v provozu | breaking DELETE (nutná zpětná kompatibilita), fork-only DDKPZ vazby v policy, přečíslovat migraci |
 | Omezení uživatele na vybrané firmy (0900) | 2026-07-02 FÁZE 2 | ✅ **PŘEVZATO JINAK** — PR #247 zavřen, autor vydal vlastní implementaci (`user_suppliers` + role per firmu) ve **v4.52.0**; naše verze odstraněna migrací 0908 | hotovo |
-| Daňový doklad k přijaté záloze (DDKPZ) + § 37a na přijaté straně (0904, 0906–0911) | 2026-07-28 (tři dávky) | **kandidát — ODLOŽENO na později** (rozhodnutí 28. 7. 2026: nejdřív provozní ověření, ideálně po podání KH za 05–07/2026; pořadí: nejdřív koš, pak DDKPZ, ať se nemusí odstřihávat) | přečíslovat migrace 0904/0906 do upstream řady; oddělit od fork-only koše (DocumentTrashPolicy, TrashGuard v settlement akcích) a od sazby CZ-NA, pokud ji upstream nechce; doplnit kapitolu manuálu + openapi (endpointy settlement-doc-candidates / final-candidates / link-settlement-doc) |
+| Daňový doklad k přijaté záloze (DDKPZ) + § 37a na přijaté straně (0904, 0906–0911, hotfix 2026-07-29) | 2026-07-28 (tři dávky) + 2026-07-29 | **kandidát — ODLOŽENO na později** (rozhodnutí 28. 7. 2026: nejdřív provozní ověření, ideálně po podání KH za 05–07/2026; pořadí: nejdřív koš, pak DDKPZ, ať se nemusí odstřihávat) | přečíslovat migrace 0904/0906 do upstream řady; oddělit od fork-only koše (DocumentTrashPolicy, TrashGuard v settlement akcích) a od sazby CZ-NA, pokud ji upstream nechce; doplnit kapitolu manuálu + openapi (endpointy settlement-doc-candidates / final-candidates / link-settlement-doc) |
 
 Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jednu z těchto funkcí upstream nemá.
+
+---
+
+## 2026-07-29 — DDKPZ hotfix: § 37a nesmí přelévat haléř do zdanitelných řádků faktury
+
+**Charakter: FORK BUGFIX** — oprava kolize mezi 2. a 3. dávkou DDKPZ (obě z 2026-07-28).
+
+**Chyba:** 2. dávka zavedla v `PurchaseInvoiceRepository::pinSettlementRowTotals()` kompenzaci —
+po přišpendlení odpočtového řádku dle DDKPZ se vzniklý haléř přesunul na **nejsilnější
+zdanitelný řádek** téže sazby. 3. dávka pak zavedla samostatný řádek „Zaokrouhlení § 37a"
+a `restoreItemTotals()`, aby zdanitelné řádky zůstaly PŘESNĚ dle dokladu dodavatele.
+Kompenzace ale zůstala aktivní a běží **až za** `restoreItemTotals()`, takže jeho efekt ruší.
+
+**Projev** (reálný případ TUkas a.s., přijatá faktura 226020278 / #62, nákup vozu):
+- rekapitulace zdanitelných řádků se rozešla s PDF dodavatele o 0,01 Kč
+  (86 881,00 místo 86 880,99), 5 z 11 řádků mělo posunutou daň;
+- zaokrouhlovací řádek vyšel −0,01 / **0,00** místo −0,01 / **+0,01**;
+- `unlink()` navíc kompenzoval bez jakéhokoli snapshotu řádků, takže **každý cyklus
+  unlink→link ukousl další haléř** (ověřeno na #57: 393 381,83 → …,82 → …,81).
+
+Spouštěč: dopočtená hodnota odpočtového řádku se liší od hodnoty na DDKPZ — typicky když
+dodavatel počítá daň SHORA z brutto (450 600 / 1,21), kdežto kalkulátor ZDOLA ze základu.
+Doklad, u kterého dopočet náhodou sedí (referenční #57 při prvním párování), problém neukáže.
+
+**Co se změnilo:**
+1. `pinSettlementRowTotals()` má nový parametr `bool $compensate = true` (zpětně kompatibilní).
+   Při `false` se haléř do zdanitelných řádků nepřelévá.
+2. `PurchaseSettlementService::pinAllSettlementRows()` parametr propaguje; obě volání
+   v `link()` i `unlink()` nově předávají `false` — rozdíl absorbuje `syncRoundingRows()`.
+3. `unlink()` dostal **symetrii s `link()`**: `snapshotItemTotals()` → `applyGrossTargets()`
+   → `restoreItemTotals()` → `pinAllSettlementRows(false)` → `syncRoundingRows()`.
+   Dřív mu snapshot/restore i zaokrouhlovací řádek chyběly úplně.
+
+**Dopad na DPH:** u dosud napárovaných dokladů žádný — konečná faktura s nulovým hrubým
+rozdílem § 37a do DP3/KH nevstupuje a celý odpočet nesou DDKPZ (ty byly správně vždy).
+Šlo o věrnost evidence dokladu podle § 73 / § 100 ZDPH a o kumulativní drift při přepárování.
+
+**Testy:** nový `tests/Integration/PurchaseInvoice/PurchaseSettlementRoundingTest.php`
+(2 testy, 24 asercí): zdanitelné řádky zůstávají dle dokladu po napárování dvou DDKPZ;
+opakovaný unlink/link haléře nekumuluje. Proti neopravenému kódu první test **padá**
+(86 881,00 ≠ 86 880,99). Suita **2017 zelených** (2015 + 2 nové), 6 685 asercí.
+
+**Jak ověřit po merge:** `vendor/bin/phpunit --filter 'PurchaseSettlementRounding'`;
+v detailu konečné faktury s DDKPZ musí součet zdanitelných řádků odpovídat rekapitulaci
+na PDF dodavatele a zaokrouhlovací řádek § 37a nést základ i daň s opačným znaménkem.
+
+**Data:** produkční #62 srovnáno ručně už 28. 7. (skript `/root/tmp/tukas/fix-lines.php`)
+— po nasazení této opravy by tentýž stav vyrobila služba sama. Doklad #57 (Direct auto,
+`paid`) drift z minulosti nese, je ale vyrovnaný (0,00/0,00) a do výkazů nevstupuje;
+přepárovávat ho není nutné.
 
 ---
 
