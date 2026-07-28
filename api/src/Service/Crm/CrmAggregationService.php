@@ -54,7 +54,9 @@ final class CrmAggregationService
         return " AND NOT (COALESCE(pi.document_kind, '') = 'advance'"
              . " AND (pi.status <> 'paid'"
              . " OR EXISTS (SELECT 1 FROM purchase_invoices adv_s"
-             . " WHERE adv_s.advance_purchase_invoice_id = pi.id)))";
+             // Vyúčtování v koši náklad nenese — zaplacená záloha se má počítat dál.
+             . " WHERE adv_s.advance_purchase_invoice_id = pi.id"
+             . " AND adv_s.deleted_at IS NULL)))";
     }
 
     /** @return array<string,float|int> nulový akumulátor pro merge tržeb a nákladů per měna */
@@ -113,6 +115,7 @@ final class CrmAggregationService
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND " . self::REV_DATE . " >= ? AND " . self::REV_DATE . " < ?
                 AND i.status IN " . self::REV_STATUS . "
                 AND i.invoice_type IN " . self::REV_TYPES . "
@@ -137,6 +140,7 @@ final class CrmAggregationService
                FROM purchase_invoices pi
                JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
+                AND pi.deleted_at IS NULL
                 AND " . self::COST_DATE . " >= ? AND " . self::COST_DATE . " < ?
                 AND pi.status IN " . self::COST_STATUS . $this->advanceCostExclude() . "
            GROUP BY cur.code"
@@ -173,7 +177,9 @@ final class CrmAggregationService
         // (cancellation apod.), které sem padaly i dosud. Kombinuj se status filtrem.
         return "(i.invoice_type != 'proforma'"
              . " OR NOT EXISTS (SELECT 1 FROM invoices ch"
-             . " WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'))";
+             // Ostrý doklad v koši dluh nenese — proforma se má vrátit mezi pohledávky.
+             . " WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'"
+             . " AND ch.deleted_at IS NULL))";
     }
 
     /**
@@ -286,6 +292,7 @@ final class CrmAggregationService
                     COUNT(*) AS cnt
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND " . self::REV_DATE . " >= ? AND " . self::REV_DATE . " < ?
                 AND i.status = 'draft'
                 AND i.invoice_type IN " . self::REV_TYPES . "
@@ -309,6 +316,7 @@ final class CrmAggregationService
                     COUNT(*) AS cnt
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND " . self::REV_DATE . " >= ? AND " . self::REV_DATE . " < ?
                 AND i.invoice_type = 'proforma'
                 AND i.status IN ('issued', 'sent', 'reminded')
@@ -364,6 +372,7 @@ final class CrmAggregationService
                     COUNT(*) AS cnt
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND " . self::REV_DATE . " >= ? AND " . self::REV_DATE . " < ?
                 AND i.status IN " . self::REV_STATUS . " AND i.invoice_type IN " . self::REV_TYPES . "
            GROUP BY ym, cur.code"
@@ -384,6 +393,7 @@ final class CrmAggregationService
                     COUNT(*) AS cnt
                FROM purchase_invoices pi JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
+                AND pi.deleted_at IS NULL
                 AND " . self::COST_DATE . " >= ? AND " . self::COST_DATE . " < ?
                 AND pi.status IN " . self::COST_STATUS . $this->advanceCostExclude() . "
            GROUP BY ym, cur.code"
@@ -434,6 +444,7 @@ final class CrmAggregationService
               JOIN clients c ON c.id = i.client_id
               JOIN currencies cur ON cur.id = i.currency_id
              WHERE i.supplier_id = ?
+               AND i.deleted_at IS NULL
                AND i.issue_date >= ?
                AND i.status NOT IN ('draft', 'cancelled')
                AND i.invoice_type != 'proforma'
@@ -477,6 +488,7 @@ final class CrmAggregationService
                     COUNT(*) AS cnt
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status IN " . self::REV_STATUS . " AND i.invoice_type IN " . self::REV_TYPES . "
            GROUP BY yr, cur.code"
         );
@@ -493,6 +505,7 @@ final class CrmAggregationService
                     COUNT(*) AS cnt
                FROM purchase_invoices pi JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
+                AND pi.deleted_at IS NULL
                 AND pi.status IN " . self::COST_STATUS . $this->advanceCostExclude() . "
            GROUP BY yr, cur.code"
         );
@@ -547,13 +560,15 @@ final class CrmAggregationService
               JOIN clients c ON c.id = pi.vendor_id
          LEFT JOIN currencies cur ON cur.id = pi.currency_id
              WHERE pi.supplier_id = ?
+               AND pi.deleted_at IS NULL
                AND pi.issue_date >= ?
                AND pi.status NOT IN ('draft', 'cancelled')
                -- Spárovaná/zaplacená záloha (advance) nese náklad finální faktura → vyřadit
                AND NOT (COALESCE(pi.document_kind, '') = 'advance'
                         AND (pi.status = 'paid'
                              OR EXISTS (SELECT 1 FROM purchase_invoices adv_s
-                                         WHERE adv_s.advance_purchase_invoice_id = pi.id)))
+                                         WHERE adv_s.advance_purchase_invoice_id = pi.id
+                                           AND adv_s.deleted_at IS NULL)))
           GROUP BY pi.vendor_id, c.company_name
           ORDER BY costs_czk DESC
              LIMIT " . (int) $limit;
@@ -587,10 +602,10 @@ final class CrmAggregationService
         $stmt = $this->db->pdo()->prepare(
             "SELECT DISTINCT code FROM (
                 SELECT cur.code AS code FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
-                 WHERE i.supplier_id = ? AND i.status IN " . self::REV_STATUS . " AND i.invoice_type IN " . self::REV_TYPES . "
+                 WHERE i.supplier_id = ? AND i.deleted_at IS NULL AND i.status IN " . self::REV_STATUS . " AND i.invoice_type IN " . self::REV_TYPES . "
                 UNION
                 SELECT cur.code AS code FROM purchase_invoices pi JOIN currencies cur ON cur.id = pi.currency_id
-                 WHERE pi.supplier_id = ? AND pi.status IN " . self::COST_STATUS . "
+                 WHERE pi.supplier_id = ? AND pi.deleted_at IS NULL AND pi.status IN " . self::COST_STATUS . "
              ) t ORDER BY code"
         );
         $stmt->execute([$supplierId, $supplierId]);
@@ -621,6 +636,7 @@ final class CrmAggregationService
               FROM invoices i
          LEFT JOIN currencies c ON c.id = i.currency_id
              WHERE i.supplier_id = ?
+               AND i.deleted_at IS NULL
                AND i.status IN ('issued', 'sent', 'reminded')
                AND " . $this->receivableDocTypeSql() . "
                AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)
@@ -658,6 +674,7 @@ final class CrmAggregationService
               FROM purchase_invoices pi
          LEFT JOIN currencies c ON c.id = pi.currency_id
              WHERE pi.supplier_id = ?
+               AND pi.deleted_at IS NULL
                AND pi.status IN ('received', 'booked')
           GROUP BY bucket, currency
           ORDER BY currency, FIELD(bucket, 'not_due', 'overdue_30', 'overdue_60', 'overdue_90', 'overdue_90_plus')
@@ -685,6 +702,7 @@ final class CrmAggregationService
             "SELECT AVG(DATEDIFF(paid_at, issue_date)) AS avg_days, COUNT(*) AS sample
                FROM invoices
               WHERE supplier_id = ?
+                AND deleted_at IS NULL
                 AND status = 'paid'
                 AND paid_at IS NOT NULL
                 AND issue_date >= ?
@@ -712,6 +730,7 @@ final class CrmAggregationService
                 COUNT(*) AS total
              FROM invoices
             WHERE supplier_id = ?
+              AND deleted_at IS NULL
               AND status = 'paid'
               AND paid_at IS NOT NULL
               AND issue_date >= ?
@@ -826,6 +845,7 @@ final class CrmAggregationService
             "SELECT AVG(DATEDIFF(paid_at, issue_date)) AS avg_days, COUNT(*) AS sample
                FROM purchase_invoices
               WHERE supplier_id = ?
+                AND deleted_at IS NULL
                 AND status = 'paid'
                 AND paid_at IS NOT NULL
                 AND issue_date >= ?"
@@ -860,13 +880,15 @@ final class CrmAggregationService
          LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id
          LEFT JOIN currencies cur ON cur.id = pi.currency_id
              WHERE pi.supplier_id = ?
+               AND pi.deleted_at IS NULL
                AND pi.issue_date >= ?
                AND pi.status NOT IN ('draft', 'cancelled')
                -- Spárovaná/zaplacená záloha (advance) nese náklad finální faktura → vyřadit (jako topVendors)
                AND NOT (COALESCE(pi.document_kind, '') = 'advance'
                         AND (pi.status = 'paid'
                              OR EXISTS (SELECT 1 FROM purchase_invoices adv_s
-                                         WHERE adv_s.advance_purchase_invoice_id = pi.id)))
+                                         WHERE adv_s.advance_purchase_invoice_id = pi.id
+                                           AND adv_s.deleted_at IS NULL)))
           GROUP BY pi.expense_category_id, ec.code, ec.label
           ORDER BY total DESC
         ";
@@ -906,6 +928,7 @@ final class CrmAggregationService
          LEFT JOIN revenue_categories rc ON rc.id = i.revenue_category_id
          LEFT JOIN currencies cur ON cur.id = i.currency_id
              WHERE i.supplier_id = ?
+               AND i.deleted_at IS NULL
                AND i.issue_date >= ?
                AND i.status NOT IN ('draft', 'cancelled')
                AND i.invoice_type != 'proforma'  -- proformy vynechat (nejsou daňový doklad)
@@ -945,7 +968,7 @@ final class CrmAggregationService
                     SUM(COALESCE($rev, 0) * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)) AS total_revenue,
                     GROUP_CONCAT(DISTINCT cur.code ORDER BY cur.code SEPARATOR ',') AS currencies
                FROM clients c
-               JOIN invoices i ON i.client_id = c.id AND i.status NOT IN ('draft', 'cancelled')
+               JOIN invoices i ON i.client_id = c.id AND i.deleted_at IS NULL AND i.status NOT IN ('draft', 'cancelled')
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE c.supplier_id = ?
                 AND i.invoice_type != 'proforma'
@@ -995,11 +1018,13 @@ final class CrmAggregationService
         $stmt = $pdo->prepare(
             "SELECT i.id FROM invoices i
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status IN ('issued', 'sent', 'reminded')
                 AND i.due_date <= ?
                 AND (i.invoice_type != 'proforma'
                      OR NOT EXISTS (SELECT 1 FROM invoices ch
-                                     WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'))
+                                     WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'
+                                       AND ch.deleted_at IS NULL))
                 AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)"
         );
         $stmt->execute([$supplierId, $today]);
@@ -1082,6 +1107,7 @@ final class CrmAggregationService
         $stmt = $pdo->prepare(
             "SELECT id FROM purchase_invoices
               WHERE supplier_id = ?
+                AND deleted_at IS NULL
                 AND status IN ('received', 'booked')
                 AND due_date < ?"
         );
@@ -1104,7 +1130,7 @@ final class CrmAggregationService
         // 3b. Koncepty přijatých faktur — naimportované (API/AI/PDF) zůstávají ve stavu
         // draft kvůli upomínkám/kontrole; vyzvi k revizi a zaúčtování.
         $stmt = $pdo->prepare(
-            "SELECT id FROM purchase_invoices WHERE supplier_id = ? AND status = 'draft'"
+            "SELECT id FROM purchase_invoices WHERE supplier_id = ? AND deleted_at IS NULL AND status = 'draft'"
         );
         $stmt->execute([$supplierId]);
         $purchaseDraftIds = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
@@ -1156,6 +1182,7 @@ final class CrmAggregationService
                   LEFT JOIN countries co ON co.id = c.country_id
                        JOIN invoice_items ii ON ii.invoice_id = i.id
                       WHERE i.supplier_id = ?
+                        AND i.deleted_at IS NULL
                         AND i.status IN ('issued','sent','reminded','paid')
                         AND i.invoice_type IN ('invoice','credit_note','tax_document')
                         AND COALESCE(co.is_eu, 0) = 1
@@ -1193,6 +1220,7 @@ final class CrmAggregationService
                 SELECT client_id, MAX(issue_date) AS last_date
                   FROM invoices
                  WHERE supplier_id = ?
+                   AND deleted_at IS NULL
                    AND status NOT IN ('draft', 'cancelled')
                  GROUP BY client_id
               )
@@ -1537,11 +1565,13 @@ final class CrmAggregationService
                 $stmt = $pdo->prepare(
                     "SELECT i.id FROM invoices i
                       WHERE i.supplier_id = ?
+                        AND i.deleted_at IS NULL
                         AND i.status IN ('issued','sent','reminded')
                         AND i.due_date <= ?
                         AND (i.invoice_type != 'proforma'
                              OR NOT EXISTS (SELECT 1 FROM invoices ch
-                                             WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'))
+                                             WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'
+                                               AND ch.deleted_at IS NULL))
                         AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)"
                 );
                 $stmt->execute([$supplierId, $today]);
@@ -1578,6 +1608,7 @@ final class CrmAggregationService
                 $stmt = $pdo->prepare(
                     "SELECT id FROM purchase_invoices
                       WHERE supplier_id = ?
+                        AND deleted_at IS NULL
                         AND status IN ('received','booked')
                         AND due_date < ?"
                 );
@@ -1585,7 +1616,7 @@ final class CrmAggregationService
                 break;
             case 'purchase_drafts':
                 $stmt = $pdo->prepare(
-                    "SELECT id FROM purchase_invoices WHERE supplier_id = ? AND status = 'draft'"
+                    "SELECT id FROM purchase_invoices WHERE supplier_id = ? AND deleted_at IS NULL AND status = 'draft'"
                 );
                 $stmt->execute([$supplierId]);
                 break;
@@ -1595,6 +1626,7 @@ final class CrmAggregationService
                         SELECT client_id, MAX(issue_date) AS last_date
                           FROM invoices
                          WHERE supplier_id = ?
+                           AND deleted_at IS NULL
                            AND status NOT IN ('draft','cancelled')
                          GROUP BY client_id
                       )
@@ -1653,6 +1685,7 @@ final class CrmAggregationService
                    FROM invoices i
               LEFT JOIN currencies c ON c.id = i.currency_id
                   WHERE i.supplier_id = ?
+                    AND i.deleted_at IS NULL
                     AND i.status IN ('issued', 'sent', 'reminded')
                     AND i.invoice_type != 'proforma'
                     AND (i.invoice_type NOT IN ('invoice','tax_document') OR i.amount_to_pay - i.paid_total > 0)
@@ -1668,6 +1701,7 @@ final class CrmAggregationService
                    FROM purchase_invoices pi
               LEFT JOIN currencies c ON c.id = pi.currency_id
                   WHERE pi.supplier_id = ?
+                    AND pi.deleted_at IS NULL
                     AND pi.status IN ('received', 'booked')
                     AND pi.due_date BETWEEN ? AND ?
                     AND COALESCE(c.code, 'CZK') = ?"
@@ -1723,6 +1757,7 @@ final class CrmAggregationService
                        DATEDIFF(i.paid_at, i.due_date) AS days_late
                   FROM invoices i
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND i.status = 'paid'
                    AND i.paid_at IS NOT NULL
                    AND i.due_date IS NOT NULL
@@ -1787,6 +1822,7 @@ final class CrmAggregationService
                     COALESCE(i.reminder_count, 0) AS reminder_count
                FROM invoices i
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status IN ('paid', 'sent', 'reminded')
                 -- tax_document je auto-paid bez upomínek — do statistiky účinnosti nepatří
                 AND i.invoice_type NOT IN ('proforma', 'tax_document')
@@ -1839,6 +1875,7 @@ final class CrmAggregationService
             "SELECT DATEDIFF(paid_at, issue_date) AS days
                FROM invoices
               WHERE supplier_id = ?
+                AND deleted_at IS NULL
                 AND status = 'paid'
                 AND paid_at IS NOT NULL
                 AND invoice_type != 'proforma'

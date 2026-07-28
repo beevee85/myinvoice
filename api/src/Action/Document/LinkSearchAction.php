@@ -117,7 +117,8 @@ final class LinkSearchAction
     {
         $toks = $this->tokens($q);
         if ($toks === []) return [];
-        $where = ['i.supplier_id = ?'];
+        // Doklad v koši se k propojení nenabízí.
+        $where = ['i.supplier_id = ?', 'i.deleted_at IS NULL'];
         $params = [$sid];
         foreach ($toks as $tk) {
             $esc = '%' . addcslashes($tk, '%_\\') . '%';
@@ -143,7 +144,8 @@ final class LinkSearchAction
     {
         $toks = $this->tokens($q);
         if ($toks === []) return [];
-        $where = ['pi.supplier_id = ?'];
+        // Doklad v koši se k propojení nenabízí.
+        $where = ['pi.supplier_id = ?', 'pi.deleted_at IS NULL'];
         $params = [$sid];
         foreach ($toks as $tk) {
             $esc = '%' . addcslashes($tk, '%_\\') . '%';

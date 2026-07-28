@@ -150,6 +150,7 @@ final class IncomeTaxBuilder
                FROM invoices i
           LEFT JOIN currencies c ON c.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status NOT IN ('draft', 'cancelled')
                 AND i.invoice_type != 'proforma'
                 -- Doklady mimo základ daně z příjmů (§4 osvobození / přefakturace) se
@@ -168,6 +169,7 @@ final class IncomeTaxBuilder
                FROM invoices i
           LEFT JOIN currencies c ON c.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status NOT IN ('draft', 'cancelled')
                 AND i.invoice_type != 'proforma'
                 AND COALESCE(i.income_tax_exempt, 0) = 1
@@ -187,6 +189,7 @@ final class IncomeTaxBuilder
                FROM purchase_invoices pi
           LEFT JOIN currencies c ON c.id = pi.currency_id
               WHERE pi.supplier_id = ?
+                AND pi.deleted_at IS NULL
                 AND pi.status NOT IN ('draft', 'cancelled')
                 AND pi.tax_deductible = 1
                 -- Zálohová / proforma (advance) NENÍ daňový doklad → nikdy uznatelný

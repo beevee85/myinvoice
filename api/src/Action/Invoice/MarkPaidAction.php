@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Invoice;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TrashGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
@@ -38,6 +39,10 @@ final class MarkPaidAction
         $invoice = $this->repo->find($id);
         if (!SupplierGuard::owns($request, $invoice)) {
             return Json::error($response, 'not_found', 'Faktura nenalezena.', 404);
+        }
+        // Doklad v koši je read-only (soft delete, 0905).
+        if (($blocked = TrashGuard::blockIfTrashed($invoice, $response)) !== null) {
+            return $blocked;
         }
         if (!in_array($invoice['status'], ['issued', 'sent', 'reminded'], true)) {
             return Json::error($response, 'invalid_state', 'Lze označit jako zaplacené jen vystavenou nebo odeslanou fakturu.', 409);

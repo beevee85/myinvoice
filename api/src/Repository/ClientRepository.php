@@ -179,7 +179,8 @@ final class ClientRepository
                                      AND NOT (COALESCE(pi.document_kind, '') = 'advance'
                                               AND (pi.status = 'paid'
                                                    OR EXISTS (SELECT 1 FROM purchase_invoices adv_s
-                                                               WHERE adv_s.advance_purchase_invoice_id = pi.id))),
+                                                               WHERE adv_s.advance_purchase_invoice_id = pi.id
+                                                                 AND adv_s.deleted_at IS NULL))),
                                      pi.total_with_vat * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1),
                                      0)) AS costs,
                               SUM(IF(pi.status != 'cancelled', 1, 0)) AS purchase_count,
@@ -187,6 +188,7 @@ final class ClientRepository
                          FROM purchase_invoices pi
                     LEFT JOIN currencies cur ON cur.id = pi.currency_id
                         WHERE pi.supplier_id = ?
+                          AND pi.deleted_at IS NULL
                      GROUP BY pi.vendor_id
                    ) pi_agg ON pi_agg.vendor_id = c.id
                  WHERE $whereSql

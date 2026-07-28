@@ -6,6 +6,7 @@ namespace MyInvoice\Action\PurchaseInvoice;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TrashGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
@@ -82,6 +83,10 @@ final class PaymentQrAction
         if ($err !== null) {
             return $err;
         }
+        // Doklad v koši je read-only (soft delete, 0905) — mutace účtu blokujeme, GET QR ne.
+        if (($blocked = TrashGuard::blockIfTrashed($invoice, $response)) !== null) {
+            return $blocked;
+        }
         $id = (int) $invoice['id'];
 
         if ($this->hasStoredAccount($invoice)) {
@@ -144,6 +149,10 @@ final class PaymentQrAction
         [$err, $invoice, $supplierId] = $this->load($request, $response, $args);
         if ($err !== null) {
             return $err;
+        }
+        // Doklad v koši je read-only (soft delete, 0905) — mutace účtu blokujeme, GET QR ne.
+        if (($blocked = TrashGuard::blockIfTrashed($invoice, $response)) !== null) {
+            return $blocked;
         }
         $id = (int) $invoice['id'];
 

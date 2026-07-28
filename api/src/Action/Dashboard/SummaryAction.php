@@ -108,6 +108,7 @@ final class SummaryAction
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND COALESCE(i.tax_date, i.issue_date) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
@@ -138,6 +139,7 @@ final class SummaryAction
                   JOIN currencies cur ON cur.id = i.currency_id
              LEFT JOIN revenue_categories rc ON rc.id = i.revenue_category_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND COALESCE(i.tax_date, i.issue_date) >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
@@ -173,6 +175,7 @@ final class SummaryAction
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
                  GROUP BY year, cur.code
@@ -229,6 +232,7 @@ final class SummaryAction
                FROM invoices i
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status = 'paid'
                 AND i.paid_at IS NOT NULL
                 AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
@@ -287,7 +291,8 @@ final class SummaryAction
                           AND COALESCE(approval_reminder_at, approval_requested_at)
                               <= DATE_SUB(NOW(), INTERVAL 5 DAY) THEN 1 ELSE 0 END) AS overdue
               FROM invoices
-             WHERE supplier_id = ?"
+             WHERE supplier_id = ?
+               AND deleted_at IS NULL"
         );
         $stmt->execute([$sid]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: ['requested' => 0, 'overdue' => 0];
@@ -331,6 +336,7 @@ final class SummaryAction
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND YEAR(COALESCE(i.tax_date, i.issue_date)) IN (?, ?)
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
@@ -374,6 +380,7 @@ final class SummaryAction
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) FROM invoices
               WHERE supplier_id = ?
+                AND deleted_at IS NULL
                 AND YEAR(COALESCE(tax_date, issue_date)) = ?
                 AND status NOT IN ('draft', 'cancelled')
                 AND invoice_type IN ('invoice', 'credit_note', 'tax_document')"
@@ -387,6 +394,7 @@ final class SummaryAction
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status IN ('issued','sent','reminded') AND i.due_date <= CURDATE()
                 AND " . $this->receivableDocTypeSql() . "
                 AND " . $this->outstandingReceivableSql() . "
@@ -404,7 +412,7 @@ final class SummaryAction
         // Průměrná doba úhrady (paid_at - issue_date) ve dnech, pro letošní zaplacené
         $stmt = $pdo->prepare(
             "SELECT AVG(DATEDIFF(paid_at, issue_date)) FROM invoices
-              WHERE supplier_id = ? AND status = 'paid' AND paid_at IS NOT NULL
+              WHERE supplier_id = ? AND deleted_at IS NULL AND status = 'paid' AND paid_at IS NOT NULL
                 AND YEAR(COALESCE(tax_date, issue_date)) = ?"
         );
         $stmt->execute([$sid, $year]);
@@ -418,6 +426,7 @@ final class SummaryAction
             "SELECT status, COUNT(*) AS cnt
                FROM invoices
               WHERE supplier_id = ?
+                AND deleted_at IS NULL
                 AND YEAR(COALESCE(tax_date, issue_date)) = ?
                 AND invoice_type = 'invoice'
               GROUP BY status"
@@ -436,6 +445,7 @@ final class SummaryAction
                FROM purchase_invoices pi
           LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
+                AND pi.deleted_at IS NULL
                 AND pi.status NOT IN ('draft', 'cancelled')" . $this->advanceCostExclude() . "
                 AND YEAR(pi.issue_date) = ?"
         );
@@ -448,6 +458,7 @@ final class SummaryAction
                FROM purchase_invoices pi
           LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
+                AND pi.deleted_at IS NULL
                 AND pi.status IN ('received', 'booked')"
         );
         $stmt->execute([$sid]);
@@ -458,6 +469,7 @@ final class SummaryAction
             "SELECT COUNT(*) AS cnt
                FROM purchase_invoices pi
               WHERE pi.supplier_id = ?
+                AND pi.deleted_at IS NULL
                 AND pi.status IN ('received', 'booked')
                 AND pi.due_date < ?"
         );
@@ -497,7 +509,9 @@ final class SummaryAction
         return " AND NOT (COALESCE(pi.document_kind, '') = 'advance'"
              . " AND (pi.status <> 'paid'"
              . " OR EXISTS (SELECT 1 FROM purchase_invoices adv_s"
-             . " WHERE adv_s.advance_purchase_invoice_id = pi.id)))";
+             // Vyúčtování v koši zálohu „neuvolňuje" z nákladů dvojmo — koš ignorujeme.
+             . " WHERE adv_s.advance_purchase_invoice_id = pi.id"
+             . " AND adv_s.deleted_at IS NULL)))";
     }
 
     /**
@@ -513,7 +527,9 @@ final class SummaryAction
         return "(i.invoice_type IN ('invoice','credit_note','tax_document')"
              . " OR (i.invoice_type = 'proforma'"
              . " AND NOT EXISTS (SELECT 1 FROM invoices ch"
-             . " WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice')))";
+             // Ostrý doklad v koši dluh nenese — proforma se má vrátit mezi pohledávky.
+             . " WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'"
+             . " AND ch.deleted_at IS NULL)))";
     }
 
     /**
@@ -538,6 +554,7 @@ final class SummaryAction
                   FROM purchase_invoices pi
              LEFT JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND pi.status NOT IN ('draft', 'cancelled')" . $this->advanceCostExclude() . "
                    AND pi.issue_date >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 11 MONTH), '%Y-%m-01')
                  GROUP BY ym";
@@ -568,6 +585,7 @@ final class SummaryAction
                   JOIN clients c ON c.id = i.client_id
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND i.status IN ('issued','sent','reminded')
                    AND i.due_date <= CURDATE()
                    AND " . $this->receivableDocTypeSql() . "
@@ -589,6 +607,7 @@ final class SummaryAction
                   JOIN clients c ON c.id = i.client_id
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND i.status IN ('issued','sent','reminded')
                    AND i.due_date >= CURDATE()
                    AND i.invoice_type IN ('invoice','credit_note','tax_document')
@@ -617,6 +636,7 @@ final class SummaryAction
                   JOIN currencies cur ON cur.id = i.currency_id
              LEFT JOIN projects p ON p.id = i.project_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND i.status = 'draft'
                    -- Koncept daňového dokladu k přijaté platbě (#89) sem nepatří —
                    -- nemá výkaz práce, vystavuje se z detailu zálohy/platby.
@@ -654,6 +674,7 @@ final class SummaryAction
                   JOIN clients c ON c.id = i.client_id
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND YEAR(COALESCE(i.tax_date, i.issue_date)) = ?
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
@@ -694,6 +715,7 @@ final class SummaryAction
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND COALESCE(i.tax_date, i.issue_date) >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 23 MONTH), '%Y-%m-01')
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
@@ -767,6 +789,7 @@ final class SummaryAction
                   JOIN clients c ON c.id = i.client_id
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND COALESCE(i.tax_date, i.issue_date) >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
@@ -802,6 +825,7 @@ final class SummaryAction
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND COALESCE(i.tax_date, i.issue_date) >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
@@ -831,6 +855,7 @@ final class SummaryAction
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND i.status = 'paid'
                    AND i.paid_at IS NOT NULL
                    AND YEAR(i.paid_at) IN (?, ?)
@@ -890,6 +915,7 @@ final class SummaryAction
         $sql = "SELECT DATEDIFF(paid_at, issue_date) AS days
                   FROM invoices
                  WHERE supplier_id = ?
+                   AND deleted_at IS NULL
                    AND status = 'paid'
                    AND paid_at IS NOT NULL
                    AND paid_at >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
@@ -941,6 +967,7 @@ final class SummaryAction
                   JOIN invoices i ON i.id = ii.invoice_id
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
                    AND COALESCE(i.tax_date, i.issue_date) >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
@@ -978,6 +1005,7 @@ final class SummaryAction
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND i.status IN ('issued','sent','reminded')
                    AND i.invoice_type IN ('invoice','credit_note','tax_document')
                    AND i.due_date >= CURDATE()
@@ -1016,6 +1044,7 @@ final class SummaryAction
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND i.status IN ('issued','sent','reminded')
                    AND i.invoice_type IN ('invoice','credit_note','tax_document')
                    AND i.due_date >= CURDATE()
@@ -1056,6 +1085,7 @@ final class SummaryAction
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND i.status IN ('issued','sent','reminded')
                    AND " . $this->receivableDocTypeSql() . "
                    AND " . $this->outstandingReceivableSql() . "
@@ -1118,6 +1148,7 @@ final class SummaryAction
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND YEAR(COALESCE(i.tax_date, i.issue_date)) IN (?, ?, ?)
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
@@ -1227,6 +1258,7 @@ final class SummaryAction
         $sql = "SELECT $rev * COALESCE(exchange_rate, 1) AS size_czk
                   FROM invoices
                  WHERE supplier_id = ?
+                   AND deleted_at IS NULL
                    AND status IN ('issued', 'sent', 'reminded', 'paid')
                    AND invoice_type IN ('invoice', 'credit_note', 'tax_document')
                    AND COALESCE(tax_date, issue_date) >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)";

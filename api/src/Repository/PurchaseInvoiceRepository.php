@@ -105,6 +105,7 @@ final class PurchaseInvoiceRepository
                               SELECT 1 FROM purchase_invoices pi
                                WHERE pi.supplier_id = ? AND pi.vendor_id = ?
                                  AND pi.document_kind = 'advance' AND pi.status != 'cancelled'
+                                 AND pi.deleted_at IS NULL
                                  AND pi.id <> ?
                                  AND NOT EXISTS (SELECT 1 FROM purchase_invoices s
                                                   WHERE s.advance_purchase_invoice_id = pi.id)
@@ -119,6 +120,7 @@ final class PurchaseInvoiceRepository
                           SELECT 1 FROM purchase_invoices pi
                            WHERE pi.supplier_id = ? AND pi.vendor_id = ?
                              AND pi.document_kind != 'advance' AND pi.status != 'cancelled'
+                             AND pi.deleted_at IS NULL
                              AND pi.advance_purchase_invoice_id IS NULL AND pi.id <> ?
                         )"
             );
@@ -286,6 +288,9 @@ final class PurchaseInvoiceRepository
             $params[] = '%' . $q . '%';
         }
 
+        // Koš (soft delete, 0905): standardně jen aktivní doklady; trash=1 → jen koš.
+        $where[] = empty($filters['trash']) ? 'pi.deleted_at IS NULL' : 'pi.deleted_at IS NOT NULL';
+
         $whereSql = implode(' AND ', $where);
 
         // MariaDB 10.2+ window function — COUNT(*) OVER() vrací total v každém řádku.
@@ -303,6 +308,7 @@ final class PurchaseInvoiceRepository
                        pi.payment_ordered_at,
                        pi.status, pi.booked_at, pi.paid_at, pi.cancelled_at,
                        pi.extraction_warning, pi.vat_deduction, pi.vat_deduction_percent, pi.tax_deductible,
+                       pi.deleted_at, pi.delete_reason, du.name AS deleted_by_name,
                        c.company_name AS vendor_company_name, c.ic AS vendor_ic,
                        DATE_FORMAT(pi.issue_date, '%Y-%m') AS month_bucket,
                        EXISTS (SELECT 1 FROM purchase_invoices adv_f
@@ -310,6 +316,7 @@ final class PurchaseInvoiceRepository
                        {$selectTotal}
                   FROM purchase_invoices pi
                   JOIN clients c ON c.id = pi.vendor_id
+             LEFT JOIN users du ON du.id = pi.deleted_by
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE $whereSql
                  ORDER BY pi.issue_date DESC, pi.id DESC";
@@ -594,7 +601,8 @@ final class PurchaseInvoiceRepository
      */
     public function listPaymentCandidates(int $supplierId, ?string $currency = null): array
     {
-        $where = ["pi.supplier_id = ?", "pi.status IN ('received','booked')", "pi.amount_to_pay > 0"];
+        // Doklad v koši se do platebního příkazu nenabízí.
+        $where = ["pi.supplier_id = ?", "pi.deleted_at IS NULL", "pi.status IN ('received','booked')", "pi.amount_to_pay > 0"];
         $params = [$supplierId];
         if ($currency !== null && $currency !== '') {
             $where[] = 'cur.code = ?';
@@ -1067,6 +1075,8 @@ final class PurchaseInvoiceRepository
                 AND pi.vendor_id = ?
                 AND pi.document_kind = 'advance'
                 AND pi.status != 'cancelled'
+                -- Doklad v koši se nenabízí k párování.
+                AND pi.deleted_at IS NULL
                 AND pi.id <> ?
                 AND NOT EXISTS (SELECT 1 FROM purchase_invoices s
                                  WHERE s.advance_purchase_invoice_id = pi.id)
@@ -1112,6 +1122,8 @@ final class PurchaseInvoiceRepository
                 AND pi.vendor_id = ?
                 AND pi.document_kind != 'advance'
                 AND pi.status != 'cancelled'
+                -- Doklad v koši se nenabízí k párování.
+                AND pi.deleted_at IS NULL
                 AND pi.advance_purchase_invoice_id IS NULL
                 AND pi.id <> ?
               ORDER BY (pi.currency_id = ?) DESC,
@@ -1156,6 +1168,7 @@ final class PurchaseInvoiceRepository
                JOIN clients c ON c.id = pi.vendor_id
           LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
+                AND pi.deleted_at IS NULL
                 AND (pi.varsymbol LIKE ? OR pi.vendor_invoice_number LIKE ?)
               ORDER BY pi.issue_date DESC, pi.id DESC
               LIMIT " . (int) $limit
@@ -1190,6 +1203,7 @@ final class PurchaseInvoiceRepository
               WHERE pi.supplier_id = ? AND pi.vendor_id = ?
                 AND pi.document_kind = 'advance'
                 AND pi.status != 'cancelled'
+                AND pi.deleted_at IS NULL
                 AND (REPLACE(COALESCE(pi.vendor_invoice_number,''), ' ', '') = ?
                   OR REPLACE(COALESCE(pi.varsymbol,''), ' ', '') = ?)
                 AND NOT EXISTS (SELECT 1 FROM purchase_invoices s
@@ -1401,6 +1415,48 @@ final class PurchaseInvoiceRepository
     private function escapeLikePurchase(string $value): string
     {
         return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $value);
+    }
+
+    /**
+     * Uvolní čítač interní řady, pokud je mazaný doklad POSLEDNÍ v řadě — další
+     * založený doklad pak dostane stejné číslo a nevznikne mezera (Vyfakturuj vzor;
+     * zrcadlí VarsymbolGenerator::releaseIfLatest u vydaných).
+     *
+     * Volej PŘED/PO hard delete se stejným obdobím, s jakým číslo vznikalo (DUZP).
+     * Idempotentní a optimisticky zamčené: když číslo šabloně neodpovídá (ruční
+     * číslo, cizí formát) nebo counter mezitím inkrementoval, nic neudělá.
+     *
+     * @return bool true pokud byl counter dekrementován
+     */
+    public function releasePurchaseVarsymbolIfLatest(int $supplierId, string $varsymbol, string $period): bool
+    {
+        if ($supplierId <= 0 || $varsymbol === '') {
+            return false;
+        }
+        $template = $this->purchaseTemplate($supplierId);
+        [$regex] = $this->buildPurchaseMatcher($template, $period);
+        if ($regex === null || !preg_match($regex, $varsymbol, $m)) {
+            return false; // šablona bez čítače / ručně zadané číslo — není co vracet
+        }
+        $counterValue  = (int) $m[1];
+        $counterPeriod = $this->purchaseCounterPeriod($template, $period);
+
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'SELECT last_number FROM purchase_invoice_counters WHERE supplier_id = ? AND period = ?'
+        );
+        $stmt->execute([$supplierId, $counterPeriod]);
+        $current = (int) ($stmt->fetchColumn() ?: 0);
+        if ($current <= 0 || $current !== $counterValue) {
+            return false;
+        }
+
+        $upd = $pdo->prepare(
+            'UPDATE purchase_invoice_counters SET last_number = last_number - 1
+              WHERE supplier_id = ? AND period = ? AND last_number = ?'
+        );
+        $upd->execute([$supplierId, $counterPeriod, $current]);
+        return $upd->rowCount() > 0;
     }
 
     /** Zvedne counter období na minimálně $value (GREATEST, nikdy nesnižuje); vrací výslednou hodnotu. */

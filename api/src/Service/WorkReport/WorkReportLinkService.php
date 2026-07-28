@@ -296,7 +296,8 @@ final class WorkReportLinkService
                JOIN work_reports wr ON wr.invoice_id = i.id
                JOIN currencies cur ON cur.id = i.currency_id
           LEFT JOIN projects p ON p.id = i.project_id
-              WHERE i.supplier_id = ? AND i.client_id = ? AND i.status = 'draft'";
+              WHERE i.supplier_id = ? AND i.client_id = ? AND i.status = 'draft'
+                AND i.deleted_at IS NULL";
         $params = [$supplierId, $clientId];
         if ($projectId !== null) {
             $sql .= ' AND i.project_id = ?';

@@ -206,6 +206,7 @@ final class RecurringTemplateAction
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.recurring_template_id = ?
+                AND i.deleted_at IS NULL
               ORDER BY i.issue_date DESC, i.id DESC"
         );
         $stmt->execute([$id]);

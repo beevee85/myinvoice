@@ -68,8 +68,14 @@ final class BulkReissueAction
         foreach ($ids as $sourceId) {
             $sourceId = (int) $sourceId;
             // Ownership: nedovol klonovat cizí faktury
-            if (!SupplierGuard::owns($request, $this->repo->find($sourceId))) {
+            $source = $this->repo->find($sourceId);
+            if (!SupplierGuard::owns($request, $source)) {
                 $errors[] = ['source_id' => $sourceId, 'error' => 'not_found'];
+                continue;
+            }
+            // Doklad v koši (soft delete) se do dávky nebere.
+            if (!empty($source['deleted_at'])) {
+                $errors[] = ['source_id' => $sourceId, 'error' => 'in_trash'];
                 continue;
             }
             try {

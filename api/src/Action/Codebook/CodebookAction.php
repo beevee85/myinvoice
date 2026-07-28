@@ -99,13 +99,13 @@ final class CodebookAction
         $pdo = $this->db->pdo();
 
         $invStmt = $pdo->prepare(
-            'SELECT DISTINCT YEAR(issue_date) AS y FROM invoices WHERE supplier_id = ? ORDER BY y DESC'
+            'SELECT DISTINCT YEAR(issue_date) AS y FROM invoices WHERE supplier_id = ? AND deleted_at IS NULL ORDER BY y DESC'
         );
         $invStmt->execute([$sid]);
         $invYears = array_map(static fn ($v) => (int) $v, $invStmt->fetchAll(\PDO::FETCH_COLUMN));
 
         $purStmt = $pdo->prepare(
-            'SELECT DISTINCT YEAR(issue_date) AS y FROM purchase_invoices WHERE supplier_id = ? ORDER BY y DESC'
+            'SELECT DISTINCT YEAR(issue_date) AS y FROM purchase_invoices WHERE supplier_id = ? AND deleted_at IS NULL ORDER BY y DESC'
         );
         $purStmt->execute([$sid]);
         $purYears = array_map(static fn ($v) => (int) $v, $purStmt->fetchAll(\PDO::FETCH_COLUMN));

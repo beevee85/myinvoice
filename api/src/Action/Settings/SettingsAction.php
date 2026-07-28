@@ -290,7 +290,18 @@ final class SettingsAction
             'self_copy',
             // FORK (beevee85) REDESIGN F8: vzhled PDF dokladu (migrace 0903)
             'pdf_attribution_enabled', 'pdf_legal_text', 'pdf_barcode_enabled',
+            // FORK (beevee85): koš pro doklady (migrace 0905)
+            'doc_trash_enabled', 'doc_trash_retention_days',
         ];
+
+        // FORK 0905: retence koše — celé dny 0–3650 (0 = neomezeně)
+        if (array_key_exists('doc_trash_retention_days', $body)) {
+            $v = (int) $body['doc_trash_retention_days'];
+            if ($v < 0 || $v > 3650) {
+                return Json::error($response, 'validation_failed', 'Retence koše musí být 0–3650 dní (0 = neomezeně).', 400);
+            }
+            $body['doc_trash_retention_days'] = $v;
+        }
 
         // FORK F8: právní věta na PDF — délkový limit (tiskne se pod položky, ne esej)
         if (array_key_exists('pdf_legal_text', $body)) {
@@ -611,6 +622,9 @@ final class SettingsAction
             ? (int) $row['default_branding_profile_id']
             : null;
         $row['has_email_logo']           = SafeLogoPath::resolve($row['logo_path'] ?? null, $row['id']) !== null;
+        // FORK 0905: koš pro doklady
+        $row['doc_trash_enabled']        = (bool) ($row['doc_trash_enabled'] ?? true);
+        $row['doc_trash_retention_days'] = (int) ($row['doc_trash_retention_days'] ?? 30);
         $row['payment_thanks_enabled']        = (bool) ($row['payment_thanks_enabled'] ?? false);
         $row['payment_thanks_auto_send']      = (bool) ($row['payment_thanks_auto_send'] ?? false);
         $row['payment_thanks_default_checked']= (bool) ($row['payment_thanks_default_checked'] ?? false);

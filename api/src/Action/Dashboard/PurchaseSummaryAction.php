@@ -106,7 +106,9 @@ final class PurchaseSummaryAction
         return " AND NOT (COALESCE({$p}document_kind, '') = 'advance'"
              . " AND ({$p}status <> 'paid'"
              . " OR EXISTS (SELECT 1 FROM purchase_invoices adv_s"
-             . " WHERE adv_s.advance_purchase_invoice_id = {$idRef})))";
+             // Vyúčtování v koši náklad nenese — zaplacená záloha se má počítat dál.
+             . " WHERE adv_s.advance_purchase_invoice_id = {$idRef}"
+             . " AND adv_s.deleted_at IS NULL)))";
     }
 
     /** Počet aktivních (nearchivovaných) dodavatelů. */
@@ -128,6 +130,7 @@ final class PurchaseSummaryAction
                   FROM purchase_invoices pi
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND GREATEST(COALESCE(pi.tax_date, pi.issue_date), pi.issue_date) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
                    AND pi.status IN " . self::COST_STATUSES . $this->advanceCostExclude() . "
                  GROUP BY cur.code";
@@ -154,6 +157,7 @@ final class PurchaseSummaryAction
                   FROM purchase_invoices pi
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND pi.status IN " . self::COST_STATUSES . $this->advanceCostExclude() . "
                  GROUP BY year, cur.code
                  ORDER BY year DESC, total DESC";
@@ -196,6 +200,7 @@ final class PurchaseSummaryAction
                   FROM purchase_invoices pi
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND YEAR(GREATEST(COALESCE(pi.tax_date, pi.issue_date), pi.issue_date)) IN (?, ?)
                    AND pi.status IN " . self::COST_STATUSES . $this->advanceCostExclude() . "
                  GROUP BY cur.code";
@@ -234,6 +239,7 @@ final class PurchaseSummaryAction
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) FROM purchase_invoices
               WHERE supplier_id = ?
+                AND deleted_at IS NULL
                 AND YEAR(COALESCE(tax_date, issue_date)) = ?
                 AND status IN " . self::COST_STATUSES . $this->advanceCostExclude('')
         );
@@ -246,6 +252,7 @@ final class PurchaseSummaryAction
                FROM purchase_invoices pi
                JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
+                AND pi.deleted_at IS NULL
                 AND pi.status IN " . self::UNPAID_STATUSES . "
               GROUP BY cur.code"
         );
@@ -262,6 +269,7 @@ final class PurchaseSummaryAction
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) FROM purchase_invoices
               WHERE supplier_id = ?
+                AND deleted_at IS NULL
                 AND status IN " . self::UNPAID_STATUSES . "
                 AND due_date < CURDATE()"
         );
@@ -271,7 +279,7 @@ final class PurchaseSummaryAction
         // Ø doba úhrady dodavatelům (paid_at - issue_date) pro letošní zaplacené
         $stmt = $pdo->prepare(
             "SELECT AVG(DATEDIFF(paid_at, issue_date)) FROM purchase_invoices
-              WHERE supplier_id = ? AND status = 'paid' AND paid_at IS NOT NULL
+              WHERE supplier_id = ? AND deleted_at IS NULL AND status = 'paid' AND paid_at IS NOT NULL
                 AND YEAR(COALESCE(tax_date, issue_date)) = ?"
         );
         $stmt->execute([$sid, $year]);
@@ -285,6 +293,7 @@ final class PurchaseSummaryAction
             "SELECT status, COUNT(*) AS cnt
                FROM purchase_invoices
               WHERE supplier_id = ?
+                AND deleted_at IS NULL
                 AND YEAR(COALESCE(tax_date, issue_date)) = ?
               GROUP BY status"
         );
@@ -316,6 +325,7 @@ final class PurchaseSummaryAction
                   JOIN clients c ON c.id = pi.vendor_id
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND pi.status IN " . self::UNPAID_STATUSES . "
                    AND pi.due_date < CURDATE()
                  ORDER BY pi.due_date ASC
@@ -335,6 +345,7 @@ final class PurchaseSummaryAction
                   JOIN clients c ON c.id = pi.vendor_id
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND pi.status IN " . self::UNPAID_STATUSES . "
                    AND pi.due_date >= CURDATE()
                  ORDER BY pi.due_date ASC
@@ -360,6 +371,7 @@ final class PurchaseSummaryAction
                   JOIN clients c ON c.id = pi.vendor_id
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND YEAR(GREATEST(COALESCE(pi.tax_date, pi.issue_date), pi.issue_date)) = ?
                    AND pi.status IN " . self::COST_STATUSES . $this->advanceCostExclude() . "
                  GROUP BY c.id, c.company_name
@@ -389,6 +401,7 @@ final class PurchaseSummaryAction
                   JOIN clients c ON c.id = pi.vendor_id
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND GREATEST(COALESCE(pi.tax_date, pi.issue_date), pi.issue_date) >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
                    AND pi.status IN " . self::COST_STATUSES . $this->advanceCostExclude() . "
                  GROUP BY c.id, c.company_name
@@ -418,6 +431,7 @@ final class PurchaseSummaryAction
                   FROM purchase_invoices pi
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND GREATEST(COALESCE(pi.tax_date, pi.issue_date), pi.issue_date) >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 23 MONTH), '%Y-%m-01')
                    AND pi.status IN " . self::COST_STATUSES . $this->advanceCostExclude() . "
                  GROUP BY cur.code, ym";
@@ -438,6 +452,7 @@ final class PurchaseSummaryAction
                   FROM purchase_invoices pi
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND pi.status = 'paid'
                    AND pi.paid_at IS NOT NULL
                    AND YEAR(pi.paid_at) IN (?, ?)
@@ -541,6 +556,7 @@ final class PurchaseSummaryAction
                   FROM purchase_invoices pi
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND GREATEST(COALESCE(pi.tax_date, pi.issue_date), pi.issue_date) >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
                    AND pi.status IN " . self::COST_STATUSES . $this->advanceCostExclude() . "
                  GROUP BY cur.code";
@@ -562,6 +578,7 @@ final class PurchaseSummaryAction
         $sql = "SELECT DATEDIFF(paid_at, issue_date) AS days
                   FROM purchase_invoices
                  WHERE supplier_id = ?
+                   AND deleted_at IS NULL
                    AND status = 'paid'
                    AND paid_at IS NOT NULL
                    AND paid_at >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)";
@@ -612,6 +629,7 @@ final class PurchaseSummaryAction
                   JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND pi.status IN " . self::COST_STATUSES . "
                    AND COALESCE(pi.document_kind, '') <> 'advance'
                    AND pi.vat_deduction <> 'none'
@@ -648,6 +666,7 @@ final class PurchaseSummaryAction
              LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND GREATEST(COALESCE(pi.tax_date, pi.issue_date), pi.issue_date) >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
                    AND pi.status IN " . self::COST_STATUSES . $this->advanceCostExclude() . "
                  GROUP BY pi.expense_category_id, ec.code, ec.label
@@ -682,6 +701,7 @@ final class PurchaseSummaryAction
                   FROM purchase_invoices pi
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND pi.status IN " . self::UNPAID_STATUSES . "
                    AND pi.due_date >= CURDATE()
                  GROUP BY cur.code";
@@ -713,6 +733,7 @@ final class PurchaseSummaryAction
                   FROM purchase_invoices pi
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND pi.status IN " . self::UNPAID_STATUSES . "
                    AND pi.due_date >= CURDATE()
                  GROUP BY cur.code";
@@ -748,6 +769,7 @@ final class PurchaseSummaryAction
                   FROM purchase_invoices pi
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND pi.status IN " . self::UNPAID_STATUSES . "
                  GROUP BY cur.code";
         $stmt = $pdo->prepare($sql);
@@ -787,6 +809,7 @@ final class PurchaseSummaryAction
                   FROM purchase_invoices pi
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND YEAR(GREATEST(COALESCE(pi.tax_date, pi.issue_date), pi.issue_date)) IN (?, ?)
                    AND pi.status IN " . self::COST_STATUSES . $this->advanceCostExclude() . "
                  GROUP BY cur.code";
@@ -819,6 +842,7 @@ final class PurchaseSummaryAction
         $sql = "SELECT $cost * COALESCE(exchange_rate, 1) AS size_czk
                   FROM purchase_invoices
                  WHERE supplier_id = ?
+                   AND deleted_at IS NULL
                    AND status IN " . self::COST_STATUSES . $this->advanceCostExclude('') . "
                    AND GREATEST(COALESCE(tax_date, issue_date), issue_date) >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)";
         $stmt = $pdo->prepare($sql);

@@ -52,6 +52,11 @@ final class ReminderService
             throw new \DomainException('Faktura nenalezena.');
         }
 
+        // Doklad v koši (soft delete) se neupomíná — pojistka pro cron i bulk cestu.
+        if (!empty($invoice['deleted_at'])) {
+            throw new \DomainException('Doklad je v koši — upomínka se neposílá.');
+        }
+
         if (!in_array($invoice['status'], ['issued', 'sent', 'reminded'], true)) {
             throw new \DomainException('Upomínku lze poslat jen u nezaplacené vystavené/odeslané faktury.');
         }

@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Invoice;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TrashGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
@@ -39,6 +40,10 @@ final class IssueFinalFromProformaAction
         $proforma = $this->repo->find($proformaId);
         if (!SupplierGuard::owns($request, $proforma)) {
             return Json::error($response, 'not_found', 'Faktura nenalezena.', 404);
+        }
+        // Doklad v koši je read-only (soft delete, 0905).
+        if (($blocked = TrashGuard::blockIfTrashed($proforma, $response)) !== null) {
+            return $blocked;
         }
         if ($proforma['invoice_type'] !== 'proforma') {
             return Json::error($response, 'not_proforma', 'Lze pouze ze zálohové faktury (proforma).', 409);

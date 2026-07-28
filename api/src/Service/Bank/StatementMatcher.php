@@ -266,6 +266,8 @@ final class StatementMatcher
                             AND CAST(REGEXP_REPLACE(i.varsymbol, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED)))
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'proforma')
+                   -- Doklad v koši se nepáruje.
+                   AND i.deleted_at IS NULL
                  LIMIT 1";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$supplierId, $vs, $vsDigits]);
@@ -286,6 +288,8 @@ final class StatementMatcher
                    JOIN currencies cur ON cur.id = i.currency_id
                   WHERE i.parent_invoice_id = ? AND i.invoice_type = 'invoice'
                     AND i.status IN ('issued', 'sent', 'reminded', 'paid')
+                    -- Finál v koši platbu nedostane — zůstane na proformě.
+                    AND i.deleted_at IS NULL
                   ORDER BY i.id LIMIT 1"
             );
             $fin->execute([(int) $inv['id']]);
@@ -523,6 +527,8 @@ final class StatementMatcher
                         OR (pi.vendor_invoice_number REGEXP '[1-9]'
                             AND CAST(REGEXP_REPLACE(pi.vendor_invoice_number, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED)))
                    AND pi.status IN ('received', 'booked', 'paid')
+                   -- Doklad v koši se nepáruje.
+                   AND pi.deleted_at IS NULL
                  LIMIT 1";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$supplierId, $vs, $vs, $vsDigits, $vsDigits]);
@@ -625,6 +631,7 @@ final class StatementMatcher
                   JOIN clients c ON c.id = pi.vendor_id
              LEFT JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND pi.status IN ('received', 'booked')";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$supplierId]);
@@ -691,6 +698,7 @@ final class StatementMatcher
                   FROM purchase_invoices pi
              LEFT JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND pi.status IN ('received', 'booked', 'paid')
                    AND (ABS(DATEDIFF(pi.due_date, ?)) <= ? OR ABS(DATEDIFF(pi.issue_date, ?)) <= ?)
                    AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.purchase_invoice_id = pi.id)";

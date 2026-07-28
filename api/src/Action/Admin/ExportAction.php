@@ -167,6 +167,7 @@ final class ExportAction
         }
         $sql = "SELECT id FROM invoices
                  WHERE supplier_id = ?
+                   AND deleted_at IS NULL
                    AND $dateExpr >= ?
                    AND $dateExpr < ?
                    AND status IN ('issued','sent','reminded','paid')

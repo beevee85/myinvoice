@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Bank;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TrashGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
@@ -1477,6 +1478,7 @@ final class BankStatementAction
                      JOIN currencies cur ON cur.id = i.currency_id
                      LEFT JOIN clients c ON c.id = i.client_id
                     WHERE i.supplier_id = ?
+                      AND i.deleted_at IS NULL
                       AND i.status IN ('issued','sent','reminded','paid')
                       AND i.invoice_type IN ('invoice','proforma','credit_note')
                       AND (ABS(DATEDIFF(i.due_date, ?)) <= ? OR ABS(DATEDIFF(i.issue_date, ?)) <= ?)";
@@ -1489,6 +1491,7 @@ final class BankStatementAction
                        JOIN currencies cur ON cur.id = p.currency_id
                        LEFT JOIN clients c ON c.id = p.vendor_id
                       WHERE p.supplier_id = ?
+                        AND p.deleted_at IS NULL
                         AND p.status IN ('received','booked','paid')
                         AND (ABS(DATEDIFF(p.due_date, ?)) <= ? OR ABS(DATEDIFF(p.issue_date, ?)) <= ?)";
 
@@ -1630,6 +1633,7 @@ final class BankStatementAction
             $a = $pdo->prepare(
                 "SELECT client_id FROM invoices
                   WHERE id = ? AND supplier_id = ?
+                    AND deleted_at IS NULL
                     AND status IN ('issued','sent','reminded','paid')
                     AND invoice_type IN ('invoice','proforma')"
             );
@@ -1655,6 +1659,7 @@ final class BankStatementAction
                   JOIN currencies cur ON cur.id = i.currency_id
              LEFT JOIN clients c ON c.id = i.client_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND i.client_id IS NOT NULL
                    AND i.status IN ('issued','sent','reminded','paid')
                    AND i.invoice_type IN ('invoice','proforma')
@@ -1953,7 +1958,7 @@ final class BankStatementAction
         if ($invoiceId <= 0 && $varsymbol !== '') {
             $sid = SupplierGuard::currentId($request);
             $stmt = $this->db->pdo()->prepare(
-                'SELECT id FROM invoices WHERE supplier_id = ? AND varsymbol = ? LIMIT 1'
+                'SELECT id FROM invoices WHERE supplier_id = ? AND varsymbol = ? AND deleted_at IS NULL LIMIT 1'
             );
             $stmt->execute([$sid, $varsymbol]);
             $invoiceId = (int) $stmt->fetchColumn();
@@ -1964,6 +1969,7 @@ final class BankStatementAction
                     // (uživatel při manuálním matchi taky zadá VS dodavatele, ne naše PF-...).
                     'SELECT id FROM purchase_invoices
                        WHERE supplier_id = ?
+                         AND deleted_at IS NULL
                          AND (varsymbol = ? OR vendor_invoice_number = ?)
                        LIMIT 1'
                 );
@@ -1985,6 +1991,10 @@ final class BankStatementAction
         $invoice = $this->invoices->find($invoiceId);
         if (!SupplierGuard::owns($request, $invoice)) {
             return Json::error($response, 'invoice_not_found', 'Faktura nenalezena.', 404);
+        }
+        // Doklad v koši se nepáruje (soft delete, 0905).
+        if (($blocked = TrashGuard::blockIfTrashed($invoice, $response)) !== null) {
+            return $blocked;
         }
         if (
             in_array($invoice['status'], ['issued', 'sent', 'reminded'], true)
@@ -2219,7 +2229,8 @@ final class BankStatementAction
                       WHERE ip.invoice_id = i.id AND ip.bank_transaction_id IS NULL) AS reconcilable_count
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
-              WHERE i.id IN ($place)"
+              WHERE i.id IN ($place)
+                AND i.deleted_at IS NULL"
         );
         $stmt->execute($invoiceIds);
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
@@ -2450,7 +2461,7 @@ final class BankStatementAction
         // Validate purchase invoice belongs to tenant + is in payable status
         $stmt = $pdo->prepare(
             'SELECT id, supplier_id, status, COALESCE(amount_to_pay, total_with_vat, 0) AS amount_to_pay
-               FROM purchase_invoices WHERE id = ?'
+               FROM purchase_invoices WHERE id = ? AND deleted_at IS NULL'
         );
         $stmt->execute([$purchaseInvoiceId]);
         $pi = $stmt->fetch(\PDO::FETCH_ASSOC);
