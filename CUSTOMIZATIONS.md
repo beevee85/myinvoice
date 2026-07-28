@@ -10,9 +10,9 @@ Uživatel chce tyto fork funkce navrhnout autorovi. Detailní checklist „před
 
 | Funkce | Sekce | Stav | Hlavní překážka před PR |
 |---|---|---|---|
-| Opravy DPH výkazů + zámek dokladu + EPO identifikace + CZ-NACE | 2026-07-27/28 | **odesláno** — issue #244, PR #245 | čeká na autora |
+| Opravy DPH výkazů + zámek dokladu + EPO identifikace + CZ-NACE | 2026-07-27/28 | ✅ **PŘIJATO** — PR #245 mergnut, vydáno v **v4.52.0** | hotovo, bloky níže lze smazat |
 | Koš + tvrdé mazání dokladů (0905) | 2026-07-28 | čeká na ověření v provozu | breaking DELETE (nutná zpětná kompatibilita), fork-only DDKPZ vazby v policy, přečíslovat migraci |
-| Omezení uživatele na vybrané firmy (0900) | 2026-07-02 FÁZE 2 | **odesláno** — issue #246, PR #247 (větev `pr/user-supplier-access`, migrace přečíslovaná na 0148) | čeká na autora |
+| Omezení uživatele na vybrané firmy (0900) | 2026-07-02 FÁZE 2 | ✅ **PŘEVZATO JINAK** — PR #247 zavřen, autor vydal vlastní implementaci (`user_suppliers` + role per firmu) ve **v4.52.0**; naše verze odstraněna migrací 0908 | hotovo |
 | Daňový doklad k přijaté záloze (DDKPZ) + § 37a na přijaté straně (0904, 0906) | 2026-07-28 (obě dávky) | **kandidát — potvrdil uživatel 28. 7. 2026** | přečíslovat migrace 0904/0906 do upstream řady; oddělit od fork-only koše (DocumentTrashPolicy, TrashGuard v settlement akcích) a od sazby CZ-NA, pokud ji upstream nechce; doplnit kapitolu manuálu + openapi (endpointy settlement-doc-candidates / final-candidates / link-settlement-doc) |
 
 Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jednu z těchto funkcí upstream nemá.
@@ -61,6 +61,34 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 **Testy:** KhDphTaxScenariosTest +4 (DDKPZ B.2 nad limit + ř. 40, B.3 do limitu, konečná jen rozdílem, PurchaseSettlementService haléřová přesnost + unlink restore), AiPdfExtractorUnitTest +6 (documentShowsVat, normalizeDocumentKind), PurchaseImportBatchAndKindTest aktualizován na novou sémantiku guardů. Suita 1952 zelených; adversarial review (20 agentů) — 14 potvrzených nálezů opraveno.
 
 **Jak ověřit po merge:** `vendor/bin/phpunit --filter 'KhDphTaxScenarios|PurchaseImportBatchAndKind|AiPdfExtractorUnit'` zelené; editor přijaté faktury nabízí 5 typů; AI import ukáže select se všemi typy; detail konečné faktury umí „Spárovat s daň. dokladem k záloze" a po spárování ukazuje minusové řádky; ARES lookup IČO 25114719 vrací plátce + DIČ CZ699003841.
+
+## 2026-07-28 — UPDATE z upstreamu: v4.51.0 → **v4.52.0** (přijetí našeho PR #245)
+
+Merge tagu v4.52.0 do `custom` (commit 2bc372b1). Release obsahuje **mergnutý náš PR #245**
+(opravy výkazů DPH, zámek dokladu, EPO identifikace, CZ-NACE) — včetně oprav z autorovy revize,
+které nám v produkci dosud chyběly, hlavně **CZ-NACE kanonizace proti číselníku ČINNOSTI**
+místo slepého paddingu (produkce dosud uměla vygenerovat kód mimo číselník → EPO chyba 30).
+VERSION 4.51.1 → 4.52.0 (fork-only bump 4.51.1 tím zaniká).
+
+**FÁZE 2 nahrazena upstreamem.** Autor po zavření PR #247 vydal vlastní implementaci: tabulka
+`user_suppliers` (migrace 0148) se schématem sdíleným s MyÚčto.cz + **per-firmu override role**,
+resoluce v `Service/Tenant/SupplierAccessResolver`. Naše `user_supplier_access`,
+`Service/Auth/UserSupplierAccess` a její test odstraněny; **migrace 0908** přenese případná
+přiřazení do `user_suppliers` a starou tabulku zahodí (v naší produkci bylo 0 řádků).
+Autor převzal i náš postřeh, že `FOREIGN_KEY_CHECKS = 0` při mazání dodavatele obchází
+`ON DELETE CASCADE` — ve své verzi uklízí membership ručně.
+
+**Konflikty (43 bloků / 13 souborů):** fork funkce zachovány (koš 0905, DDKPZ 0904/0906/0907,
+pokladna, interní poznámka, redesign); u sporných bloků měl přednost upstream. Ručně dořešeno:
+`PurchaseInvoiceValidation::hasVatSignMismatch` vrácena (volá ji DDKPZ kód, autor ji nahradil
+vlastní `hasMixedSignItems`), `dic_sk_dph` zpět do `AresLookupResult`, odstraněn duplicitní
+`FORMS` v `DphPriznaniBuilder` a zbytek staré FÁZE 2 v `listSuppliers`.
+V upstream testu `SupplierMembershipTest` opraven fiktivní bcrypt hash (61 → 60 znaků — padal
+na `CHAR(60)` ve strict módu; **nahlásit autorovi**).
+
+**Ověřeno:** suita 2009 zelených (čerstvá DB, migrace 0001–0908), `pnpm type-check` + `build`
+čisté, migrace 0907 i 0908 aplikované, HTTP 200, log čistý, běžící kód = HEAD (md5 shoda).
+Zálohy: `/root/backup-myinvoice-{db,data}-2026-07-28-2000-pred-vat-merge.*`
 
 ## 2026-07-28 — KOŠ + TVRDÉ MAZÁNÍ DOKLADŮ (vydané i přijaté faktury) — větev feature/document-trash
 
