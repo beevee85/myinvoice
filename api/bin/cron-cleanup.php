@@ -125,6 +125,56 @@ if ($exportIds !== []) {
 $report['monthly_export_jobs']  = count($exportIds);
 $report['monthly_export_files'] = $exportFilesDeleted;
 
+// FORK 0905: automatické vysypání koše dokladů po retenci.
+// Per supplier: doc_trash_enabled=1 a doc_trash_retention_days>0 → doklady
+// (vydané i přijaté) s deleted_at starším než retence se TVRDĚ smažou přes
+// DocumentTrashService (snapshot + soubory + čítač + audit *.trash_autopurged).
+// Doklady s aktivní blokací (DPH podání za jejich období, vazby) se přeskočí
+// a v koši zůstanou — bezpečnost má přednost před úklidem.
+$autopurged = 0;
+$autopurgeSkipped = 0;
+$candidates = $pdo->query(
+    "SELECT 'invoice' AS entity, i.id, i.supplier_id
+       FROM invoices i
+       JOIN supplier s ON s.id = i.supplier_id
+      WHERE s.doc_trash_enabled = 1 AND s.doc_trash_retention_days > 0
+        AND i.deleted_at IS NOT NULL
+        AND i.deleted_at < NOW() - INTERVAL s.doc_trash_retention_days DAY
+      UNION ALL
+     SELECT 'purchase_invoice', pi.id, pi.supplier_id
+       FROM purchase_invoices pi
+       JOIN supplier s ON s.id = pi.supplier_id
+      WHERE s.doc_trash_enabled = 1 AND s.doc_trash_retention_days > 0
+        AND pi.deleted_at IS NOT NULL
+        AND pi.deleted_at < NOW() - INTERVAL s.doc_trash_retention_days DAY"
+)->fetchAll(PDO::FETCH_ASSOC);
+if ($candidates !== []) {
+    // Kontejner stavíme lazy až tady — běžný noční běh bez kandidátů zůstává levný.
+    $container = Bootstrap::buildApp()->getContainer();
+    if ($container !== null) {
+        $trash  = $container->get(\MyInvoice\Service\Invoice\DocumentTrashService::class);
+        $policy = $container->get(\MyInvoice\Service\Invoice\DocumentTrashPolicy::class);
+        $invRepo = $container->get(\MyInvoice\Repository\InvoiceRepository::class);
+        $piRepo  = $container->get(\MyInvoice\Repository\PurchaseInvoiceRepository::class);
+        foreach ($candidates as $cand) {
+            if ($cand['entity'] === 'invoice') {
+                $row = $invRepo->find((int) $cand['id']);
+                $blockers = $row !== null ? $policy->blockersForInvoice($row) : [['skip']];
+                if ($row === null || $blockers !== []) { $autopurgeSkipped++; continue; }
+                $trash->forceDeleteInvoice($row, null, 'Automatické vysypání koše po retenci (cron-cleanup)', null, 'cron-cleanup', 'invoice.trash_autopurged');
+            } else {
+                $row = $piRepo->find((int) $cand['id'], (int) $cand['supplier_id']);
+                $blockers = $row !== null ? $policy->blockersForPurchaseInvoice($row) : [['skip']];
+                if ($row === null || $blockers !== []) { $autopurgeSkipped++; continue; }
+                $trash->forceDeletePurchaseInvoice($row, null, 'Automatické vysypání koše po retenci (cron-cleanup)', null, 'cron-cleanup', 'purchase_invoice.trash_autopurged');
+            }
+            $autopurged++;
+        }
+    }
+}
+$report['doc_trash_autopurged'] = $autopurged;
+$report['doc_trash_autopurge_skipped'] = $autopurgeSkipped;
+
 // Pročisti cron_runs — drž max 500 posledních záznamů na skript.
 $report['cron_runs_purged'] = CronRun::purgeOld($pdo, 500);
 
