@@ -21,6 +21,7 @@ import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar from '@/components/ui/FilterBar.vue'
+import DocumentTrashModal, { type TrashModalDoc } from '@/components/invoices/DocumentTrashModal.vue'
 import { clientsApi, type Client } from '@/api/clients'
 
 const { t, locale } = useI18n()
@@ -57,6 +58,8 @@ const vendors = ref<Client[]>([])
 // Filtr na dávku hromadného AI importu (#232) — proklik z obrazovky importu.
 const importBatchFilter = ref('')
 const importBatches = ref<ImportBatch[]>([])
+// FORK 0905 — režim koše (?trash=1): list jede s filter[trash]=1, jiné bulk akce.
+const trashOnly = ref(false)
 
 // Počet aktivních filtrů pro odznáček na mobilním tlačítku „Filtry" (rok i hledání se nepočítají)
 const activeFilterCount = computed(() => {
@@ -116,6 +119,7 @@ function loadFiltersFromQuery(q: typeof route.query) {
   // dávka neschová kvůli defaultu na aktuální rok.
   if (importBatchFilter.value && typeof q.year !== 'string') yearFilter.value = ''
   search.value       = typeof q.q === 'string' ? q.q : ''
+  trashOnly.value    = q.trash === '1'
 }
 
 let suppressUrlSync = false
@@ -137,13 +141,14 @@ function syncFiltersToUrl() {
   if (needsReviewOnly.value) q.needs_review = '1'
   if (paymentOrderedFilter.value) q.payment_ordered = paymentOrderedFilter.value
   if (importBatchFilter.value) q.import_batch = importBatchFilter.value
+  if (trashOnly.value) q.trash = '1'
   if (search.value) q.q = search.value
   router.replace({ query: q })
 }
 
 watch([statusFilter, kindFilter, yearFilter, monthFilter, dateFrom, dateTo,
        overdueOnly, unpaidOnly, needsReviewOnly, paymentOrderedFilter, currencyFilter, vendorFilter,
-       importBatchFilter], () => {
+       importBatchFilter, trashOnly], () => {
   syncFiltersToUrl()
   load()
 })
@@ -171,6 +176,7 @@ watch(() => route.query, (newQ) => {
     currencyFilter.value = ''
     vendorFilter.value = ''
     importBatchFilter.value = ''
+    trashOnly.value = false
     search.value = ''
     // Uvolnit po flush (watch effects)
     setTimeout(() => { suppressUrlSync = false }, 0)
@@ -228,6 +234,7 @@ async function load(reset = true) {
       needs_review:  needsReviewOnly.value || undefined,
       payment_ordered: paymentOrderedFilter.value || undefined,
       import_batch_id: importBatchFilter.value || undefined,
+      trash:         trashOnly.value    || undefined,
       q:             search.value       || undefined,
       page: page.value,
     })
@@ -328,7 +335,6 @@ function statusOf(id: number): PurchaseInvoiceStatus | null {
   return null
 }
 
-const draftsSelected     = computed(() => selectedIds.value.filter(id => statusOf(id) === 'draft'))
 const markReceivedSelected = computed(() => selectedIds.value.filter(id => statusOf(id) === 'draft'))
 const markPayableSelected = computed(() => selectedIds.value.filter(id => {
   const s = statusOf(id); return s === 'received' || s === 'booked'
@@ -352,19 +358,109 @@ async function bulkTransition(target: PurchaseInvoiceStatus, ids: number[]) {
   await load()
 }
 
-async function bulkDelete() {
-  const ids = draftsSelected.value
-  if (ids.length === 0 || bulkBusy.value) return
-  if (!confirm(t('purchase_invoice.bulk.confirm_delete', { n: ids.length }))) return
-  bulkBusy.value = true
-  let ok = 0, fail = 0
-  for (const id of ids) {
-    try { await purchaseInvoicesApi.delete(id); ok++ } catch { fail++ }
+// ─── FORK 0905 — koš dokladů: dialogy + operace (žádný native confirm) ───
+const trashModalOpen = ref(false)
+const trashModalMode = ref<'trash' | 'force' | 'empty'>('trash')
+const trashModalDocs = ref<TrashModalDoc[]>([])
+const trashBusy = ref(false)
+
+/** Preflight blokací → naplní dialog čísly dokladů + důvody blokací. */
+async function openTrashModal(mode: 'trash' | 'force' | 'empty', ids: number[]) {
+  if (!ids.length) return
+  trashBusy.value = true
+  try {
+    const { documents } = await purchaseInvoicesApi.trashPreflight(ids)
+    const byId = new Map(groups.value.flatMap(g => g.invoices).map(i => [i.id, i]))
+    trashModalDocs.value = documents.filter(d => d.found).map(d => {
+      const row = byId.get(d.id)
+      return {
+        id: d.id,
+        varsymbol: d.varsymbol ?? null,
+        party: row?.vendor_company_name ?? null,
+        totalFormatted: row ? formatMoney(row.total_with_vat, row.currency) : null,
+        taxDate: row ? formatDate(row.tax_date || row.issue_date) : null,
+        statusLabel: d.status ? t(`purchase_invoice.status.${d.status}`) : null,
+        blockers: d.blockers ?? [],
+      }
+    })
+    trashModalMode.value = mode
+    trashModalOpen.value = true
+  } catch (e) {
+    toast.error(apiErrorMessage(e, t('doc_trash.preflight_failed')))
+  } finally {
+    trashBusy.value = false
   }
-  bulkBusy.value = false
-  if (fail === 0) toast.success(t('purchase_invoice.bulk.delete_success', { n: ok }))
-  else            toast.error(t('purchase_invoice.bulk.partial', { ok, fail }))
+}
+
+function openBulkTrash() { openTrashModal('trash', selectedIds.value) }
+function openBulkForce() { openTrashModal('force', selectedIds.value) }
+function openEmptyTrash() { openTrashModal('empty', allRowIds()) }
+
+async function bulkRestore() {
+  const ids = [...selectedIds.value]
+  if (!ids.length) return
+  trashBusy.value = true
+  const errors: string[] = []
+  for (const id of ids) {
+    try { await purchaseInvoicesApi.restore(id) } catch (e) { errors.push(apiErrorMessage(e, `#${id}`)) }
+  }
+  trashBusy.value = false
+  selectedIds.value = []
   await load()
+  if (errors.length) toast.error(t('doc_trash.bulk_partial', { ok: ids.length - errors.length, failed: errors.length }) + ' ' + errors.join('; '))
+  else toast.success(t('doc_trash.bulk_restored', { n: ids.length }))
+}
+
+async function rowRestore(inv: PurchaseInvoiceListItem) {
+  try {
+    await purchaseInvoicesApi.restore(inv.id)
+    toast.success(t('doc_trash.restored', { varsymbol: inv.varsymbol || `#${inv.id}` }))
+    await load()
+  } catch (e) {
+    toast.error(apiErrorMessage(e, t('doc_trash.restore_failed')))
+  }
+}
+function rowForceDelete(inv: PurchaseInvoiceListItem) { openTrashModal('force', [inv.id]) }
+
+/** Potvrzení z dialogu — provede operaci; nepřebitelně blokované doklady přeskočí. */
+async function confirmTrashModal(payload: { reason: string; override: boolean; confirmNumber: string }) {
+  trashBusy.value = true
+  const errors: string[] = []
+  let done = 0
+  try {
+    if (trashModalMode.value === 'empty') {
+      const res = await purchaseInvoicesApi.emptyTrash(payload.reason)
+      done = res.deleted.length
+      if (res.skipped.length) toast.error(t('doc_trash.empty_skipped', { n: done, skipped: res.skipped.length }))
+      else toast.success(t('doc_trash.empty_done', { n: done }))
+    } else {
+      const eligible = trashModalDocs.value.filter(d =>
+        !d.blockers.some(b => !b.overridable)
+        && (d.blockers.length === 0 || payload.override))
+      for (const d of eligible) {
+        try {
+          if (trashModalMode.value === 'trash') {
+            await purchaseInvoicesApi.delete(d.id, payload.reason, payload.override)
+          } else {
+            await purchaseInvoicesApi.forceDelete(d.id, payload.reason,
+              eligible.length === 1 ? payload.confirmNumber : (d.varsymbol ?? ''), payload.override)
+          }
+          done++
+        } catch (e) {
+          errors.push(`${d.varsymbol || `#${d.id}`}: ${apiErrorMessage(e, t('doc_trash.op_failed'))}`)
+        }
+      }
+      const skipped = trashModalDocs.value.length - eligible.length
+      if (errors.length) toast.error(t('doc_trash.bulk_partial', { ok: done, failed: errors.length }) + ' ' + errors.join('; '))
+      else if (trashModalMode.value === 'trash') toast.success(t('doc_trash.trashed_done', { n: done }) + (skipped ? ' ' + t('doc_trash.skipped_note', { n: skipped }) : ''))
+      else toast.success(t('doc_trash.force_done', { n: done }) + (skipped ? ' ' + t('doc_trash.skipped_note', { n: skipped }) : ''))
+    }
+  } finally {
+    trashBusy.value = false
+    trashModalOpen.value = false
+    selectedIds.value = []
+    await load()
+  }
 }
 
 // Hromadná změna typu dokladu (#232) — po AI importu přehodit vybrané „Doklady
@@ -409,34 +505,34 @@ async function bulkSetKind() {
 
       <div class="flex items-center gap-2 flex-wrap">
         <!-- Bulk actions — viditelné jen pokud něco vybráno -->
-        <button v-if="(selectedIds.length > 0) && auth.canWrite"
+        <button v-if="!trashOnly && (selectedIds.length > 0) && auth.canWrite"
           @click="goToPaymentOrder"
           class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-primary-500 text-primary-700 hover:bg-primary-50 text-sm font-medium rounded-md">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3z"/></svg>
           {{ t('purchase_invoice.bulk.to_payment_order', { n: selectedIds.length }) }}
         </button>
-        <button v-if="(markReceivedSelected.length > 0) && auth.canWrite"
+        <button v-if="!trashOnly && (markReceivedSelected.length > 0) && auth.canWrite"
           @click="bulkTransition('received', markReceivedSelected)"
           :disabled="bulkBusy"
           class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-primary-500 text-primary-700 hover:bg-primary-50 disabled:opacity-50 text-sm font-medium rounded-md">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-8l-4-4m0 0l-4 4m4-4v12"/></svg>
           {{ bulkBusy ? '…' : t('purchase_invoice.bulk.mark_received', { n: markReceivedSelected.length }) }}
         </button>
-        <button v-if="(markBookableSelected.length > 0) && auth.canWrite"
+        <button v-if="!trashOnly && (markBookableSelected.length > 0) && auth.canWrite"
           @click="bulkTransition('booked', markBookableSelected)"
           :disabled="bulkBusy"
           class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-warning-500 text-warning-600 hover:bg-warning-50 disabled:opacity-50 text-sm font-medium rounded-md">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
           {{ bulkBusy ? '…' : t('purchase_invoice.bulk.mark_booked', { n: markBookableSelected.length }) }}
         </button>
-        <button v-if="(markPayableSelected.length > 0) && auth.canWrite"
+        <button v-if="!trashOnly && (markPayableSelected.length > 0) && auth.canWrite"
           @click="bulkTransition('paid', markPayableSelected)"
           :disabled="bulkBusy"
           class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-success-500 text-success-600 hover:bg-success-50 disabled:opacity-50 text-sm font-medium rounded-md">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 14l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
           {{ bulkBusy ? '…' : t('purchase_invoice.bulk.mark_paid', { n: markPayableSelected.length }) }}
         </button>
-        <button v-if="(cancellableSelected.length > 0) && auth.canWrite"
+        <button v-if="!trashOnly && (cancellableSelected.length > 0) && auth.canWrite"
           @click="bulkTransition('cancelled', cancellableSelected)"
           :disabled="bulkBusy"
           class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-danger-500/50 text-danger-500 hover:bg-danger-50 disabled:opacity-50 text-sm font-medium rounded-md">
@@ -444,7 +540,7 @@ async function bulkSetKind() {
           {{ bulkBusy ? '…' : t('purchase_invoice.bulk.cancel', { n: cancellableSelected.length }) }}
         </button>
         <!-- Hromadná změna typu dokladu (#232) — oprava AI klasifikace po importu -->
-        <select v-if="(kindEditableSelected.length > 0) && auth.canWrite"
+        <select v-if="!trashOnly && (kindEditableSelected.length > 0) && auth.canWrite"
           v-model="bulkKindTarget"
           @change="bulkSetKind"
           :disabled="bulkBusy"
@@ -454,16 +550,51 @@ async function bulkSetKind() {
           <option value="receipt">{{ t('purchase_invoice.document_kind.receipt') }}</option>
           <option value="credit_note">{{ t('purchase_invoice.document_kind.credit_note') }}</option>
         </select>
-        <button v-if="(draftsSelected.length > 0) && auth.canWrite"
-          @click="bulkDelete"
-          :disabled="bulkBusy"
+        <!-- FORK 0905: hromadný přesun do koše (nahrazuje mazání konceptů) -->
+        <button v-if="!trashOnly && (selectedIds.length > 0) && auth.canWrite"
+          @click="openBulkTrash"
+          :disabled="bulkBusy || trashBusy"
           class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-danger-500/50 text-danger-500 hover:bg-danger-50 disabled:opacity-50 text-sm font-medium rounded-md">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
-          {{ bulkBusy ? '…' : t('purchase_invoice.bulk.delete', { n: draftsSelected.length }) }}
+          {{ t('doc_trash.bulk_trash', { n: selectedIds.length }) }}
+        </button>
+
+        <!-- FORK 0905: akce v koši -->
+        <template v-if="trashOnly">
+          <button v-if="auth.canWrite && selectedIds.length"
+            @click="bulkRestore"
+            :disabled="trashBusy"
+            class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-primary-500 text-primary-700 hover:bg-primary-50 disabled:opacity-50 text-sm font-medium rounded-md">
+            {{ t('doc_trash.bulk_restore') }}
+          </button>
+          <button v-if="auth.isAdmin && selectedIds.length"
+            @click="openBulkForce"
+            :disabled="trashBusy"
+            class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-danger-500/50 text-danger-500 hover:bg-danger-50 disabled:opacity-50 text-sm font-medium rounded-md">
+            {{ t('doc_trash.bulk_force') }}
+          </button>
+          <button v-if="auth.isAdmin"
+            @click="openEmptyTrash"
+            :disabled="trashBusy || total === 0"
+            class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-danger-500/50 text-danger-500 hover:bg-danger-50 disabled:opacity-50 text-sm font-medium rounded-md">
+            {{ t('doc_trash.empty_trash') }}
+          </button>
+        </template>
+
+        <!-- FORK 0905: přepínač Koš (stav v URL ?trash=1, jako u Dokumentů) -->
+        <button
+          @click="trashOnly = !trashOnly"
+          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border text-sm font-medium rounded-md"
+          :class="trashOnly
+            ? 'border-primary-500 bg-primary-50 text-primary-700'
+            : 'border-neutral-300 text-neutral-600 hover:bg-neutral-50'"
+        >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
+          {{ trashOnly ? t('doc_trash.back_from_trash') : t('doc_trash.tab') }}
         </button>
 
         <RouterLink
-          v-if="auth.canWrite"
+          v-if="auth.canWrite && !trashOnly"
           to="/purchase-invoices/new"
           class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md"
         >
@@ -561,6 +692,10 @@ async function bulkSetKind() {
       {{ error }}
     </div>
 
+    <div v-else-if="!groups.length && trashOnly" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+      <EmptyState :title="t('doc_trash.empty_state')" />
+    </div>
+
     <div v-else-if="!groups.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
       <EmptyState
         :title="search || statusFilter || kindFilter ? t('purchase_invoice.empty_filtered') : t('purchase_invoice.empty')"
@@ -609,9 +744,12 @@ async function bulkSetKind() {
                   <th class="text-left px-4 py-2 font-medium w-32">{{ t('purchase_invoice.fields.vendor_invoice_number') }}</th>
                   <th class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.document_kind') }}</th>
                   <th class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.tax_date') }}</th>
-                  <th class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.due_date') }}</th>
+                  <th v-if="!trashOnly" class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.due_date') }}</th>
                   <th class="text-right px-4 py-2 font-medium">{{ t('purchase_invoice.totals.with_vat') }}</th>
-                  <th class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.status.draft') }}</th>
+                  <th v-if="!trashOnly" class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.status.draft') }}</th>
+                  <th v-if="trashOnly" class="text-left px-4 py-2 font-medium">{{ t('doc_trash.col_deleted') }}</th>
+                  <th v-if="trashOnly" class="text-left px-4 py-2 font-medium">{{ t('doc_trash.col_reason') }}</th>
+                  <th v-if="trashOnly" class="px-4 py-2 w-24"></th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
@@ -657,7 +795,7 @@ async function bulkSetKind() {
                   <td class="px-4 py-2.5 text-center text-xs">
                     <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
                   </td>
-                  <td class="px-4 py-2.5 text-center text-xs">
+                  <td v-if="!trashOnly" class="px-4 py-2.5 text-center text-xs">
                     <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : 'text-neutral-600'">
                       {{ formatDate(inv.due_date) }}
                     </span>
@@ -665,7 +803,25 @@ async function bulkSetKind() {
                   <td class="px-4 py-2.5 text-right font-mono">
                     {{ formatMoney(inv.total_with_vat, inv.currency) }}
                   </td>
-                  <td class="px-4 py-2.5 text-center">
+                  <!-- FORK 0905 — koš: kdo a kdy smazal + důvod + akce -->
+                  <td v-if="trashOnly" class="px-4 py-2.5 text-xs text-neutral-600">
+                    <div>{{ inv.deleted_at ? formatDate(inv.deleted_at) : '—' }}</div>
+                    <div v-if="inv.deleted_by_name" class="text-neutral-400">{{ inv.deleted_by_name }}</div>
+                  </td>
+                  <td v-if="trashOnly" class="px-4 py-2.5 text-xs text-neutral-600 max-w-56">
+                    <span class="line-clamp-2" :title="inv.delete_reason ?? undefined">{{ inv.delete_reason || '—' }}</span>
+                  </td>
+                  <td v-if="trashOnly" class="px-4 py-2.5 text-right whitespace-nowrap" @click.stop>
+                    <button v-if="auth.canWrite" @click="rowRestore(inv)" :disabled="trashBusy"
+                      class="cursor-pointer text-xs px-2 py-1 rounded border border-primary-500/50 text-primary-700 hover:bg-primary-50 disabled:opacity-50">
+                      {{ t('doc_trash.restore') }}
+                    </button>
+                    <button v-if="auth.isAdmin" @click="rowForceDelete(inv)" :disabled="trashBusy"
+                      class="cursor-pointer ml-1 text-xs px-2 py-1 rounded border border-danger-500/50 text-danger-500 hover:bg-danger-50 disabled:opacity-50">
+                      {{ t('doc_trash.force_delete') }}
+                    </button>
+                  </td>
+                  <td v-if="!trashOnly" class="px-4 py-2.5 text-center">
                     <span class="text-xs px-2 py-0.5 rounded" :class="statusBadgeClass(inv.status)">
                       {{ t(`purchase_invoice.status.${inv.status}`) }}
                     </span>
@@ -755,5 +911,16 @@ async function bulkSetKind() {
         </button>
       </div>
     </div>
+
+    <!-- FORK 0905 — potvrzovací dialog koše / trvalého smazání / vysypání -->
+    <DocumentTrashModal
+      v-if="trashModalOpen"
+      :mode="trashModalMode"
+      :docs="trashModalDocs"
+      :is-admin="auth.isAdmin"
+      :busy="trashBusy"
+      @close="trashModalOpen = false"
+      @confirm="confirmTrashModal"
+    />
   </div>
 </template>

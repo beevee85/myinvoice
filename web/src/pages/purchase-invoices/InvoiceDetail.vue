@@ -10,6 +10,7 @@ import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { apiErrorMessage } from '@/api/errors'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import DocumentTrashModal, { type TrashModalDoc } from '@/components/invoices/DocumentTrashModal.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -236,40 +237,75 @@ async function transition(target: PurchaseInvoiceStatus, paidDate?: string) {
   }
 }
 
-async function remove() {
-  if (!invoice.value) return
-  if (!confirm(t('purchase_invoice.confirm.delete_draft'))) return
+// ─── FORK 0905 — koš dokladů: dialog s důvodem + blokacemi místo window.confirm ───
+const trashModalOpen = ref(false)
+const trashModalMode = ref<'trash' | 'force'>('trash')
+const trashModalDocs = ref<TrashModalDoc[]>([])
+const trashBusy = ref(false)
+const inTrash = computed(() => !!invoice.value?.deleted_at)
+
+async function openTrashModal(mode: 'trash' | 'force') {
+  const inv = invoice.value
+  if (!inv) return
+  trashBusy.value = true
   try {
-    await purchaseInvoicesApi.delete(invoice.value.id)
-    toast.success(t('common.deleted'))
-    router.push('/purchase-invoices')
+    const { documents } = await purchaseInvoicesApi.trashPreflight([inv.id])
+    const d = documents[0]
+    trashModalDocs.value = [{
+      id: inv.id,
+      varsymbol: d?.varsymbol ?? inv.varsymbol,
+      party: inv.vendor_company_name ?? null,
+      totalFormatted: formatMoney(inv.total_with_vat, inv.currency),
+      taxDate: formatDate(inv.tax_date || inv.issue_date),
+      statusLabel: t(`purchase_invoice.status.${inv.status}`) as string,
+      blockers: d?.blockers ?? [],
+    }]
+    trashModalMode.value = mode
+    trashModalOpen.value = true
   } catch (e) {
-    toast.error(apiErrorMessage(e))
+    toast.error(apiErrorMessage(e, t('doc_trash.preflight_failed')))
+  } finally {
+    trashBusy.value = false
   }
 }
 
-/**
- * Force delete — admin only, pro received/booked (NE paid/cancelled, ty jsou audit trail).
- * Vyžaduje dvojí potvrzení (velké varování).
- */
-async function forceDelete() {
-  if (!invoice.value) return
-  if (!auth.user || auth.user.role !== 'admin') return
-  if (!confirm(t('purchase_invoice.confirm.force_delete_warning'))) return
-  if (!confirm(t('purchase_invoice.confirm.force_delete_confirm'))) return
+function remove() { openTrashModal('trash') }
+
+async function confirmTrashModal(payload: { reason: string; override: boolean; confirmNumber: string }) {
+  const inv = invoice.value
+  if (!inv) return
+  trashBusy.value = true
   try {
-    await purchaseInvoicesApi.delete(invoice.value.id, true)
-    toast.success(t('common.deleted'))
-    router.push('/purchase-invoices')
+    if (trashModalMode.value === 'trash') {
+      const res = await purchaseInvoicesApi.delete(inv.id, payload.reason, payload.override)
+      toast.success(res.hard_deleted ? t('doc_trash.force_done', { n: 1 }) : t('doc_trash.trashed_done', { n: 1 }))
+      router.push('/purchase-invoices')
+    } else {
+      await purchaseInvoicesApi.forceDelete(inv.id, payload.reason, payload.confirmNumber, payload.override)
+      toast.success(t('doc_trash.force_done', { n: 1 }))
+      router.push({ path: '/purchase-invoices', query: { trash: '1' } })
+    }
   } catch (e) {
-    toast.error(apiErrorMessage(e))
+    toast.error(apiErrorMessage(e, t('doc_trash.op_failed')))
+  } finally {
+    trashBusy.value = false
+    trashModalOpen.value = false
   }
 }
 
-const canForceDelete = computed(() =>
-  invoice.value && auth.user?.role === 'admin'
-  && ['received', 'booked'].includes(invoice.value.status),
-)
+async function restoreFromTrash() {
+  if (!invoice.value) return
+  trashBusy.value = true
+  try {
+    await purchaseInvoicesApi.restore(invoice.value.id)
+    toast.success(t('doc_trash.restored', { varsymbol: invoice.value.varsymbol || `#${invoice.value.id}` }))
+    invoice.value = await purchaseInvoicesApi.get(invoice.value.id)
+  } catch (e) {
+    toast.error(apiErrorMessage(e, t('doc_trash.restore_failed')))
+  } finally {
+    trashBusy.value = false
+  }
+}
 
 // Konzistentní s `statusBadgeClass` z useFormat (vystavené faktury) — používáme
 // stejné `bg-X-50 text-X-600 border border-X-500/40` tokeny.
@@ -308,7 +344,6 @@ function confirmForceEdit() {
   // modalem s checkboxem přímo v něm (příznak nepřežije reload).
   router.push(`/purchase-invoices/${invoice.value.id}/edit`)
 }
-const canDelete = computed(() => invoice.value?.status === 'draft')
 
 // ── „Zaplatit pomocí QR" ──────────────────────────────────────────────────────
 // Tlačítko se zobrazí u nezaplacené faktury s kladnou částkou k úhradě (readonly
@@ -445,6 +480,16 @@ const purchaseActions = computed<ActionItem[]>(() => {
   const w = auth.canWrite
   const items: ActionItem[] = []
 
+  // FORK 0905 — doklad v koši je read-only: jen Obnovit / Smazat trvale.
+  if (inTrash.value) {
+    return [
+      { key: 'restore', label: t('doc_trash.restore'), icon: 'uturn', tier: 'primary', variant: 'primary',
+        show: w, disabled: trashBusy.value, run: restoreFromTrash },
+      { key: 'force-delete', label: t('doc_trash.force_delete'), icon: 'trash', tier: 'secondary', variant: 'danger',
+        show: auth.isAdmin, disabled: trashBusy.value, run: () => openTrashModal('force') },
+    ]
+  }
+
   items.push({ key: 'edit', label: t('common.edit'), icon: 'edit', tier: 'secondary', variant: 'success',
     show: canEdit.value && w, to: `/purchase-invoices/${inv.id}/edit` })
 
@@ -480,16 +525,16 @@ const purchaseActions = computed<ActionItem[]>(() => {
   items.push({ key: 'exp-pohoda', label: t('purchase_invoice.export.pohoda'), icon: 'doc', tier: 'overflow', variant: 'warning',
     href: purchaseInvoicesApi.pohodaUrl(inv.id) })
 
-  items.push({ key: 'delete', label: t('common.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
-    show: canDelete.value && w, disabled: acting.value, run: remove })
-
   // odkaz na dodavatele + admin „force" akce (pod „Pokročilé")
   items.push({ key: 'vendor', label: t('purchase_invoice.vendor_detail'), icon: 'user', tier: 'overflow', variant: 'neutral',
     show: !!inv.vendor_id, to: `/clients/${inv.vendor_id}` })
   items.push({ key: 'force-edit', label: t('purchase_invoice.force_edit'), icon: 'edit', tier: 'advanced', variant: 'warning',
     show: canForceEdit.value, title: t('purchase_invoice.force_edit_hint') as string, run: confirmForceEdit })
-  items.push({ key: 'force-delete', label: t('purchase_invoice.force_delete'), icon: 'trash', tier: 'advanced', variant: 'danger',
-    show: canForceDelete.value, title: t('purchase_invoice.confirm.force_delete_warning') as string, run: forceDelete })
+  // FORK 0905 — „Do koše" jako poslední položka Pokročilé, oddělená separátorem.
+  // Nahrazuje dřívější mazání konceptů i force-delete: koš je vratný, blokace hlídá dialog.
+  items.push({ key: 'trash', label: t('doc_trash.to_trash'), icon: 'trash', tier: 'advanced', variant: 'danger',
+    dividerBefore: true,
+    show: w, disabled: acting.value || trashBusy.value, run: remove })
 
   return items
 })
@@ -505,6 +550,20 @@ const purchaseActions = computed<ActionItem[]>(() => {
     <RouterLink to="/purchase-invoices" class="text-sm text-neutral-600 hover:text-neutral-900">
       {{ t('purchase_invoice.back_to_list') }}
     </RouterLink>
+
+    <!-- FORK 0905 — banner: doklad je v koši (read-only, jen zobrazit / obnovit / trvale smazat) -->
+    <div v-if="inTrash" class="rounded-lg border border-danger-300 bg-danger-50 px-4 py-3 text-sm text-danger-700">
+      <p class="font-semibold">{{ t('doc_trash.banner_title') }}</p>
+      <p class="mt-0.5">
+        {{ t('doc_trash.banner_body', {
+          date: invoice.deleted_at ? formatDate(invoice.deleted_at) : '',
+          who: invoice.deleted_by_name || '—',
+        }) }}
+        <span v-if="invoice.delete_reason" class="block text-danger-600 mt-0.5">
+          {{ t('doc_trash.reason_label') }}: {{ invoice.delete_reason }}
+        </span>
+      </p>
+    </div>
 
     <!-- AI extraction warning — uživatel by měl řádky ověřit proti PDF před zaúčtováním. -->
     <div v-if="invoice.extraction_warning" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md flex gap-3 items-start">
@@ -1059,5 +1118,16 @@ const purchaseActions = computed<ActionItem[]>(() => {
     </div>
 
     <LinkedDocumentsPanel v-if="invoice" class="mt-4 block" entity-type="purchase_invoice" :entity-id="invoice.id" />
+
+    <!-- FORK 0905 — dialog koše / trvalého smazání -->
+    <DocumentTrashModal
+      v-if="trashModalOpen"
+      :mode="trashModalMode"
+      :docs="trashModalDocs"
+      :is-admin="auth.isAdmin"
+      :busy="trashBusy"
+      @close="trashModalOpen = false"
+      @confirm="confirmTrashModal"
+    />
   </div>
 </template>

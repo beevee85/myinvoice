@@ -22,6 +22,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useSupplierStore } from '@/stores/supplier'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import Modal from '@/components/ui/Modal.vue'
+import DocumentTrashModal, { type TrashModalDoc } from '@/components/invoices/DocumentTrashModal.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
 import { priceListApi, type PriceListItem } from '@/api/priceList'
@@ -1459,14 +1460,41 @@ async function submit() {
   }
 }
 
+// FORK 0905 — mazání konceptu jde přes dialog koše (povinný důvod, žádný native confirm).
+const trashModalOpen = ref(false)
+const trashModalDocs = ref<TrashModalDoc[]>([])
+const trashBusy = ref(false)
+
 async function deleteDraft() {
   if (!invoiceId.value) return
-  if (!confirm(t('invoice.delete_draft_confirm'))) return
+  trashBusy.value = true
   try {
-    await invoicesApi.delete(invoiceId.value)
+    const { documents } = await invoicesApi.trashPreflight([invoiceId.value])
+    const d = documents[0]
+    trashModalDocs.value = [{
+      id: invoiceId.value,
+      varsymbol: d?.varsymbol ?? null,
+      blockers: d?.blockers ?? [],
+    }]
+    trashModalOpen.value = true
+  } catch (e: any) {
+    error.value = apiErrorMessage(e, t('common.delete_failed'))
+  } finally {
+    trashBusy.value = false
+  }
+}
+
+async function confirmDeleteDraft(payload: { reason: string; override: boolean }) {
+  if (!invoiceId.value) return
+  trashBusy.value = true
+  try {
+    await invoicesApi.delete(invoiceId.value, payload.reason, payload.override)
     router.push('/invoices')
   } catch (e: any) {
     error.value = apiErrorMessage(e, t('common.delete_failed'))
+  } finally {
+    trashBusy.value = false
+    trashModalOpen.value = false
   }
 }
 </script>
@@ -2499,5 +2527,16 @@ async function deleteDraft() {
       :client-id="form.client_id"
       @created="onProjectCreatedInModal"
       @close="projectModalOpen = false" />
+
+    <!-- FORK 0905 — dialog koše pro mazání konceptu -->
+    <DocumentTrashModal
+      v-if="trashModalOpen"
+      mode="trash"
+      :docs="trashModalDocs"
+      :is-admin="isAdmin"
+      :busy="trashBusy"
+      @close="trashModalOpen = false"
+      @confirm="confirmDeleteDraft"
+    />
   </div>
 </template>

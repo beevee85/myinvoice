@@ -22,6 +22,7 @@ import { useToast } from '@/composables/useToast'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import Modal from '@/components/ui/Modal.vue'
+import DocumentTrashModal, { type TrashModalDoc } from '@/components/invoices/DocumentTrashModal.vue'
 import Button from '@/components/ui/Button.vue'
 
 const { t, te, locale } = useI18n()
@@ -577,68 +578,86 @@ function payloadText(payload: any): string {
     .join(' · ')
 }
 
-async function deleteInvoice() {
-  if (!invoice.value) return
-  // Pro cancellation doklad: smaž PARENT (cascade pak odstraní i tento storno),
-  // jinak by zůstala originálka v 'cancelled' bez storno dokladu — interní storno
-  // bez parenta nedává smysl jako samostatný účetní doklad.
-  // Dobropis se ale maže samostatně — je to plnohodnotný účetní doklad, parent
-  // zůstává v cancelled stavu (admin si může případně ručně upravit).
-  if (invoice.value.invoice_type === 'cancellation' && invoice.value.parent_invoice_id) {
-    return deleteCancellationParent()
-  }
-  // Per-status confirm — pro vystavené/odeslané/zaplacené/stornované je delší vysvětlující
-  // hláška (force-delete účetního dokladu, cascade na storno/dobropis).
-  // UI tlačítko force-delete se admin-only zobrazuje (canDelete), backend má stejný guard.
-  const status = invoice.value.status
-  const isCN = invoice.value.invoice_type === 'credit_note'
-  let confirmKey: string
-  switch (status) {
-    case 'draft':     confirmKey = isCN ? 'invoice.delete_draft_confirm_cn'     : 'invoice.delete_draft_confirm';     break
-    case 'cancelled': confirmKey = isCN ? 'invoice.delete_cancelled_confirm_cn' : 'invoice.delete_cancelled_confirm'; break
-    case 'paid':      confirmKey = 'invoice.delete_paid_confirm';                                                     break
-    case 'sent':      confirmKey = isCN ? 'invoice.delete_sent_confirm_cn'      : 'invoice.delete_sent_confirm';      break
-    case 'issued':
-    case 'reminded':
-    default:          confirmKey = isCN ? 'invoice.delete_issued_confirm_cn'    : 'invoice.delete_issued_confirm';    break
-  }
-  const vs = invoice.value.varsymbol || `#${invoice.value.id}`
-  if (!confirm(t(confirmKey, { varsymbol: vs }))) return
-  busy.value = 'delete'
+// ─── FORK 0905 — koš dokladů: přesun do koše / obnova / trvalé smazání ───
+// Nahrazuje dřívější window.confirm force-delete: dialog s povinným důvodem,
+// blokujícími pravidly z preflightu a u trvalého smazání opsáním čísla dokladu.
+const trashModalOpen = ref(false)
+const trashModalMode = ref<'trash' | 'force'>('trash')
+const trashModalDocs = ref<TrashModalDoc[]>([])
+const trashBusy = ref(false)
+const inTrash = computed(() => !!invoice.value?.deleted_at)
+
+async function openTrashModal(mode: 'trash' | 'force', targetId?: number) {
+  const inv = invoice.value
+  if (!inv) return
+  const id = targetId ?? inv.id
+  trashBusy.value = true
   try {
-    const res = await invoicesApi.delete(invoice.value.id)
-    if (res?.cascade_deleted && res.cascade_deleted > 0) {
-      toast.success(t('invoice.deleted_with_cascade', { n: res.cascade_deleted }))
-    }
-    router.push('/invoices')
-  } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('invoice.delete_failed'))
+    const { documents } = await invoicesApi.trashPreflight([id])
+    const d = documents[0]
+    trashModalDocs.value = [{
+      id,
+      varsymbol: d?.varsymbol ?? inv.varsymbol,
+      party: inv.client_company_name ?? null,
+      totalFormatted: formatMoney(inv.total_with_vat, inv.currency),
+      taxDate: formatDate(inv.tax_date || inv.issue_date),
+      statusLabel: d?.status ? statusLabel(d.status) : null,
+      blockers: d?.blockers ?? [],
+    }]
+    trashModalMode.value = mode
+    trashModalOpen.value = true
+  } catch (e) {
+    toast.error(apiErrorMessage(e, t('doc_trash.preflight_failed')))
   } finally {
-    busy.value = null
+    trashBusy.value = false
   }
 }
 
-async function deleteCancellationParent() {
-  if (!invoice.value || !invoice.value.parent_invoice_id) return
-  const parentId = invoice.value.parent_invoice_id
-  // Najdi varsymbol parenta pro hezčí confirm — fallback na #id
-  let parentVs = `#${parentId}`
+/**
+ * „Do koše" z menu Pokročilé. Pro interní storno (cancellation) se maže PARENT
+ * (cascade odstraní i tento doklad) — storno bez parenta nedává účetně smysl.
+ */
+function deleteInvoice() {
+  if (!invoice.value) return
+  const targetId = (invoice.value.invoice_type === 'cancellation' && invoice.value.parent_invoice_id)
+    ? invoice.value.parent_invoice_id
+    : invoice.value.id
+  openTrashModal('trash', targetId)
+}
+
+async function confirmTrashModal(payload: { reason: string; override: boolean; confirmNumber: string }) {
+  const doc = trashModalDocs.value[0]
+  if (!doc) return
+  trashBusy.value = true
   try {
-    const parent = await invoicesApi.get(parentId)
-    if (parent?.varsymbol) parentVs = parent.varsymbol
-  } catch { /* ignore — fallback stačí */ }
-  if (!confirm(t('invoice.delete_cancelled_confirm', { varsymbol: parentVs }))) return
-  busy.value = 'delete'
-  try {
-    const res = await invoicesApi.delete(parentId)
-    if (res?.cascade_deleted && res.cascade_deleted > 0) {
-      toast.success(t('invoice.deleted_with_cascade', { n: res.cascade_deleted }))
+    if (trashModalMode.value === 'trash') {
+      const res = await invoicesApi.delete(doc.id, payload.reason, payload.override)
+      toast.success(res.hard_deleted ? t('doc_trash.force_done', { n: 1 }) : t('doc_trash.trashed_done', { n: 1 }))
+      router.push('/invoices')
+    } else {
+      await invoicesApi.forceDelete(doc.id, payload.reason, payload.confirmNumber, payload.override)
+      toast.success(t('doc_trash.force_done', { n: 1 }))
+      router.push({ path: '/invoices', query: { trash: '1' } })
     }
-    router.push('/invoices')
-  } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('invoice.delete_failed'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e, t('doc_trash.op_failed')))
   } finally {
-    busy.value = null
+    trashBusy.value = false
+    trashModalOpen.value = false
+  }
+}
+
+async function restoreFromTrash() {
+  if (!invoice.value) return
+  trashBusy.value = true
+  try {
+    await invoicesApi.restore(invoice.value.id)
+    toast.success(t('doc_trash.restored', { varsymbol: invoice.value.varsymbol || `#${invoice.value.id}` }))
+    invoice.value = await invoicesApi.get(invoice.value.id)
+  } catch (e) {
+    toast.error(apiErrorMessage(e, t('doc_trash.restore_failed')))
+  } finally {
+    trashBusy.value = false
   }
 }
 
@@ -755,8 +774,8 @@ function openCancelModal() {
 
 async function cancel() {
   if (!invoice.value) return
-  // 3. možnost v modalu — force-delete účetního dokladu (admin only).
-  // Modal jen otevře potvrzovací dialog s detailním per-status warningem v deleteInvoice().
+  // 3. možnost v modalu — smazání dokladu: otevře dialog koše (FORK 0905)
+  // s povinným důvodem a blokujícími pravidly místo dřívějšího window.confirm.
   if (cancelMode.value === 'delete') {
     cancelOpen.value = false
     await deleteInvoice()
@@ -1305,6 +1324,15 @@ const invoiceActions = computed<ActionItem[]>(() => {
   if (!inv) return []
   const w = auth.canWrite
   const b = busy.value !== null
+  // FORK 0905 — doklad v koši je read-only: jen Obnovit / Smazat trvale.
+  if (inTrash.value) {
+    return [
+      { key: 'restore', label: t('doc_trash.restore'), icon: 'uturn', tier: 'primary', variant: 'primary',
+        show: w, disabled: trashBusy.value, run: restoreFromTrash },
+      { key: 'force-delete', label: t('doc_trash.force_delete'), icon: 'trash', tier: 'secondary', variant: 'danger',
+        show: isAdmin.value, disabled: trashBusy.value, run: () => openTrashModal('force') },
+    ]
+  }
   const approvalPending = requiresApproval.value && approvalStatus.value !== 'approved'
   const markPaidPrimary = !canSendReminder.value
   return [
@@ -1349,8 +1377,8 @@ const invoiceActions = computed<ActionItem[]>(() => {
       show: !isDraft.value || inv.items.length > 0,
       title: invoiceWillBeSigned.value ? (t('invoice.download_pdf_tooltip_signed') as string) : undefined,
       run: downloadPdf },
-    { key: 'delete', label: t('common.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
-      show: isDraft.value && w, disabled: b, run: deleteInvoice },
+    { key: 'delete', label: t('doc_trash.to_trash'), icon: 'trash', tier: 'overflow', variant: 'danger',
+      show: isDraft.value && w, disabled: b || trashBusy.value, run: deleteInvoice },
     // ── spodní panel „Více akcí" → pod „Pokročilé" (test/odeslání, admin, storno/destrukce) ──
     { key: 'client', label: t('invoice.client_detail'), icon: 'user', tier: 'advanced', variant: 'neutral',
       to: `/clients/${inv.client_id}` },
@@ -1374,9 +1402,11 @@ const invoiceActions = computed<ActionItem[]>(() => {
     { key: 'cancel', label: isCreditNoteSource.value ? t('invoice.cancel_credit_note') : t('invoice.cancel_or_credit'),
       icon: 'trash', tier: 'advanced', variant: 'danger',
       show: canCancel.value, disabled: b, run: openCancelModal },
-    { key: 'delete-cancelled', label: t('invoice.delete_cancelled'), icon: 'trash', tier: 'advanced', variant: 'danger',
-      show: isAdmin.value && (inv.status === 'cancelled' || (inv.invoice_type === 'cancellation' && !!inv.parent_invoice_id)),
-      disabled: b, loading: busy.value === 'delete', run: deleteInvoice },
+    // FORK 0905 — „Do koše" jako poslední položka Pokročilé, oddělená separátorem.
+    // Vratné soft delete pro libovolný stav (blokující pravidla hlídá backend + dialog).
+    { key: 'trash', label: t('doc_trash.to_trash'), icon: 'trash', tier: 'advanced', variant: 'danger',
+      dividerBefore: true,
+      show: !isDraft.value && w, disabled: b || trashBusy.value, run: deleteInvoice },
   ]
 })
 </script>
@@ -1385,6 +1415,19 @@ const invoiceActions = computed<ActionItem[]>(() => {
   <div v-if="loading" class="text-center text-neutral-500 py-12">{{ t('common.loading') }}</div>
 
   <div v-else-if="invoice" class="max-w-5xl space-y-4">
+    <!-- FORK 0905 — banner: doklad je v koši (read-only, jen zobrazit / obnovit / trvale smazat) -->
+    <div v-if="inTrash" class="rounded-lg border border-danger-300 bg-danger-50 px-4 py-3 text-sm text-danger-700">
+      <p class="font-semibold">{{ t('doc_trash.banner_title') }}</p>
+      <p class="mt-0.5">
+        {{ t('doc_trash.banner_body', {
+          date: invoice.deleted_at ? formatDate(invoice.deleted_at) : '',
+          who: invoice.deleted_by_name || '—',
+        }) }}
+        <span v-if="invoice.delete_reason" class="block text-danger-600 mt-0.5">
+          {{ t('doc_trash.reason_label') }}: {{ invoice.delete_reason }}
+        </span>
+      </p>
+    </div>
     <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
       <div class="flex items-start gap-2 min-w-0">
         <!-- Zpět jako kruhové ikonové tlačítko -->
@@ -2763,5 +2806,16 @@ const invoiceActions = computed<ActionItem[]>(() => {
         <Button variant="primary" @click="downloadPdfFile">{{ t('invoice.download_pdf') }}</Button>
       </template>
     </Modal>
+
+    <!-- FORK 0905 — dialog koše / trvalého smazání -->
+    <DocumentTrashModal
+      v-if="trashModalOpen"
+      :mode="trashModalMode"
+      :docs="trashModalDocs"
+      :is-admin="isAdmin"
+      :busy="trashBusy"
+      @close="trashModalOpen = false"
+      @confirm="confirmTrashModal"
+    />
   </div>
 </template>

@@ -115,6 +115,29 @@ export interface InvoiceTotals {
 
 export type PaymentMethod = 'bank_transfer' | 'card' | 'cash' | 'other'
 
+/** FORK 0905 — blokace mazání dokladu (koš / trvalé smazání). */
+export interface TrashBlocker {
+  code: 'blocked_vat_period' | 'blocked_linked_documents' | 'blocked_sent' | 'blocked_exported' | string
+  /** Admin ji smí přebít checkboxem „Vím, co dělám" (jen odesláno/exportováno). */
+  overridable: boolean
+  message: string
+}
+
+export interface TrashPreflightDocument {
+  id: number
+  found: boolean
+  varsymbol?: string | null
+  status?: string | null
+  in_trash?: boolean
+  blockers?: TrashBlocker[]
+}
+
+export interface TrashSkippedDocument {
+  id: number
+  varsymbol: string | null
+  blockers: TrashBlocker[]
+}
+
 export interface Invoice {
   id: number
   varsymbol: string | null
@@ -182,6 +205,10 @@ export interface Invoice {
   reminder_count: number
   paid_at: string | null
   cancelled_at: string | null
+  /** FORK 0905 — koš dokladů: NULL = aktivní doklad, jinak čas přesunu do koše. */
+  deleted_at?: string | null
+  delete_reason?: string | null
+  deleted_by_name?: string | null
   pdf_path: string | null
   /** Zdrojové PDF z importu (iDoklad/Fakturoid) — oddělené od našeho rendered `pdf_path`. */
   imported_pdf_path: string | null
@@ -271,6 +298,10 @@ export interface InvoiceListItem {
   reminder_count: number
   paid_at: string | null
   cancelled_at: string | null
+  /** FORK 0905 — koš: vyplněné jen v trash listu. */
+  deleted_at?: string | null
+  delete_reason?: string | null
+  deleted_by_name?: string | null
   client_company_name: string
   project_name: string | null
   project_requires_approval?: boolean
@@ -354,6 +385,8 @@ export interface ListFilters {
   currency?: string
   unpaid_only?: boolean
   overdue?: boolean
+  /** FORK 0905 — true = jen doklady v koši (jinak koš vždy vynechán). */
+  trash?: boolean
   q?: string
   page?: number
   per_page?: number
@@ -385,6 +418,7 @@ export const invoicesApi = {
     if (filters.currency)    params['filter[currency]']    = filters.currency
     if (filters.unpaid_only) params['filter[unpaid_only]'] = 1
     if (filters.overdue)     params['filter[overdue]']     = 1
+    if (filters.trash)       params['filter[trash]']       = 1
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
     return api.get<{ data: MonthGroup[]; meta: InvoiceListMeta }>('/invoices', { params }).then(r => r.data)
@@ -453,11 +487,32 @@ export const invoicesApi = {
   update: (id: number, payload: InvoicePayload, force = false) =>
     api.put<Invoice>(`/invoices/${id}${force ? '?force=1' : ''}`, payload).then(r => r.data),
   /**
-   * Smazání faktury. Pro draft kdokoliv ≥ accountant, pro vystavené/zaplacené/stornované jen admin.
-   * Vrací `cascade_deleted` = počet navazujících dokladů (storno, dobropis), které byly
-   * smazány zároveň přes ON DELETE CASCADE (migrace 0015).
+   * FORK 0905 — přesun do koše (soft delete). Povinný důvod (min. 10 znaků);
+   * override=true (jen admin) přebije přebitelné blokace (odesláno / exportováno).
+   * Když je koš v Nastavení vypnutý, backend provede rovnou trvalé smazání
+   * (hard_deleted=true v odpovědi).
    */
-  delete: (id: number) => api.delete<{ ok: boolean; cascade_deleted: number }>(`/invoices/${id}`).then(r => r.data),
+  delete: (id: number, reason: string, override = false) =>
+    api.delete<{ ok: boolean; hard_deleted: boolean }>(`/invoices/${id}`, { data: { reason, override } }).then(r => r.data),
+  /** Obnova dokladu z koše — vrátí se se stejným číslem do všech přehledů. */
+  restore: (id: number) => api.post<{ ok: boolean }>(`/invoices/${id}/restore`).then(r => r.data),
+  /**
+   * Trvalé (nevratné) smazání — jen admin, jen z koše. confirm_number musí
+   * přesně odpovídat číslu dokladu (ochrana proti překliku).
+   */
+  forceDelete: (id: number, reason: string, confirmNumber: string, override = false) =>
+    api.delete<{ ok: boolean; snapshot_id: number; counter_released: boolean; numbering_gap: string | null }>(
+      `/invoices/${id}/force`,
+      { data: { reason, confirm_number: confirmNumber, override } },
+    ).then(r => r.data),
+  /** Read-only vyhodnocení blokací mazání pro potvrzovací dialog (i hromadný). */
+  trashPreflight: (ids: number[]) =>
+    api.post<{ documents: TrashPreflightDocument[] }>('/invoices/trash-preflight', { ids }).then(r => r.data),
+  /** Vysypání koše (jen admin) — blokované doklady se přeskočí a vrátí ve `skipped`. */
+  emptyTrash: (reason: string) =>
+    api.post<{ ok: boolean; deleted: { id: number; varsymbol: string | null }[]; skipped: TrashSkippedDocument[] }>(
+      '/invoices/trash/empty', { reason },
+    ).then(r => r.data),
 
   // Akce nad fakturou
   issue:    (id: number) => api.post<Invoice>(`/invoices/${id}/issue`).then(r => r.data),

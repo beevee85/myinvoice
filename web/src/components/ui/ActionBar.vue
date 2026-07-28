@@ -39,6 +39,8 @@ export interface ActionItem {
   href?: string              // externí odkaz (target=_blank)
   download?: boolean
   run?: () => void           // click handler
+  /** vykreslí oddělovač NAD položkou (v „Pokročilé" — typicky před destruktivní akcí) */
+  dividerBefore?: boolean
 }
 
 const props = defineProps<{
@@ -282,17 +284,20 @@ onBeforeUnmount(() => {
               </svg>
             </button>
             <template v-if="advancedOpen">
-              <component :is="tagOf(a)" v-for="a in advanced" :key="a.key" v-bind="attrsOf(a)"
-                :class="['w-full flex items-center gap-2.5 pl-6 pr-3 py-2 cursor-pointer text-left',
-                         a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
-                         a.disabled ? 'opacity-50 pointer-events-none' : '']"
-                :title="a.title || undefined" @click="runItem(a)">
-                <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-                  <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
-                </svg>
-                <span>{{ a.loading ? '…' : a.label }}</span>
-              </component>
+              <template v-for="a in advanced" :key="a.key">
+                <div v-if="a.dividerBefore" class="my-1 border-t border-neutral-100"></div>
+                <component :is="tagOf(a)" v-bind="attrsOf(a)"
+                  :class="['w-full flex items-center gap-2.5 pl-6 pr-3 py-2 cursor-pointer text-left',
+                           a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
+                           a.disabled ? 'opacity-50 pointer-events-none' : '']"
+                  :title="a.title || undefined" @click="runItem(a)">
+                  <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
+                  </svg>
+                  <span>{{ a.loading ? '…' : a.label }}</span>
+                </component>
+              </template>
             </template>
           </template>
         </div>
