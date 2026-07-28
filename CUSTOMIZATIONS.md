@@ -10,7 +10,7 @@ Uživatel chce tyto fork funkce navrhnout autorovi. Detailní checklist „před
 
 | Funkce | Sekce | Stav | Hlavní překážka před PR |
 |---|---|---|---|
-| Opravy DPH výkazů + zámek dokladu + EPO identifikace + CZ-NACE | 2026-07-27/28 | ✅ **PŘIJATO** — PR #245 mergnut, vydáno v **v4.52.0** | hotovo, bloky níže lze smazat |
+| Opravy DPH výkazů + zámek dokladu + EPO identifikace + CZ-NACE | 2026-07-27/28 | ✅ **PŘIJATO** — PR #245 mergnut, vydáno v **v4.52.0** | hotovo — bloky níže přeznačeny na PŘIJATO |
 | Koš + tvrdé mazání dokladů (0905) | 2026-07-28 | čeká na ověření v provozu | breaking DELETE (nutná zpětná kompatibilita), fork-only DDKPZ vazby v policy, přečíslovat migraci |
 | Omezení uživatele na vybrané firmy (0900) | 2026-07-02 FÁZE 2 | ✅ **PŘEVZATO JINAK** — PR #247 zavřen, autor vydal vlastní implementaci (`user_suppliers` + role per firmu) ve **v4.52.0**; naše verze odstraněna migrací 0908 | hotovo |
 | Daňový doklad k přijaté záloze (DDKPZ) + § 37a na přijaté straně (0904, 0906) | 2026-07-28 (obě dávky) | **kandidát — potvrdil uživatel 28. 7. 2026** | přečíslovat migrace 0904/0906 do upstream řady; oddělit od fork-only koše (DocumentTrashPolicy, TrashGuard v settlement akcích) a od sazby CZ-NA, pokud ji upstream nechce; doplnit kapitolu manuálu + openapi (endpointy settlement-doc-candidates / final-candidates / link-settlement-doc) |
@@ -122,7 +122,7 @@ Tři oddělené operace: **storno/dobropis** (beze změny, primární cesta) →
 
 ## 2026-07-28 — FORK RELEASE 4.51.1 + BUG 7: CZ-NACE (EPO chyba 30) a warning zaokrouhlení (chyba 49)
 
-**Charakter: BUGFIX KANDIDÁT PRO UPSTREAM** (součást jednoho PR `pr/vat-report-fixes`, commit BUG 7 cherry-picknut; VERSION bump je fork-only). VERSION 4.51.0 → **4.51.1** (propisuje se do verzeSW EPO výkazů).
+**Charakter: BUGFIX — ✅ PŘIJATO UPSTREAMEM** (PR #245 mergnut, vydáno ve **v4.52.0**; od merge tagu je to už upstream kód, ne fork úprava — při dalších updatech se nekontroluje). Fork VERSION bump 4.51.1 zanikl s přechodem na 4.52.0.
 
 1. **CZ-NACE / c_okec:** ukládání normalizuje na 6místný kód číselníku MFČR (73.11/7311 → 731100, 62020 → 620200); pod 4 číslice (oddíl z ARES, např. „74") → 422 a neuloží se. ARES prefill bere NEJDELŠÍ kód z czNace, u pouhého oddílu nechává pole prázdné + `cz_nace_note` pro UI (Settings toast). Build (normalizeOkec) neúplný kód VYNECHÁ (c_okec optional — dřív by šel ven a EPO hlásilo propustnou chybu 30). UI: placeholder 731100, nový hint, inline validace, normalizace na blur. EpoIdentityValidator u DP3 varuje i na neúplný kód s odkazem na chybu 30. **Data: PROPSOL cz_nace_code opraveno „74" → „731100".**
 2. **Propustná chyba 49:** DP3 preview porovnává součet daně z dokladů na ř. 40/41 s round(zaokrouhlený základ × sazba) a rozdíl hlásí warningem („…neupravuj ji" — hodnota odpovídá KH B.2/B.3). XML se nikdy nepřepisuje, generování se neblokuje. Ověřeno na Q1/2026: rozdíl 1 Kč na ř. 40 (5227 vs 5228).
@@ -130,7 +130,7 @@ Tři oddělené operace: **storno/dobropis** (beze změny, primární cesta) →
 
 ## 2026-07-27 — ZÁMEK DOKLADU V UI + EPO IDENTIFIKACE + VIES CZ699 (přímo na custom, 6 commitů 9c90c80f..e1395c0e)
 
-**Charakter: BUGFIX KANDIDÁT PRO UPSTREAM** — sloučeno s 1. dávkou do JEDNOHO PR: větev `pr/vat-report-fixes` na forku (11 commitů), podklad `/root/vat-fix-snapshots/GITHUB-ISSUE.md` + `GITHUB-PR.md`; po přijetí autorem blok odpadá.
+**Charakter: BUGFIX — ✅ PŘIJATO UPSTREAMEM** (PR #245 mergnut, vydáno ve **v4.52.0**; upstream kód, při updatech se nekontroluje). Podklady zůstávají v `/root/vat-fix-snapshots/`.
 
 1. **BUG 5 — zámek stavu bez cesty ven z UI:** oba editory (vydané i přijaté) zobrazují u uzamčeného dokladu výstražný pruh + admin tlačítko **„Odemknout k editaci"** → modal s výslovnými následky a povinným checkboxem; formulář je do odemčení `fieldset[disabled]`; příznak nepřežije reload a `?force=1` z URL se ignoruje. Backend: bez force 409 s návodem, force bez admin 403; audit **`invoice.force_edit` / `purchase_invoice.force_edit`** s diffem polí + starým/novým snapshotem (dřív jen `force_updated` bez detailu). Nový **POST `/api/invoices/{id}/rebuild-snapshots`** („Obnovit údaje klienta", admin) — přepíše jen snapshoty z live dat i u zaplacené faktury, audit `invoice.rebuild_snapshots`.
 2. **BUG 6 — EPO XML bez povinné identifikace:** nový **`EpoIdentityValidator`** (povinné: kód FÚ, **ÚzP/c_pracufo**, DIČ, typ poplatníka, e-mail; u PO opr_*; doporučené: telefon, CZ-NACE u DP3). KH/DP3/SHV preview i download vrací **422 `epo_identity_incomplete`** s `missing[]` + `settings_url`; report stránky to kreslí jako blok s výčtem a odkazem na `/admin/settings#epo`; Settings mají kotvu #epo, badge „Nekompletní — EPO podání selže", červené hinty a nápovědu ÚzP. PUT suppliers vrací `epo_ready`+`missing` (informativně). **POZOR: BEKRON (supplier 1) nemá ÚzP ani oprávněnou osobu → jeho výkazy vrací 422, dokud se pole nedoplní** (PROPSOL je kompletní).
@@ -140,7 +140,7 @@ Testy: ForceEditUnlockTest, EpoIdentityGuardTest, ViesClientCzRoutingTest (+2). 
 
 ## 2026-07-27 — OPRAVA DPH VÝKAZŮ: dobropisy, zahraniční RC, forma podání, termíny, konzistence RC (větev fix/vat-credit-note-sign)
 
-**Charakter: BUGFIX KANDIDÁT PRO UPSTREAM** — po přijetí autorem (radekhulan/myinvoice) celý blok z evidence odpadá. Sloučeno s 2. dávkou (zámek dokladu + EPO identifikace) do jednoho PR: větev `pr/vat-report-fixes`, podklad `/root/vat-fix-snapshots/GITHUB-ISSUE.md` + `GITHUB-PR.md` + `DIFF-REPORT.md`.
+**Charakter: BUGFIX — ✅ PŘIJATO UPSTREAMEM** (PR #245 mergnut, vydáno ve **v4.52.0**; upstream kód, při updatech se nekontroluje). Podklady zůstávají v `/root/vat-fix-snapshots/`.
 
 **Co se změnilo (5 chyb v4.51.0):**
 1. **BUG 1 — dobropisy se přičítaly:** `VatLedgerService::fetchPurchases` nově normalizuje přijaté dobropisy (`document_kind='credit_note'`) přes **-ABS()** na záporné částky (base/vat/inv_total) — v DB žijí obě znaménkové konvence (ruční/AI import záporně, část importů kladně — reálně PF2602004). Propíše se do DPHDP3/DPHKH1/DPHSHV/Knihy DPH. Vydané dobropisy (v DB záporné) beze změny. KH: dobropis nad 10 000 Kč jde přes `abs()` práh jako **samostatný záporný řádek B.2/A.4**. `IncomeTaxBuilder` náklady taktéž -ABS().
