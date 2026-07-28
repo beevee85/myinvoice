@@ -269,7 +269,7 @@ final class IdokladBankTransactionImporter
         $s = $pdo->prepare(
             'SELECT i.id, i.status, c.code AS currency
                FROM invoices i JOIN currencies c ON c.id = i.currency_id
-              WHERE i.supplier_id = ? AND i.idoklad_id = ? LIMIT 2'
+              WHERE i.supplier_id = ? AND i.idoklad_id = ? AND i.deleted_at IS NULL LIMIT 2'
         );
         $s->execute([$supplierId, $documentId]);
         $rows = $s->fetchAll(PDO::FETCH_ASSOC) ?: [];

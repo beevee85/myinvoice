@@ -7,6 +7,7 @@ namespace MyInvoice\Action\PurchaseInvoice;
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TrashGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
@@ -49,6 +50,10 @@ final class UpdatePurchaseInvoiceAction
         $existing = $this->repo->find($id, $supplierId);
         if ($existing === null) {
             return Json::error($response, 'not_found', 'Přijatá faktura nenalezena.', 404);
+        }
+        // Doklad v koši je read-only (soft delete, 0905).
+        if (($blocked = TrashGuard::blockIfTrashed($existing, $response)) !== null) {
+            return $blocked;
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);

@@ -69,6 +69,7 @@ final class InvoicesZipAction
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
+                   AND i.deleted_at IS NULL
                    AND DATE_FORMAT(i.$dateExpr, '%Y-%m') = ?
                    AND i.status IN ('issued','sent','reminded','paid')
                    " . ($typeFilter !== '' ? ' AND i.invoice_type = ?' : '') . "

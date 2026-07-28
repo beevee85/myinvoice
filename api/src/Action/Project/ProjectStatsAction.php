@@ -38,6 +38,7 @@ final class ProjectStatsAction
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status != 'cancelled' AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
            GROUP BY cur.code
            ORDER BY COUNT(*) DESC
@@ -81,6 +82,7 @@ final class ProjectStatsAction
                JOIN clients  c ON c.id = p.client_id
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                 AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
                 AND YEAR(COALESCE(i.tax_date, i.issue_date)) = ?
@@ -132,6 +134,7 @@ final class ProjectStatsAction
                JOIN clients  c ON c.id = p.client_id
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                 AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
                 AND COALESCE(i.tax_date, i.issue_date) >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
@@ -172,6 +175,7 @@ final class ProjectStatsAction
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                 AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
                 AND YEAR(COALESCE(i.tax_date, i.issue_date)) IN ($place)

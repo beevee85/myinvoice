@@ -157,7 +157,8 @@ final class RecurringTemplateRepository
                        c.company_name AS client_company_name,
                        p.name AS project_name,
                        cur.code AS currency,
-                       (SELECT COUNT(*) FROM invoices iv WHERE iv.recurring_template_id = t.id) AS invoices_generated_count,
+                       (SELECT COUNT(*) FROM invoices iv WHERE iv.recurring_template_id = t.id
+                          AND iv.deleted_at IS NULL) AS invoices_generated_count,
                        $totalExpr AS total_with_vat
                   FROM recurring_invoice_templates t
                   JOIN clients c ON c.id = t.client_id

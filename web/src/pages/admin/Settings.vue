@@ -282,6 +282,9 @@ async function saveSupplier() {
       self_copy: supplier.value.self_copy ?? null,
       auto_generate_recurring: supplier.value.auto_generate_recurring,
       embed_isdoc: supplier.value.embed_isdoc,
+      // FORK 0905: koš pro doklady
+      doc_trash_enabled: supplier.value.doc_trash_enabled,
+      doc_trash_retention_days: supplier.value.doc_trash_retention_days,
       pohoda_account_code: supplier.value.pohoda_account_code,
       pohoda_centre_code: supplier.value.pohoda_centre_code,
       pohoda_activity_code: supplier.value.pohoda_activity_code,
@@ -616,6 +619,26 @@ async function removeLogo() {
       <DocumentAppearanceSettings />
 
       <!-- Číslování faktur — samostatný box -->
+      <!-- FORK 0905 — Koš pro doklady (vydané i přijaté faktury) -->
+      <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.doc_trash_section') }}</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="md:col-span-2">
+            <label class="flex items-center gap-2 text-sm">
+              <input v-model="supplier.doc_trash_enabled" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+              {{ t('settings.doc_trash_enabled') }}
+            </label>
+            <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.doc_trash_enabled_hint') }}</p>
+          </div>
+          <div v-if="supplier.doc_trash_enabled" class="ml-6">
+            <label class="block text-sm text-neutral-700 mb-1">{{ t('settings.doc_trash_retention') }}</label>
+            <input v-model.number="supplier.doc_trash_retention_days" type="number" min="0" max="3650" step="1"
+                   class="w-32 h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+            <p class="text-xs text-neutral-500 mt-1">{{ t('settings.doc_trash_retention_hint') }}</p>
+          </div>
+        </div>
+      </section>
+
       <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.numbering_section') }}</h2>
         <div>

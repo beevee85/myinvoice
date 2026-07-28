@@ -220,6 +220,7 @@ final class ExportPurchaseInvoicesAction
                   FROM purchase_invoices pi
                   JOIN clients c ON c.id = pi.vendor_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND $dateExpr >= ?
                    AND $dateExpr < ?
                    AND pi.status IN ('received', 'booked', 'paid')

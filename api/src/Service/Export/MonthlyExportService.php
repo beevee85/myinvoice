@@ -399,6 +399,7 @@ final class MonthlyExportService
         // Vystavené dle DUZP (daň na výstupu vzniká k DUZP). Shodné s VatLedgerService.
         $sql = "SELECT id FROM invoices
                  WHERE supplier_id = ?
+                   AND deleted_at IS NULL
                    AND COALESCE(tax_date, issue_date) >= ?
                    AND COALESCE(tax_date, issue_date) <  ?
                    AND status IN ('issued','sent','reminded','paid')
@@ -426,6 +427,7 @@ final class MonthlyExportService
                   JOIN clients c ON c.id = pi.vendor_id
              LEFT JOIN countries co ON co.id = c.country_id
                  WHERE pi.supplier_id = ?
+                   AND pi.deleted_at IS NULL
                    AND $dateExpr >= ?
                    AND $dateExpr <  ?
                    AND pi.status IN ('received', 'booked', 'paid')

@@ -47,8 +47,14 @@ final class BulkSendRemindersAction
         $errors = [];
         foreach ($ids as $invId) {
             // Per-supplier ownership check — skip cizí faktury jako not_found
-            if (!SupplierGuard::owns($request, $this->repo->find($invId))) {
+            $invoice = $this->repo->find($invId);
+            if (!SupplierGuard::owns($request, $invoice)) {
                 $errors[] = ['invoice_id' => $invId, 'error' => 'not_found'];
+                continue;
+            }
+            // Doklad v koši (soft delete) se do dávky nebere.
+            if (!empty($invoice['deleted_at'])) {
+                $errors[] = ['invoice_id' => $invId, 'error' => 'in_trash'];
                 continue;
             }
             try {

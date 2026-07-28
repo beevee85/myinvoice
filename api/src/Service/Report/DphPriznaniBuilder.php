@@ -393,6 +393,7 @@ final class DphPriznaniBuilder
             "SELECT varsymbol
                FROM invoices
               WHERE supplier_id = ?
+                AND deleted_at IS NULL
                 AND status NOT IN ('draft', 'cancelled')
                 AND invoice_type = 'credit_note'
                 AND (total_without_vat < 0 OR total_vat < 0)
@@ -413,6 +414,7 @@ final class DphPriznaniBuilder
                FROM invoices i
                JOIN invoice_items ii ON ii.invoice_id = i.id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status NOT IN ('draft', 'cancelled')
                 AND i.invoice_type <> 'proforma'
                 AND COALESCE(i.tax_date, i.issue_date) BETWEEN ? AND ?

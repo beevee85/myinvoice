@@ -247,6 +247,8 @@ final class VatClassificationMapperTest extends TestCase
             tax_deductible INTEGER NOT NULL DEFAULT 1,
             is_fixed_asset INTEGER NOT NULL DEFAULT 0,
             total_with_vat REAL NOT NULL DEFAULT 0
+        ,
+            deleted_at TEXT NULL
         )");
 
         $this->pdo->exec("CREATE TABLE purchase_invoice_items (
@@ -274,6 +276,8 @@ final class VatClassificationMapperTest extends TestCase
             invoice_type TEXT NOT NULL DEFAULT 'invoice',
             vat_classification_code TEXT NULL,
             total_with_vat REAL NOT NULL DEFAULT 0
+        ,
+            deleted_at TEXT NULL
         )");
 
         $this->pdo->exec("CREATE TABLE invoice_items (

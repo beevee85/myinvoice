@@ -200,6 +200,7 @@ final class InvoiceRepository
                           SELECT 1 FROM invoices i
                            WHERE i.supplier_id = ? AND i.client_id = ?
                              AND i.invoice_type = 'proforma' AND i.status != 'cancelled'
+                             AND i.deleted_at IS NULL
                              AND i.id <> ?
                              AND NOT EXISTS (SELECT 1 FROM invoices ch
                                               WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice')
@@ -223,6 +224,7 @@ final class InvoiceRepository
                           SELECT 1 FROM invoices i
                            WHERE i.supplier_id = ? AND i.client_id = ?
                              AND i.invoice_type = 'invoice' AND i.status != 'cancelled'
+                             AND i.deleted_at IS NULL
                              AND i.parent_invoice_id IS NULL AND i.id <> ?
                         )"
             );
@@ -274,6 +276,8 @@ final class InvoiceRepository
                 AND i.client_id = ?
                 AND i.invoice_type = 'proforma'
                 AND i.status != 'cancelled'
+                -- Doklad v koši se nenabízí k párování.
+                AND i.deleted_at IS NULL
                 AND i.id <> ?
                 AND NOT EXISTS (SELECT 1 FROM invoices ch
                                  WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice')
@@ -427,6 +431,8 @@ final class InvoiceRepository
                 AND i.client_id = ?
                 AND i.invoice_type = 'invoice'
                 AND i.status != 'cancelled'
+                -- Doklad v koši se nenabízí k párování.
+                AND i.deleted_at IS NULL
                 AND i.parent_invoice_id IS NULL
                 AND i.id <> ?
               ORDER BY (i.currency_id = ?) DESC,
@@ -501,6 +507,7 @@ final class InvoiceRepository
                JOIN clients c ON c.id = i.client_id
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.varsymbol LIKE ?
               ORDER BY i.issue_date DESC, i.id DESC
               LIMIT " . (int) $limit
@@ -578,7 +585,8 @@ final class InvoiceRepository
             // (receivableDocTypeSql) a InvoiceAmountPolicy.
             $where[] = "(i.invoice_type != 'proforma'"
                 . " OR NOT EXISTS (SELECT 1 FROM invoices ch"
-                . " WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'))";
+                . " WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'"
+                . " AND ch.deleted_at IS NULL))";
             // Finální daňový doklad k zaplacené proformě má amount_to_pay = 0 by design
             // (záloha pokryla celek) — není nezaplacený, jen status zůstal 'issued'.
             // Dobropisy (záporný total) ponecháváme. Částečné úhrady (#89): dlužná
@@ -590,7 +598,8 @@ final class InvoiceRepository
             // Stejná pohledávková sémantika jako unpaid (vč. nespárovaných proforem).
             $where[] = "(i.invoice_type != 'proforma'"
                 . " OR NOT EXISTS (SELECT 1 FROM invoices ch"
-                . " WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'))";
+                . " WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'"
+                . " AND ch.deleted_at IS NULL))";
             $where[] = "(i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)";
         }
         if (!empty($filters['q'])) {
@@ -600,6 +609,9 @@ final class InvoiceRepository
             $params[] = $q . '%';
             $params[] = '%' . $q . '%';
         }
+
+        // Koš (soft delete, 0905): standardně jen aktivní doklady; trash=1 → jen koš.
+        $where[] = empty($filters['trash']) ? 'i.deleted_at IS NULL' : 'i.deleted_at IS NOT NULL';
 
         $whereSql = implode(' AND ', $where);
 
@@ -625,6 +637,7 @@ final class InvoiceRepository
                        i.status, i.payment_method, i.revenue_category_id,
                        i.sent_at, i.last_reminder_at, i.reminder_count,
                        i.paid_at, i.cancelled_at,
+                       i.deleted_at, i.delete_reason, du.name AS deleted_by_name,
                        c.company_name AS client_company_name,
                        p.name AS project_name,
                        p.requires_work_report_approval AS project_requires_approval,
@@ -633,6 +646,7 @@ final class InvoiceRepository
                   FROM invoices i
                   JOIN clients c ON c.id = i.client_id
              LEFT JOIN projects p ON p.id = i.project_id
+             LEFT JOIN users du ON du.id = i.deleted_by
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE $whereSql
                  ORDER BY COALESCE(i.tax_date, i.issue_date) DESC, i.id DESC";
@@ -1591,6 +1605,9 @@ final class InvoiceRepository
     ): array {
         $where = ['1=1'];
         $params = [];
+
+        // Doklad v koši do schvalovacího inboxu / reminder cronu nepatří.
+        $where[] = 'i.deleted_at IS NULL';
 
         if ($supplierId !== null) {
             $where[] = 'i.supplier_id = ?';

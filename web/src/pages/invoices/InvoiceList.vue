@@ -25,6 +25,8 @@ import StatusDot from '@/components/ui/StatusDot.vue'
 import TabsNav from '@/components/ui/TabsNav.vue'
 import Modal from '@/components/ui/Modal.vue'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
+import DocumentTrashModal, { type TrashModalDoc } from '@/components/invoices/DocumentTrashModal.vue'
+import { apiErrorMessage } from '@/api/errors'
 
 const { t, tm, rt } = useI18n()
 const toast = useToast()
@@ -74,6 +76,9 @@ const activeFilterCount = computed(() => {
   return n
 })
 
+// FORK 0905 — režim koše: samostatný tab, list jede s filter[trash]=1.
+const trashOnly = ref(false)
+
 // ─── Taby stavů = presety existujících filtrů (žádná nová API sémantika) ───
 const statusTabs = computed(() => [
   { value: 'all',     label: t('invoice.tab_all') },
@@ -81,8 +86,10 @@ const statusTabs = computed(() => [
   { value: 'unpaid',  label: t('invoice.tab_unpaid') },
   { value: 'overdue', label: t('invoice.tab_overdue') },
   { value: 'draft',   label: t('invoice.tab_drafts') },
+  { value: 'trash',   label: t('doc_trash.tab') },
 ])
 const activeTab = computed<string>(() => {
+  if (trashOnly.value) return 'trash'
   if (overdueOnly.value) return 'overdue'
   if (unpaidOnly.value) return 'unpaid'
   if (statusFilter.value === 'paid') return 'paid'
@@ -92,10 +99,11 @@ const activeTab = computed<string>(() => {
 })
 function setTab(v: string | number) {
   const tab = String(v)
-  // preset přepisuje jen stavovou trojici (status / unpaid / overdue); ostatní filtry nechává
+  // preset přepisuje jen stavovou čtveřici (status / unpaid / overdue / koš); ostatní filtry nechává
   statusFilter.value = tab === 'paid' ? 'paid' : (tab === 'draft' ? 'draft' : '')
   unpaidOnly.value = tab === 'unpaid'
   overdueOnly.value = tab === 'overdue'
+  trashOnly.value = tab === 'trash'
 }
 
 // ─── Odstranitelné chipy aktivních filtrů (zrcadlí activeFilterCount + odchylku roku) ───
@@ -174,6 +182,118 @@ function openBulkPdfExport() {
   if (selectedPdfIds.value.length === 0) return
   bulkPdfSign.value = false
   bulkPdfOpen.value = true
+}
+
+// ─── FORK 0905 — koš dokladů: dialogy + operace ───
+const trashModalOpen = ref(false)
+const trashModalMode = ref<'trash' | 'force' | 'empty'>('trash')
+const trashModalDocs = ref<TrashModalDoc[]>([])
+const trashBusy = ref(false)
+
+/** Preflight blokací → naplní dialog daty (čísla dokladů + důvody blokací). */
+async function openTrashModal(mode: 'trash' | 'force' | 'empty', ids: number[]) {
+  if (!ids.length) return
+  trashBusy.value = true
+  try {
+    const { documents } = await invoicesApi.trashPreflight(ids)
+    const byId = new Map(groups.value.flatMap(g => g.invoices).map(i => [i.id, i]))
+    trashModalDocs.value = documents.filter(d => d.found).map(d => {
+      const row = byId.get(d.id)
+      return {
+        id: d.id,
+        varsymbol: d.varsymbol ?? null,
+        party: row?.client_company_name ?? null,
+        totalFormatted: row ? formatMoney(row.total_with_vat, row.currency) : null,
+        taxDate: row ? formatDate(row.tax_date || row.issue_date) : null,
+        statusLabel: d.status ? statusLabel(d.status) : null,
+        blockers: d.blockers ?? [],
+      }
+    })
+    trashModalMode.value = mode
+    trashModalOpen.value = true
+  } catch (e) {
+    toast.error(apiErrorMessage(e, t('doc_trash.preflight_failed')))
+  } finally {
+    trashBusy.value = false
+  }
+}
+
+function openBulkTrash() { openTrashModal('trash', selectedIds.value) }
+function openBulkForce() { openTrashModal('force', selectedIds.value) }
+function openEmptyTrash() {
+  const ids = groups.value.flatMap(g => g.invoices).map(i => i.id)
+  openTrashModal('empty', ids)
+}
+/** Řádkové akce v koši. */
+function rowForceDelete(inv: InvoiceListItem) { openTrashModal('force', [inv.id]) }
+async function rowRestore(inv: InvoiceListItem) {
+  try {
+    await invoicesApi.restore(inv.id)
+    toast.success(t('doc_trash.restored', { varsymbol: inv.varsymbol || `#${inv.id}` }))
+    selectedIds.value = selectedIds.value.filter(id => id !== inv.id)
+    await load(true)
+  } catch (e) {
+    toast.error(apiErrorMessage(e, t('doc_trash.restore_failed')))
+  }
+}
+async function bulkRestore() {
+  const ids = [...selectedIds.value]
+  if (!ids.length) return
+  trashBusy.value = true
+  const errors: string[] = []
+  for (const id of ids) {
+    try { await invoicesApi.restore(id) } catch (e) { errors.push(apiErrorMessage(e, `#${id}`)) }
+  }
+  trashBusy.value = false
+  selectedIds.value = []
+  await load(true)
+  if (errors.length) toast.warning(t('doc_trash.bulk_partial', { ok: ids.length - errors.length, failed: errors.length }) + ' ' + errors.join('; '))
+  else toast.success(t('doc_trash.bulk_restored', { n: ids.length }))
+}
+
+/** Potvrzení z dialogu — provede operaci podle režimu. Blokované doklady přeskočí. */
+async function confirmTrashModal(payload: { reason: string; override: boolean; confirmNumber: string }) {
+  trashBusy.value = true
+  const errors: string[] = []
+  let done = 0
+  try {
+    if (trashModalMode.value === 'empty') {
+      const res = await invoicesApi.emptyTrash(payload.reason)
+      done = res.deleted.length
+      if (res.skipped.length) {
+        toast.warning(t('doc_trash.empty_skipped', { n: done, skipped: res.skipped.length }))
+      } else {
+        toast.success(t('doc_trash.empty_done', { n: done }))
+      }
+    } else {
+      // Jen doklady, které preflight nechal průchozí (nepřebitelně blokované vynech).
+      const eligible = trashModalDocs.value.filter(d =>
+        !d.blockers.some(b => !b.overridable)
+        && (d.blockers.length === 0 || payload.override))
+      for (const d of eligible) {
+        try {
+          if (trashModalMode.value === 'trash') {
+            await invoicesApi.delete(d.id, payload.reason, payload.override)
+          } else {
+            await invoicesApi.forceDelete(d.id, payload.reason,
+              eligible.length === 1 ? payload.confirmNumber : (d.varsymbol ?? ''), payload.override)
+          }
+          done++
+        } catch (e) {
+          errors.push(`${d.varsymbol || `#${d.id}`}: ${apiErrorMessage(e, t('doc_trash.op_failed'))}`)
+        }
+      }
+      const skipped = trashModalDocs.value.length - eligible.length
+      if (errors.length) toast.warning(t('doc_trash.bulk_partial', { ok: done, failed: errors.length }) + ' ' + errors.join('; '))
+      else if (trashModalMode.value === 'trash') toast.success(t('doc_trash.trashed_done', { n: done }) + (skipped ? ' ' + t('doc_trash.skipped_note', { n: skipped }) : ''))
+      else toast.success(t('doc_trash.force_done', { n: done }) + (skipped ? ' ' + t('doc_trash.skipped_note', { n: skipped }) : ''))
+    }
+  } finally {
+    trashBusy.value = false
+    trashModalOpen.value = false
+    selectedIds.value = []
+    await load(true)
+  }
 }
 
 async function responseErrorMessage(error: any, fallback: string): Promise<string> {
@@ -519,6 +639,7 @@ async function load(reset = true) {
       currency:  currencyFilter.value || undefined,
       overdue: overdueOnly.value || undefined,
       unpaid_only: unpaidOnly.value || undefined,
+      trash: trashOnly.value || undefined,
       page: page.value,
     })
     if (reset) {
@@ -557,6 +678,7 @@ function loadFiltersFromQuery(q: typeof route.query) {
   clientFilter.value = typeof q.client_id === 'string' && q.client_id !== '' ? Number(q.client_id) : ''
   overdueOnly.value  = q.overdue === '1' || q.overdue === 'true'
   unpaidOnly.value   = q.unpaid === '1' || q.unpaid === 'true'
+  trashOnly.value    = q.trash === '1'
   yearFilter.value   = typeof q.year === 'string' && q.year !== ''
     ? (q.year === 'all' ? '' : Number(q.year))
     : ((overdueOnly.value || unpaidOnly.value) ? '' : DEFAULT_YEAR)
@@ -582,15 +704,18 @@ function syncFiltersToUrl() {
   if (currencyFilter.value) q.currency = currencyFilter.value
   if (overdueOnly.value) q.overdue = '1'
   if (unpaidOnly.value) q.unpaid = '1'
+  if (trashOnly.value) q.trash = '1'
   if (search.value) q.q = search.value
   router.replace({ query: q })
 }
 
 watch([statusFilter, typeFilter, clientFilter, yearFilter, monthFilter, dateFrom, dateTo,
-       overdueOnly, unpaidOnly, currencyFilter], () => {
+       overdueOnly, unpaidOnly, trashOnly, currencyFilter], () => {
   syncFiltersToUrl()
   load(true)
 })
+// Výběr řádků nesmí přežít přepnutí koš ↔ aktivní doklady (jiné operace nad jinou množinou).
+watch(trashOnly, () => { selectedIds.value = [] })
 // Když se vyčistí rok (vše/range), automaticky zrušit i měsíční filtr.
 watch(yearFilter, (y) => { if (y === '') monthFilter.value = '' })
 watch([dateFrom, dateTo], ([f, to]) => { if (f || to) monthFilter.value = '' })
@@ -612,6 +737,7 @@ watch(() => route.query, (newQ) => {
     dateTo.value = ''
     overdueOnly.value = false
     unpaidOnly.value = false
+    trashOnly.value = false
     currencyFilter.value = ''
     search.value = ''
     setTimeout(() => { suppressUrlSync = false }, 0)
@@ -699,8 +825,34 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
         />
       </div>
 
+      <!-- FORK 0905 — koš: vlastní sada hromadných akcí -->
+      <div v-if="trashOnly" class="flex items-center gap-2" role="toolbar" :aria-label="t('doc_trash.tab')">
+        <span v-if="selectedIds.length" class="text-xs text-neutral-500 tabular-nums px-1.5">{{ selectedIds.length }}×</span>
+        <Button v-if="auth.canWrite" variant="secondary" :disabled="trashBusy || selectedIds.length === 0" @click="bulkRestore">
+          {{ t('doc_trash.bulk_restore') }}
+        </Button>
+        <button
+          v-if="auth.isAdmin"
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-full border border-danger-300 px-4 py-2 text-sm font-medium text-danger-600 hover:bg-danger-50 disabled:opacity-50 disabled:pointer-events-none"
+          :disabled="trashBusy || selectedIds.length === 0"
+          @click="openBulkForce"
+        >
+          {{ t('doc_trash.bulk_force') }}
+        </button>
+        <button
+          v-if="auth.isAdmin"
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-full border border-danger-300 px-4 py-2 text-sm font-medium text-danger-600 hover:bg-danger-50 disabled:opacity-50 disabled:pointer-events-none"
+          :disabled="trashBusy || total === 0"
+          @click="openEmptyTrash"
+        >
+          {{ t('doc_trash.empty_trash') }}
+        </button>
+      </div>
+
       <!-- Hromadné akce: kruhové ikony, disabled dokud výběr nesplňuje podmínky dané akce -->
-      <div class="flex items-center gap-1" role="toolbar" aria-label="Hromadné akce">
+      <div v-else class="flex items-center gap-1" role="toolbar" aria-label="Hromadné akce">
         <span v-if="selectedIds.length" class="text-xs text-neutral-500 tabular-nums px-1.5">{{ selectedIds.length }}×</span>
         <IconButton :label="t('invoice.bulk_pdf', { n: selectedPdfIds.length })" :disabled="bulkBusy || selectedIds.length === 0" @click="openBulkPdfExport">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 12l-4-4m4 4l4-4M4 20h16"/></svg>
@@ -720,6 +872,10 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
           </IconButton>
           <IconButton :label="t('invoice.bulk_reissue', { n: selectedIds.length })" :disabled="bulkBusy || selectedIds.length === 0" @click="bulkReissue">
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2m-6 12h8a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z"/></svg>
+          </IconButton>
+          <!-- FORK 0905: hromadný přesun do koše -->
+          <IconButton :label="t('doc_trash.bulk_trash', { n: selectedIds.length })" :disabled="bulkBusy || trashBusy || selectedIds.length === 0" @click="openBulkTrash">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
           </IconButton>
         </template>
         <IconButton :label="t('invoice.csv_export')" @click="exportCsv">
@@ -825,6 +981,7 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
       <TableSkeleton :rows="8" :cols="7" />
     </div>
 
+    <EmptyState v-else-if="!groups.length && trashOnly" :title="t('doc_trash.empty_state')" />
     <EmptyState v-else-if="!groups.length" :title="t('invoice.no_data')" :cta="t('invoice.issue_first')" to="/invoices/new" />
 
     <div v-else>
@@ -871,9 +1028,11 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
                 <th>{{ t('invoice.client_project') }}</th>
                 <th>Typ</th>
                 <th>DUZP / Vystaveno</th>
-                <th>Splatnost</th>
+                <th v-if="!trashOnly">Splatnost</th>
                 <th class="num">{{ t('invoice.amount_to_pay') }}</th>
-                <th>Stav</th>
+                <th v-if="!trashOnly">Stav</th>
+                <th v-if="trashOnly">{{ t('doc_trash.col_deleted') }}</th>
+                <th v-if="trashOnly">{{ t('doc_trash.col_reason') }}</th>
                 <th class="w-32"></th>
               </tr>
             </thead>
@@ -907,7 +1066,7 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
                 <td class="text-xs">
                   <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
                 </td>
-                <td class="text-xs">
+                <td v-if="!trashOnly" class="text-xs">
                   <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : 'text-neutral-600'">
                     {{ formatDate(inv.due_date) }}
                   </span>
@@ -915,7 +1074,15 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
                 <td class="num font-medium">
                   {{ formatMoney(inv.amount_to_pay ?? inv.total_with_vat, inv.currency) }}
                 </td>
-                <td @click.stop>
+                <!-- FORK 0905 — koš: kdo a kdy smazal + důvod -->
+                <td v-if="trashOnly" class="text-xs text-neutral-600">
+                  <div>{{ inv.deleted_at ? formatDate(inv.deleted_at) : '—' }}</div>
+                  <div v-if="inv.deleted_by_name" class="text-neutral-400">{{ inv.deleted_by_name }}</div>
+                </td>
+                <td v-if="trashOnly" class="text-xs text-neutral-600 max-w-56">
+                  <span class="line-clamp-2" :title="inv.delete_reason ?? undefined">{{ inv.delete_reason || '—' }}</span>
+                </td>
+                <td v-if="!trashOnly" @click.stop>
                   <!-- Pro koncepty (s právem editace) zobraz tlačítko "Výkaz" místo stavu — rychlý přístup k modalu. -->
                   <button v-if="inv.status === 'draft' && inv.invoice_type !== 'tax_document' && auth.canWrite"
                     @click="openWorkReport(inv.id)"
@@ -932,7 +1099,21 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
                       :title="t('invoice.reminder_at', { count: inv.reminder_count, date: formatDate(inv.last_reminder_at) })">⚠ {{ inv.reminder_count }}</span>
                   </span>
                 </td>
-                <td @click.stop>
+                <!-- FORK 0905 — koš: jen Obnovit / Smazat trvale -->
+                <td v-if="trashOnly" @click.stop>
+                  <span class="row-actions inline-flex items-center gap-0.5 justify-end w-full">
+                    <IconButton v-if="auth.canWrite" :label="t('doc_trash.restore')" size="sm" :disabled="trashBusy" @click="rowRestore(inv)">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10h10a8 8 0 0 1 8 8v2M3 10l6 6m-6-6l6-6"/></svg>
+                    </IconButton>
+                    <IconButton v-if="auth.isAdmin" :label="t('doc_trash.force_delete')" size="sm" :disabled="trashBusy" @click="rowForceDelete(inv)">
+                      <svg class="w-4 h-4 text-danger-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
+                    </IconButton>
+                    <IconButton :label="t('common.view_all')" size="sm" :to="`/invoices/${inv.id}`">
+                      <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                    </IconButton>
+                  </span>
+                </td>
+                <td v-else @click.stop>
                   <!-- Rychlé zkratky k existujícím akcím — viditelné při hoveru řádku -->
                   <span class="row-actions inline-flex items-center gap-0.5 justify-end w-full">
                     <IconButton v-if="inv.status === 'draft' && auth.canWrite" :label="t('common.edit')" size="sm" :to="`/invoices/${inv.id}/edit`">
@@ -1057,5 +1238,16 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
       v-model="wrModalOpen"
       :invoice-id="wrModalInvoiceId"
       @saved="load(true)" />
+
+    <!-- FORK 0905 — potvrzovací dialog koše / trvalého smazání / vysypání -->
+    <DocumentTrashModal
+      v-if="trashModalOpen"
+      :mode="trashModalMode"
+      :docs="trashModalDocs"
+      :is-admin="auth.isAdmin"
+      :busy="trashBusy"
+      @close="trashModalOpen = false"
+      @confirm="confirmTrashModal"
+    />
   </div>
 </template>

@@ -230,6 +230,7 @@ final class OssLedgerService
                JOIN clients c ON c.id = i.client_id
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND ii.oss_applicable = 1
                 AND i.status NOT IN ('draft', 'cancelled')
                 AND i.invoice_type <> 'proforma'

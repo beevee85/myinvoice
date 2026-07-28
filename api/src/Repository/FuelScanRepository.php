@@ -43,7 +43,7 @@ final class FuelScanRepository
      */
     public function listFuelStationInvoices(int $supplierId, array $filters = []): array
     {
-        $where = ['pi.supplier_id = ?', 'cl.is_fuel_station = 1', "pi.document_kind <> 'advance'"];
+        $where = ['pi.supplier_id = ?', 'pi.deleted_at IS NULL', 'cl.is_fuel_station = 1', "pi.document_kind <> 'advance'"];
         $params = [$supplierId];
         if (!empty($filters['year'])) { $where[] = 'YEAR(pi.issue_date) = ?'; $params[] = (int) $filters['year']; }
         $sql = 'SELECT pi.id, pi.vendor_id, pi.issue_date, pi.vendor_invoice_number, pi.document_kind,
@@ -104,7 +104,8 @@ final class FuelScanRepository
             "SELECT pi.id
                FROM purchase_invoices pi
                JOIN clients cl ON cl.id = pi.vendor_id
-              WHERE pi.supplier_id = ? AND cl.is_fuel_station = 1 AND pi.document_kind <> 'advance'
+              WHERE pi.supplier_id = ? AND pi.deleted_at IS NULL
+                AND cl.is_fuel_station = 1 AND pi.document_kind <> 'advance'
                 AND NOT EXISTS (SELECT 1 FROM logbook_fuel_scans s
                                  WHERE s.purchase_invoice_id = pi.id AND s.supplier_id = pi.supplier_id)
               ORDER BY pi.issue_date ASC, pi.id ASC
@@ -131,7 +132,8 @@ final class FuelScanRepository
                JOIN clients cl ON cl.id = pi.vendor_id
                JOIN logbook_fuel_scans s ON s.purchase_invoice_id = pi.id AND s.supplier_id = pi.supplier_id
                JOIN fuelings f ON f.source_purchase_invoice_id = pi.id AND f.supplier_id = pi.supplier_id
-              WHERE pi.supplier_id = ? AND cl.is_fuel_station = 1 AND pi.document_kind <> 'advance'
+              WHERE pi.supplier_id = ? AND pi.deleted_at IS NULL
+                AND cl.is_fuel_station = 1 AND pi.document_kind <> 'advance'
                 AND s.liters_attempted = 0
                 AND f.quantity IS NULL
                 AND EXISTS (SELECT 1 FROM purchase_invoice_items it

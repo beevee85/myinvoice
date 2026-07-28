@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Invoice;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TrashGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
@@ -33,6 +34,10 @@ final class UnlinkAdvanceAction
         $invoice = $this->repo->find($id);
         if (!SupplierGuard::owns($request, $invoice)) {
             return Json::error($response, 'not_found', 'Faktura nenalezena.', 404);
+        }
+        // Doklad v koši je read-only (soft delete, 0905).
+        if (($blocked = TrashGuard::blockIfTrashed($invoice, $response)) !== null) {
+            return $blocked;
         }
 
         $supplierId = SupplierGuard::currentId($request);

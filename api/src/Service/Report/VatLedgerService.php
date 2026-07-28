@@ -157,6 +157,8 @@ final class VatLedgerService
          LEFT JOIN currencies cur ON cur.id = i.currency_id
              WHERE i.supplier_id = ?
                AND {$statusFilter}
+               -- Doklad v koši (soft delete) nepatří do DPH evidence.
+               AND i.deleted_at IS NULL
                AND i.invoice_type != 'proforma'
                {$ossFilter}
                AND COALESCE(i.tax_date, i.issue_date) BETWEEN ? AND ?
@@ -240,6 +242,8 @@ final class VatLedgerService
          LEFT JOIN currencies cur ON cur.id = pi.currency_id
              WHERE pi.supplier_id = ?
                AND {$statusFilter}
+               -- Doklad v koši (soft delete) nepatří do DPH evidence.
+               AND pi.deleted_at IS NULL
                -- Zálohová / proforma (advance) NENÍ daňový doklad → ven z DPH evidence,
                -- symetricky k výstupní straně (fetchSales: invoice_type != 'proforma').
                -- Daňovým dokladem je až 'daňový doklad k přijaté platbě', ne tato výzva k platbě.

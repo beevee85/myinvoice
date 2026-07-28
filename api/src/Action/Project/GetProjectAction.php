@@ -46,6 +46,7 @@ final class GetProjectAction
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.project_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                 AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
                 AND COALESCE(i.tax_date, i.issue_date) >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
@@ -66,6 +67,7 @@ final class GetProjectAction
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.project_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                 AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
               GROUP BY year, cur.code
@@ -97,6 +99,7 @@ final class GetProjectAction
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.project_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status IN ('issued','sent','reminded')
                 AND i.invoice_type IN ('invoice','credit_note')
                 -- Finální doklad k zaplacené proformě má amount_to_pay = 0 by design;

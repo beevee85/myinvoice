@@ -22,6 +22,10 @@ export interface Supplier {
   pdf_attribution_enabled?: boolean | number
   pdf_legal_text?: string | null
   pdf_barcode_enabled?: boolean | number
+  // FORK 0905: koš pro doklady — vypnutý koš = „Do koše" maže rovnou natvrdo
+  doc_trash_enabled?: boolean
+  /** Retence koše ve dnech pro cron-cleanup (0 = neomezeně). */
+  doc_trash_retention_days?: number
   is_vat_payer: boolean
   /** Identifikovaná osoba (§ 6g–6l ZDPH, issue #94) — neplátce v tuzemsku
    *  s přeshraničními povinnostmi. Nelze kombinovat s is_vat_payer. */

@@ -142,6 +142,11 @@ final class PaymentOrderService
                 $skipped[] = ['id' => $id, 'reason' => 'not_found'];
                 continue;
             }
+            // Doklad v koši (soft delete) do platebního příkazu nepatří.
+            if (!empty($inv['deleted_at'])) {
+                $skipped[] = ['id' => $id, 'reason' => 'in_trash'];
+                continue;
+            }
             if (strtoupper((string) ($inv['currency'] ?? '')) !== $orderCurrency) {
                 $skipped[] = ['id' => $id, 'reason' => 'currency_mismatch'];
                 continue;
@@ -300,7 +305,9 @@ final class PaymentOrderService
     {
         $valid = [];
         foreach (array_unique(array_map('intval', $invoiceIds)) as $id) {
-            if ($this->invoices->find($id, $supplierId) !== null) {
+            $inv = $this->invoices->find($id, $supplierId);
+            // Doklad v koši (soft delete) se k úhradě neoznačuje.
+            if ($inv !== null && empty($inv['deleted_at'])) {
                 $valid[] = $id;
             }
         }

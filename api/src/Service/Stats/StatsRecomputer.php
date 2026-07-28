@@ -47,6 +47,7 @@ final class StatsRecomputer
                    FROM invoices i
                    JOIN supplier s ON s.id = i.supplier_id
                   WHERE i.project_id = ?
+                    AND i.deleted_at IS NULL
                     AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                     AND i.invoice_type != 'cancellation'
                GROUP BY i.currency_id"
@@ -98,6 +99,7 @@ final class StatsRecomputer
                    FROM invoices i
                    JOIN supplier s ON s.id = i.supplier_id
                   WHERE i.client_id = ?
+                    AND i.deleted_at IS NULL
                     AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                     AND i.invoice_type != 'cancellation'
                GROUP BY i.currency_id"

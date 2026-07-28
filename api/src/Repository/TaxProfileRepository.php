@@ -91,6 +91,7 @@ final class TaxProfileRepository
                FROM invoices i
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status = 'paid'
                 AND i.paid_at IS NOT NULL
                 AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
@@ -115,6 +116,7 @@ final class TaxProfileRepository
                FROM invoices i
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status = 'paid'
                 AND i.paid_at IS NOT NULL
                 AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
@@ -138,6 +140,7 @@ final class TaxProfileRepository
                FROM invoices i
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status = 'paid'
                 AND i.paid_at IS NOT NULL
                 AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
@@ -165,6 +168,7 @@ final class TaxProfileRepository
                FROM invoices i
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
+                AND i.deleted_at IS NULL
                 AND i.status = 'paid'
                 AND i.paid_at IS NOT NULL
                 AND i.invoice_type IN ('invoice', 'credit_note', 'tax_document')
@@ -188,6 +192,7 @@ final class TaxProfileRepository
                FROM purchase_invoices pi
           LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
+                AND pi.deleted_at IS NULL
                 AND pi.status = 'paid'
                 AND pi.paid_at IS NOT NULL
                 AND DATE_FORMAT(pi.paid_at, '%Y-%m') = ?
@@ -195,7 +200,8 @@ final class TaxProfileRepository
                 AND NOT (COALESCE(pi.document_kind, '') = 'advance'
                      AND EXISTS (SELECT 1 FROM purchase_invoices adv_s
                                  WHERE adv_s.advance_purchase_invoice_id = pi.id
-                                   AND COALESCE(adv_s.document_kind, '') <> 'tax_document'))"
+                                   AND COALESCE(adv_s.document_kind, '') <> 'tax_document'
+                                   AND adv_s.deleted_at IS NULL))"
         );
         $stmt->execute([$supplierId, $ym]);
         return round((float) $stmt->fetchColumn(), 2);
@@ -209,7 +215,7 @@ final class TaxProfileRepository
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT DISTINCT YEAR(paid_at) AS y FROM invoices
-              WHERE supplier_id = ? AND status = 'paid' AND paid_at IS NOT NULL
+              WHERE supplier_id = ? AND deleted_at IS NULL AND status = 'paid' AND paid_at IS NOT NULL
            ORDER BY y DESC"
         );
         $stmt->execute([$supplierId]);

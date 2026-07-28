@@ -673,15 +673,120 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
     delete:
       tags: [Invoices]
-      summary: Smazání draftu
+      summary: Přesun dokladu do koše (soft delete)
+      description: |
+        FORK 0905 — koš dokladů. Vyžaduje důvod (min. 10 znaků). Blokující
+        pravidla: uzavřené DPH období (Archiv podání), vazby na jiné doklady
+        a úhrady (obojí nepřebitelné), odesláno klientovi / exportováno
+        (admin smí přebít `override: true`). Když je koš v Nastavení vypnutý,
+        provede se rovnou trvalé smazání (`hard_deleted: true`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 10 }
+                override: { type: boolean, default: false }
       responses:
         '200':
-          description: OK
+          description: OK (`{ok, hard_deleted}`)
+        '403':
+          description: forbidden_role — readonly, nebo hard delete bez role admin
         '409':
-          description: Vystavenou fakturu nelze smazat (použij storno)
+          description: blocked_vat_period / blocked_linked_documents / blocked_sent / blocked_exported / already_in_trash
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: reason_required — chybí důvod smazání
+
+  /api/v1/invoices/{id}/restore:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [Invoices]
+      summary: Obnova dokladu z koše (vrátí se se stejným číslem)
+      responses:
+        '200': { description: OK }
+        '409': { description: not_in_trash — doklad není v koši }
+
+  /api/v1/invoices/{id}/force:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    delete:
+      tags: [Invoices]
+      summary: Trvalé smazání dokladu (jen admin, jen z koše)
+      description: |
+        Nevratné. `confirm_number` musí přesně odpovídat číslu dokladu.
+        Před smazáním se ukládá kompletní snapshot do deleted_document_snapshots;
+        poslední číslo v řadě uvolní čítač (jinak vzniká mezera — `numbering_gap`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, confirm_number]
+              properties:
+                reason: { type: string, minLength: 10 }
+                confirm_number: { type: string }
+                override: { type: boolean, default: false }
+      responses:
+        '200':
+          description: OK (`{ok, snapshot_id, counter_released, numbering_gap, pdf_deleted}`)
+        '403': { description: forbidden_role — pouze admin }
+        '409': { description: blocked_* / not_in_trash }
+        '422': { description: reason_required / confirm_number_mismatch }
+
+  /api/v1/invoices/trash-preflight:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Invoices]
+      summary: Read-only vyhodnocení blokací mazání pro dávku dokladů
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids: { type: array, items: { type: integer }, maxItems: 200 }
+      responses:
+        '200':
+          description: "OK — `documents[]` s poli id, found, varsymbol, status, in_trash, blockers[]"
+
+  /api/v1/invoices/trash/empty:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Invoices]
+      summary: Vysypání koše (jen admin) — blokované doklady přeskočí
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 10 }
+      responses:
+        '200':
+          description: OK (`{ok, deleted[], skipped[]}`)
+        '403': { description: forbidden_role — pouze admin }
 
   /api/v1/invoices/{id}/issue:
     parameters:
@@ -3315,11 +3420,105 @@ paths:
         '409': { description: Not editable }
     delete:
       tags: [Purchase invoices]
-      summary: Smaže draft (vystavené faktury použij transition cancel)
+      summary: Přesun dokladu do koše (soft delete)
+      description: |
+        FORK 0905 — koš dokladů; stejná sémantika jako DELETE /invoices/{id}
+        (povinný `reason`, blokující pravidla, `override` pro admina, vypnutý
+        koš = rovnou trvalé smazání).
       parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 10 }
+                override: { type: boolean, default: false }
+      responses:
+        '200': { description: "OK — vrací ok + hard_deleted" }
+        '403': { description: forbidden_role }
+        '409': { description: blocked_* / already_in_trash }
+        '422': { description: reason_required }
+
+  /api/v1/purchase-invoices/{id}/restore:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [Purchase invoices]
+      summary: Obnova dokladu z koše (vrátí se se stejným interním číslem)
       responses:
         '200': { description: OK }
-        '409': { description: Lze smazat jen draft }
+        '409': { description: not_in_trash }
+
+  /api/v1/purchase-invoices/{id}/force:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    delete:
+      tags: [Purchase invoices]
+      summary: Trvalé smazání dokladu (jen admin, jen z koše)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, confirm_number]
+              properties:
+                reason: { type: string, minLength: 10 }
+                confirm_number: { type: string }
+                override: { type: boolean, default: false }
+      responses:
+        '200': { description: "OK — vrací ok, snapshot_id, counter_released, numbering_gap, pdf_deleted" }
+        '403': { description: forbidden_role — pouze admin }
+        '409': { description: blocked_* / not_in_trash }
+        '422': { description: reason_required / confirm_number_mismatch }
+
+  /api/v1/purchase-invoices/trash-preflight:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Purchase invoices]
+      summary: Read-only vyhodnocení blokací mazání pro dávku dokladů
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids: { type: array, items: { type: integer }, maxItems: 200 }
+      responses:
+        '200': { description: "OK — vrací documents[]" }
+
+  /api/v1/purchase-invoices/trash/empty:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Purchase invoices]
+      summary: Vysypání koše (jen admin) — blokované doklady přeskočí
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 10 }
+      responses:
+        '200': { description: "OK — vrací ok, deleted[], skipped[]" }
+        '403': { description: forbidden_role — pouze admin }
 
   /api/v1/purchase-invoices/{id}/items:
     put:

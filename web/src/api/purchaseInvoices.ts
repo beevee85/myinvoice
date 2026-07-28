@@ -170,6 +170,10 @@ export interface PurchaseInvoice {
   booked_at: string | null
   paid_at: string | null
   cancelled_at: string | null
+  /** FORK 0905 — koš dokladů: NULL = aktivní doklad, jinak čas přesunu do koše. */
+  deleted_at?: string | null
+  delete_reason?: string | null
+  deleted_by_name?: string | null
   pdf_path: string | null
   pdf_hash: string | null
   pdf_size_bytes: number | null
@@ -271,6 +275,10 @@ export interface PurchaseInvoiceListItem {
   booked_at: string | null
   paid_at: string | null
   cancelled_at: string | null
+  /** FORK 0905 — koš: vyplněné jen v trash listu. */
+  deleted_at?: string | null
+  delete_reason?: string | null
+  deleted_by_name?: string | null
   vendor_company_name: string
   vendor_ic: string | null
   month_bucket: string
@@ -357,6 +365,8 @@ export interface PurchaseListFilters {
   unpaid_only?: boolean
   overdue?: boolean
   needs_review?: boolean
+  /** FORK 0905 — true = jen doklady v koši (jinak koš vždy vynechán). */
+  trash?: boolean
   /** '1' = předané k úhradě, '0' = nepředané (odvozeno z payment_ordered_at). */
   payment_ordered?: '1' | '0'
   /** Filtr na dávku hromadného AI importu (#232). */
@@ -418,6 +428,7 @@ export const purchaseInvoicesApi = {
     if (filters.unpaid_only)  params['filter[unpaid_only]']  = 1
     if (filters.overdue)      params['filter[overdue]']      = 1
     if (filters.needs_review) params['filter[needs_review]'] = 1
+    if (filters.trash)        params['filter[trash]']        = 1
     if (filters.payment_ordered) params['filter[payment_ordered]'] = filters.payment_ordered
     if (filters.import_batch_id) params['filter[import_batch_id]'] = filters.import_batch_id
     if (filters.page)        params.page                   = filters.page
@@ -436,11 +447,34 @@ export const purchaseInvoicesApi = {
       `/purchase-invoices/${id}${force ? '?force=1' : ''}`,
       payload,
     ).then(r => r.data),
-  delete: (id: number, force = false) =>
-    api.delete<{ ok: boolean; pdf_deleted?: boolean }>(
-      `/purchase-invoices/${id}${force ? '?force=1' : ''}`,
+  /**
+   * FORK 0905 — přesun do koše (soft delete). Povinný důvod (min. 10 znaků);
+   * override=true (jen admin) přebije přebitelné blokace (exportováno).
+   * Koš vypnutý v Nastavení → backend provede rovnou trvalé smazání.
+   */
+  delete: (id: number, reason: string, override = false) =>
+    api.delete<{ ok: boolean; hard_deleted: boolean }>(
+      `/purchase-invoices/${id}`,
+      { data: { reason, override } },
     ).then(r => r.data),
-
+  /** Obnova dokladu z koše — vrátí se se stejným interním číslem. */
+  restore: (id: number) => api.post<{ ok: boolean }>(`/purchase-invoices/${id}/restore`).then(r => r.data),
+  /** Trvalé (nevratné) smazání — jen admin, jen z koše; confirm_number = interní číslo dokladu. */
+  forceDelete: (id: number, reason: string, confirmNumber: string, override = false) =>
+    api.delete<{ ok: boolean; snapshot_id: number; counter_released: boolean; numbering_gap: string | null }>(
+      `/purchase-invoices/${id}/force`,
+      { data: { reason, confirm_number: confirmNumber, override } },
+    ).then(r => r.data),
+  /** Read-only vyhodnocení blokací mazání pro potvrzovací dialog (i hromadný). */
+  trashPreflight: (ids: number[]) =>
+    api.post<{ documents: import('./invoices').TrashPreflightDocument[] }>(
+      '/purchase-invoices/trash-preflight', { ids },
+    ).then(r => r.data),
+  /** Vysypání koše (jen admin) — blokované doklady se přeskočí a vrátí ve `skipped`. */
+  emptyTrash: (reason: string) =>
+    api.post<{ ok: boolean; deleted: { id: number; varsymbol: string | null }[]; skipped: import('./invoices').TrashSkippedDocument[] }>(
+      '/purchase-invoices/trash/empty', { reason },
+    ).then(r => r.data),
   setItems: (id: number, items: PurchaseInvoicePayload['items']) =>
     api.put<PurchaseInvoice>(`/purchase-invoices/${id}/items`, { items }).then(r => r.data),
 

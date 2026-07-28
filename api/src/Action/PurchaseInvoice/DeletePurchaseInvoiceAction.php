@@ -6,27 +6,35 @@ namespace MyInvoice\Action\PurchaseInvoice;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
-use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
-use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\DocumentTrashPolicy;
+use MyInvoice\Service\Invoice\DocumentTrashService;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * DELETE /api/purchase-invoices/{id}
+ * DELETE /api/purchase-invoices/{id} — přesun do koše (soft delete).
  *
- * Smaže přijatou fakturu vč. items (ON DELETE CASCADE). Pouze draft lze smazat.
- * Vystavené / zaúčtované doklady jsou součástí auditní stopy — používá se cancel.
+ * Nahrazuje dřívější „jen draft / force=1" mazání: chybné doklady (typicky
+ * z AI importu) jdou do koše bez ohledu na stav, pokud neprojdou blokující
+ * pravidla (DPH období, vazby, export). Trvalé smazání je zvlášť
+ * (ForceDeletePurchaseInvoiceAction, jen admin, jen z koše).
+ *
+ * Tělo: { reason: string (povinné, min. 10 znaků), override?: bool }
+ * Role: admin i účetní. Koš vypnutý v Nastavení → rovnou trvalé smazání
+ * (drafty smí i účetní, ostatní stavy jen admin).
+ *
+ * Chyby: 403 forbidden_role · 409 blocked_* / already_in_trash · 422 reason_required
  */
 final class DeletePurchaseInvoiceAction
 {
     public function __construct(
         private readonly PurchaseInvoiceRepository $repo,
-        private readonly ActivityLogger $logger,
+        private readonly DocumentTrashPolicy $policy,
+        private readonly DocumentTrashService $trash,
         private readonly IpMatcher $ipMatcher,
-        private readonly Config $config,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -35,96 +43,57 @@ final class DeletePurchaseInvoiceAction
         if ($id <= 0) {
             return Json::error($response, 'invalid_id', 'Neplatné ID', 400);
         }
-
         $supplierId = SupplierGuard::currentId($request);
         $existing = $this->repo->find($id, $supplierId);
         if ($existing === null) {
             return Json::error($response, 'not_found', 'Přijatá faktura nenalezena.', 404);
         }
-
-        // Default: jen draft lze smazat. Force=1 (admin) povolí smazat received/booked
-        // (paid/cancelled stále chráněné — auditní stopa).
-        $force = (string) ($request->getQueryParams()['force'] ?? '') === '1';
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $isAdmin = ($user['role'] ?? '') === 'admin';
-        $allowedForce = ['received', 'booked'];
-        if ($existing['status'] !== 'draft') {
-            if (!($force && $isAdmin && in_array($existing['status'], $allowedForce, true))) {
-                return Json::error(
-                    $response,
-                    'not_deletable',
-                    'Lze smazat pouze koncepty (nebo received/booked s force=1 jako admin). Pro paid/cancelled použijte storno.',
-                    409,
-                );
-            }
+        if (!empty($existing['deleted_at'])) {
+            return Json::error($response, 'already_in_trash', 'Doklad už je v koši.', 409);
         }
 
-        // Doklad zapojený do vyúčtování záloh (záloha ↔ DDKPZ ↔ konečná faktura) nelze
-        // smazat — nejdřív zrušit propojení, jinak by na protistraně zůstaly viset
-        // odpočtové řádky § 37a / rozbité nákladové agregace.
-        if ($this->repo->hasSettlementLinks($id)) {
-            return Json::error(
-                $response,
-                'has_settlement_links',
-                'Doklad je propojený s vyúčtováním zálohy — nejdřív zrušte propojení.',
-                409,
-            );
+        $user    = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $role    = (string) ($user['role'] ?? '');
+        $isAdmin = $role === 'admin';
+        if ($role === 'readonly') {
+            return Json::error($response, 'forbidden_role', 'Read-only role nemůže mazat.', 403);
         }
 
-        // Před DB delete uchovat info o PDF (k orphan cleanup)
-        $pdfPath = (string) ($existing['pdf_path'] ?? '');
-        $pdfHash = (string) ($existing['pdf_hash'] ?? '');
+        $body     = (array) $request->getParsedBody();
+        $reason   = trim((string) ($body['reason'] ?? ''));
+        $override = !empty($body['override']);
+        if (mb_strlen($reason) < 10) {
+            return Json::error($response, 'reason_required', 'Uveďte důvod smazání (alespoň 10 znaků).', 422);
+        }
 
-        $this->repo->delete($id, $supplierId);
-
-        // Orphan PDF cleanup — pokud žádná jiná faktura tenanta nemá stejný hash,
-        // smaž soubor (s realpath check pro path traversal).
-        $pdfDeleted = false;
-        if ($pdfPath !== '' && $pdfHash !== '') {
-            $stillUsed = $this->repo->findIdByPdfHash($supplierId, $pdfHash);
-            if ($stillUsed === null) {
-                $pdfDeleted = $this->safeUnlinkPdf($supplierId, $pdfPath);
-            }
+        $blockers = $this->policy->withoutOverridden(
+            $this->policy->blockersForPurchaseInvoice($existing), $override, $isAdmin,
+        );
+        if ($blockers !== []) {
+            return Json::error($response, $blockers[0]['code'], $blockers[0]['message'], 409, [
+                'blockers' => $blockers,
+            ]);
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
-        $this->logger->log('purchase_invoice.deleted', $user['id'] ?? null, 'purchase_invoice', $id,
-            [
-                'varsymbol'   => $existing['varsymbol'] ?? null,
-                'pdf_deleted' => $pdfDeleted,
-                'pdf_hash'    => $pdfHash !== '' ? substr($pdfHash, 0, 12) . '…' : null,
-            ],
-            $ip, $request->getHeaderLine('User-Agent'),
-        );
+        $ua = $request->getHeaderLine('User-Agent');
+        $userId = isset($user['id']) ? (int) $user['id'] : null;
 
-        return Json::ok($response, ['ok' => true, 'pdf_deleted' => $pdfDeleted]);
-    }
+        $settings = $this->trash->trashSettings($supplierId);
+        if (!$settings['enabled']) {
+            if (($existing['status'] ?? '') !== 'draft' && !$isAdmin) {
+                return Json::error(
+                    $response,
+                    'forbidden_role',
+                    'Trvale smazat vystavený doklad může jen admin (koš je vypnutý).',
+                    403,
+                );
+            }
+            $result = $this->trash->forceDeletePurchaseInvoice($existing, $userId, $reason, $ip, $ua);
+            return Json::ok($response, ['ok' => true, 'hard_deleted' => true] + $result);
+        }
 
-    /**
-     * Smaže PDF soubor s realpath check vůči archive root (path traversal guard).
-     */
-    private function safeUnlinkPdf(int $supplierId, string $relativePath): bool
-    {
-        $archiveRoot = (string) $this->config->get('purchase_invoice.archive_storage', '');
-        if ($archiveRoot === '') {
-            $storageBase = (string) $this->config->get('storage.uploads_dir', '');
-            $archiveRoot = $storageBase !== ''
-                ? dirname($storageBase) . '/purchase-invoices'
-                : \MyInvoice\Infrastructure\Config\RuntimePaths::storage('purchase-invoices');
-        }
-        $fullPath = $archiveRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
-        $archiveRootReal = realpath($archiveRoot);
-        $fullPathReal = realpath($fullPath);
-        if ($archiveRootReal === false || $fullPathReal === false || !is_file($fullPathReal)) {
-            return false;
-        }
-        // Windows is case-insensitive, normalize obě strany na lowercase
-        $isWindows = DIRECTORY_SEPARATOR === '\\';
-        $haystack = ($isWindows ? strtolower($fullPathReal) : $fullPathReal);
-        $needle   = ($isWindows ? strtolower($archiveRootReal) : $archiveRootReal) . DIRECTORY_SEPARATOR;
-        if (!str_starts_with($haystack, $needle)) {
-            return false; // mimo archive root — path traversal attempt, refuse
-        }
-        return @unlink($fullPathReal);
+        $this->trash->trashPurchaseInvoice($existing, $userId, $reason, $ip, $ua);
+        return Json::ok($response, ['ok' => true, 'hard_deleted' => false]);
     }
 }

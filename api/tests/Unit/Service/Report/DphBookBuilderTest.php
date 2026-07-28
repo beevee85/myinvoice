@@ -109,6 +109,8 @@ final class DphBookBuilderTest extends TestCase
             status TEXT NOT NULL DEFAULT 'received', vat_classification_code TEXT NULL,
             vat_deduction TEXT NOT NULL DEFAULT 'full', vat_deduction_percent REAL NOT NULL DEFAULT 100,
             is_fixed_asset INTEGER NOT NULL DEFAULT 0, total_with_vat REAL NOT NULL DEFAULT 0
+        ,
+            deleted_at TEXT NULL
         )");
         $this->pdo->exec("CREATE TABLE purchase_invoice_items (
             id INTEGER PRIMARY KEY, purchase_invoice_id INTEGER NOT NULL, vat_rate_snapshot REAL NOT NULL,
@@ -120,6 +122,8 @@ final class DphBookBuilderTest extends TestCase
             issue_date TEXT NOT NULL, tax_date TEXT NULL, currency_id INTEGER NOT NULL, exchange_rate REAL NULL,
             reverse_charge INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'issued',
             invoice_type TEXT NOT NULL DEFAULT 'invoice', vat_classification_code TEXT NULL, total_with_vat REAL NOT NULL DEFAULT 0
+        ,
+            deleted_at TEXT NULL
         )");
         $this->pdo->exec("CREATE TABLE invoice_items (
             id INTEGER PRIMARY KEY, invoice_id INTEGER NOT NULL, vat_rate_snapshot REAL NOT NULL,
