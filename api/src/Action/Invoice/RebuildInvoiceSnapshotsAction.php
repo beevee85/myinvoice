@@ -19,9 +19,17 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  * „Obnovit údaje klienta" — lehčí alternativa k odemčení celého formuláře:
  * přepíše POUZE snapshoty (client/supplier/bank) z aktuálních live dat,
- * a to i u uzamčeného (issued/sent/paid) dokladu. Typický případ: změna
- * DIČ odběratele nebo přesun do skupinové registrace — částky, stav,
- * varsymbol i datumy zůstávají nedotčené.
+ * a to i u uzamčeného (issued/sent/paid) dokladu; částky, stav, varsymbol
+ * i datumy zůstávají nedotčené. Zároveň ZNEPLATNÍ vygenerované PDF (stará
+ * verze se archivuje) — u dokladu v už podaném období se tedy nově
+ * vygenerované PDF může lišit od toho, které odběratel dostal.
+ *
+ * POZOR na motivaci: na výkazy DPH akce NEMÁ vliv. VatLedgerService čte DIČ
+ * i název protistrany z živé tabulky `clients` (viz VatLedgerService::
+ * fetchSales/fetchPurchases, sloupec `c.dic AS counterparty_dic`), ne ze
+ * snapshotů — po změně DIČ nebo přechodu do skupinové registrace jsou KH
+ * i přiznání správně i bez této akce. Projeví se jen v PDF a v exportech,
+ * které snapshoty čtou (ISDOC, Pohoda, Stereo).
  *
  * Stornovaný doklad (cancelled) zůstává immutable — auditní stopa.
  * Akce se audituje jako `invoice.rebuild_snapshots` se starým i novým

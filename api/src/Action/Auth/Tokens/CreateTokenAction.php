@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PasskeyCredentialRepository;
+use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\ApiTokenService;
 use MyInvoice\Service\Auth\BruteForceGuard;
@@ -45,6 +46,7 @@ final class CreateTokenAction
         private readonly MfaPolicyService $mfaPolicy,
         private readonly BruteForceGuard $bruteForce,
         private readonly MfaProtectedOperationService $protectedOperations,
+        private readonly UserSupplierRepository $memberships,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -84,6 +86,14 @@ final class CreateTokenAction
             $check->execute([$supplierId]);
             if ($check->fetchColumn() === false) {
                 return Json::error($response, 'validation_failed', 'Supplier nenalezen.', 400);
+            }
+
+            // Membership (migrace 0148): uživatel s přiřazenými firmami nesmí vytvořit
+            // token bound na firmu mimo své přiřazení — jinak by tím obešel supplier
+            // scope (bound PAT jinak firmu forcuje). Bez membershipu = BC (bez omezení).
+            $allowed = $this->memberships->allowedSupplierIds($userId);
+            if ($allowed !== [] && !in_array($supplierId, $allowed, true)) {
+                return Json::error($response, 'forbidden_supplier', 'K této firmě nemáš oprávnění.', 403);
             }
         }
 

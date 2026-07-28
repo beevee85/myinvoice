@@ -938,8 +938,11 @@ function editIssued() {
 }
 
 // „Obnovit údaje klienta" — lehčí alternativa force-editu: přepíše JEN snapshoty
-// odběratele/dodavatele z aktuálních live dat (typicky změna DIČ / skupinová
-// registrace), částky, stav i číslo dokladu zůstávají. Admin only, auditováno.
+// odběratele, dodavatele a bankovního spojení z aktuálních live dat a zneplatní
+// PDF (stará verze se archivuje); částky, stav i číslo dokladu zůstávají.
+// Pozor na motivaci: na výkazy DPH akce NEMÁ vliv — VatLedgerService čte DIČ
+// protistrany z živé tabulky `clients`, ne ze snapshotu. Projeví se jen v PDF
+// a v exportech, které snapshoty čtou (ISDOC, Pohoda). Admin only, auditováno.
 async function rebuildSnapshots() {
   if (!invoice.value) return
   if (!confirm(t('invoice.rebuild_snapshots_confirm', { varsymbol: invoice.value.varsymbol || '' }))) return
@@ -1393,8 +1396,9 @@ const invoiceActions = computed<ActionItem[]>(() => {
       to: { name: 'recurring-new', query: { from_invoice: inv.id } } },
     { key: 'edit-admin', label: t('invoice.edit_admin'), icon: 'edit', tier: 'advanced', variant: 'warning',
       show: canAdminEdit.value, disabled: b, run: editIssued },
-    // Lehčí operace než force-edit: přepíše jen snapshoty klienta/dodavatele
-    // z live dat (změna DIČ, skupinová registrace) — bez odemykání formuláře.
+    // Lehčí operace než force-edit: přepíše jen snapshoty klienta, dodavatele
+    // a bankovního spojení z live dat — bez odemykání formuláře. Ovlivní PDF
+    // a exporty (ISDOC/Pohoda), na výkazy DPH vliv nemá (viz rebuildSnapshots).
     { key: 'rebuild-snapshots', label: t('invoice.rebuild_snapshots'), icon: 'cycle', tier: 'advanced', variant: 'warning',
       show: canAdminEdit.value, disabled: b, loading: busy.value === 'rebuild-snapshots', run: rebuildSnapshots },
     { key: 'unmark-paid', label: t('invoice.unmark_paid'), icon: 'uturn', tier: 'advanced', variant: 'warning',

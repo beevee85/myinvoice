@@ -74,6 +74,18 @@ api.interceptors.response.use(
       }
     }
 
+    // 403 forbidden_supplier = v localStorage je stale firma, ke které uživatel
+    // ztratil přístup (admin mu ji odebral z přiřazených). Bez zásahu by selhal
+    // i /auth/me (interceptor hlavičku posílá vždy) a uživatel by se do aplikace
+    // vůbec nedostal. Smaž stale výběr a reloadni — server bez hlavičky fallbackne
+    // na první přiřazenou firmu. Reload jen když klíč existoval → žádná smyčka.
+    if (status === 403 && code === 'forbidden_supplier') {
+      if (localStorage.getItem('myinvoice.current_supplier_id') !== null) {
+        localStorage.removeItem('myinvoice.current_supplier_id')
+        window.location.reload()
+      }
+    }
+
     // 503 config_missing / bootstrap_failed = backend není nakonfigurovaný
     // (chybí cfg.php nebo nelze do DB). Zobrazíme fullscreen overlay s návodem,
     // ať uživatel nedostane jen prázdný login form bez vysvětlení.

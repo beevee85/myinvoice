@@ -97,6 +97,13 @@ final class ViesClientCzRoutingTest extends TestCase
         self::assertSame('crpdph', $r['source']);
         self::assertTrue($r['valid']);
         self::assertTrue($r['group_registration'] ?? false);
+        // Registr plátců název ani adresu subjektu nevrací — kontrakt, na kterém
+        // stojí guardy ve frontendu (prázdný název se nesmí propsat do formuláře
+        // klienta ani do hlášky „DIČ je platné — <název>“).
+        self::assertSame('', $r['name'] ?? null);
+        self::assertSame('', $r['address'] ?? null);
+        self::assertArrayHasKey('parsed', $r);
+        self::assertNull($r['parsed']);
     }
 
     public function testCzGroupDicUnavailableRegistryIsSoftError(): void

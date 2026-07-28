@@ -276,7 +276,12 @@ final class RoleMiddlewareTest extends TestCase
 
     private function middleware(): RoleMiddleware
     {
-        return new RoleMiddleware(new ResponseFactory());
+        // Bez membershipu = žádný per-supplier override (BC větev resolveru).
+        $resolver = $this->createMock(\MyInvoice\Service\Tenant\SupplierAccessResolver::class);
+        $resolver->method('resolve')->willReturn(
+            new \MyInvoice\Service\Tenant\SupplierAccess(0, false, null),
+        );
+        return new RoleMiddleware(new ResponseFactory(), $resolver);
     }
 
     private function request(string $method, string $path, string $role): ServerRequestInterface

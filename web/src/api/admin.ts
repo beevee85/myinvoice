@@ -134,6 +134,14 @@ export interface AdminUser {
   supplier_ids: number[]
 }
 
+/** Membership uživatel ↔ firma (user_suppliers). role null = zdědit globální users.role. */
+export interface UserSupplierAssignment {
+  supplier_id: number
+  name: string
+  ic: string | null
+  role: 'accountant' | 'readonly' | null
+}
+
 export const adminApi = {
   activityLog: (params: { action?: string; user_id?: number; entity_type?: string; entity_id?: number; limit?: number; offset?: number } = {}) =>
     api.get<ActivityLogResponse>('/admin/activity-log', { params }).then(r => r.data),
@@ -157,6 +165,11 @@ export const adminApi = {
   updateUser: (id: number, payload: Partial<{ name: string; role: AdminUser['role']; locale: 'cs' | 'en'; is_active: boolean; password: string; supplier_ids: number[] }>) =>
     api.put<AdminUser>(`/admin/users/${id}`, payload).then(r => r.data),
   deleteUser: (id: number) => api.delete(`/admin/users/${id}`),
+  // Přiřazení firem uživateli (prázdné = bez omezení, vidí všechny firmy)
+  listUserSuppliers: (id: number) =>
+    api.get<UserSupplierAssignment[]>(`/admin/users/${id}/suppliers`).then(r => r.data),
+  setUserSuppliers: (id: number, assignments: Array<{ supplier_id: number; role: 'accountant' | 'readonly' | null }>) =>
+    api.put<UserSupplierAssignment[]>(`/admin/users/${id}/suppliers`, { assignments }).then(r => r.data),
 
   // Approvals inbox
   listApprovals: (params: { status?: 'requested' | 'approved' | 'rejected' | 'all'; overdue_days?: number; page?: number; per_page?: number } = {}) =>

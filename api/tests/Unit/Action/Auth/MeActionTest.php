@@ -28,9 +28,10 @@ final class MeActionTest extends TestCase
             ->method('fetchAll')
             ->with(\PDO::FETCH_ASSOC)
             ->willReturn([]);
+        $supplierStatement->expects(self::once())->method('execute')->with([])->willReturn(true);
         $pdo = $this->createMock(\PDO::class);
         $pdo->expects(self::once())
-            ->method('query')
+            ->method('prepare')
             ->willReturn($supplierStatement);
         $db = $this->createMock(Connection::class);
         $db->expects(self::once())->method('hasColumn')->with('supplier', 'oss_enabled')->willReturn(true);
@@ -53,17 +54,18 @@ final class MeActionTest extends TestCase
                 'allowed_mfa_methods' => ['passkey', 'totp'],
             ],
         ]);
-        // FORK (beevee85): MeAction má navíc UserSupplierAccess (FÁZE 2) — stub
-        // bez omezení (allowedIdsForUser → null = přístup ke všem dodavatelům).
-        $access = $this->createStub(\MyInvoice\Service\Auth\UserSupplierAccess::class);
+        // Uživatel role admin → membership se ani nedotazuje (vidí všechny firmy).
+        $userSuppliers = $this->createMock(\MyInvoice\Repository\UserSupplierRepository::class);
+        $userSuppliers->expects(self::never())->method('allowedSupplierIds');
+
         $action = new MeAction(
             $db,
             $config,
             $credentials,
+            $userSuppliers,
             new MfaPolicyService($config),
             new SessionLockPolicy($config),
             $clock,
-            $access,
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/auth/me')

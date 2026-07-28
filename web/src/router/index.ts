@@ -129,6 +129,17 @@ export const router = createRouter({
   },
 })
 
+/**
+ * Bezpečný fallback při zamítnutí. Vrací `true` (pusť dál), když už cílíme na
+ * `home` — jinak by vznikla NEKONEČNÁ smyčka, kdyby dashboard sám propadl
+ * některým z gatů níž (přesně tak zamrzl prohlížeč u uživatele bez přístupu
+ * k firmě v MyÚčtu). Radši pustit dál a nechat stránku zobrazit prázdný stav
+ * nebo chybu z API, než točit prohlížeč donekonečna.
+ */
+function denyFallback(toName: unknown) {
+  return toName === 'home' ? true : { name: 'home' }
+}
+
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
 
@@ -177,14 +188,14 @@ router.beforeEach(async (to) => {
   // Admin-only stránky
   const adminOnly = to.matched.some((r) => r.meta.adminOnly)
   if (adminOnly && auth.user?.role !== 'admin') {
-    return { name: 'home' }
+    return denyFallback(to.name)
   }
 
   // Zápisové stránky (zakládání/editace dokladů, klientů, zakázek, recurring).
   // readonly smí jen číst/exportovat → na write routes ho přesměrujeme na dashboard.
   const requiresWrite = to.matched.some((r) => r.meta.requiresWrite)
   if (requiresWrite && !auth.canWrite) {
-    return { name: 'home' }
+    return denyFallback(to.name)
   }
 
   // Onboarding gate: pokud uživatel v úvodním nastavení přeskočil dodavatele, nemá v DB
@@ -193,19 +204,19 @@ router.beforeEach(async (to) => {
   // ho pošleme na dashboard, kde se zobrazí výzva k vytvoření prvního dodavatele.
   const requiresSupplier = to.matched.some((r) => r.meta.requiresSupplier)
   if (requiresSupplier && auth.isAuthenticated && !useSupplierStore().hasSupplier) {
-    return { name: 'home' }
+    return denyFallback(to.name)
   }
 
   // OSS gate: režim je opt-in v nastavení firmy (default vypnuto). Bez registrace nemá
   // kvartální přehled co ukázat, takže na něj nepustíme ani přes přímou URL.
   const requiresOss = to.matched.some((r) => r.meta.requiresOss)
   if (requiresOss && auth.isAuthenticated && useSupplierStore().currentSupplier?.oss_enabled !== true) {
-    return { name: 'home' }
+    return denyFallback(to.name)
   }
 
   const signingProfiles = to.matched.some((r) => r.meta.signingProfiles)
   if (signingProfiles && auth.user?.role !== 'admin' && auth.user?.role !== 'accountant') {
-    return { name: 'home' }
+    return denyFallback(to.name)
   }
 
   return true

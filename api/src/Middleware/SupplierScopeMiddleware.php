@@ -5,8 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
-use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Service\Auth\UserSupplierAccess;
+use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Server\MiddlewareInterface;
@@ -19,38 +18,24 @@ use Slim\Psr7\Factory\ResponseFactory;
  *
  *   $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
  *
- * Pravidla:
- *   - Pokud header chybí nebo není v DB, fallback = MIN(supplier.id) (= "default supplier")
+ * Pravidla (resoluci sdílí SupplierAccessResolver — používá ji i RoleMiddleware
+ * pro efektivní per-supplier roli):
+ *   - PAT bound na supplier_id → forcuj ho, header/query se ignoruje
+ *   - Pokud header chybí nebo není v DB, fallback = MIN(supplier.id), resp.
+ *     nejnižší PŘIŘAZENÝ supplier u uživatele s membership (user_suppliers)
+ *   - Uživatel s neprázdným membership, který si explicitně vyžádá firmu mimo
+ *     své membership → 403 `forbidden_supplier` (dřív směl kamkoliv)
+ *   - Uživatel bez membership řádků = bez omezení (zpětná kompatibilita)
  *   - Pokud supplier tabulka prázdná (před setup) → 0 (akce by stejně měly být chráněné Authem)
- *   - Validace existence se cachuje v rámci request (jeden DB hit)
- *
- * FORK (beevee85): per-user omezení na dodavatele (user_supplier_access).
- *   - Omezený uživatel (má záznamy, není admin): header/query mimo povolený set → 403;
- *     chybějící header → fallback MIN(povolených) místo MIN(všech).
- *   - Na cestách, kde se scope dle spec ignoruje (SCOPE_IGNORED_PREFIXES — /auth/*,
- *     /codebooks/* …), se mimo-setová hodnota tiše koriguje na MIN(povolených),
- *     aby si FE přes /auth/me srovnal uložený výběr a uživatel se nezamknul.
- *   - API token vázaný na supplier-a mimo povolený set vlastníka → 403.
+ *   - Validace se memoizuje v rámci requestu (resolver)
  */
 final class SupplierScopeMiddleware implements MiddlewareInterface
 {
     public const ATTR_CURRENT_ID = 'supplier.current_id';
     public const HEADER_NAME     = 'X-Supplier-Id';
 
-    /** Cesty, kde se supplier scope dle source/04-api.md ignoruje (žádné 403, jen tichá korekce). */
-    private const SCOPE_IGNORED_PREFIXES = [
-        '/api/auth/',
-        '/api/health',
-        '/api/version',
-        '/api/codebooks',
-        '/api/public/',
-        '/api/suppliers',
-        '/api/csrf-token',
-    ];
-
     public function __construct(
-        private readonly Connection $db,
-        private readonly UserSupplierAccess $access,
+        private readonly SupplierAccessResolver $resolver,
         private readonly ResponseFactory $responseFactory,
     ) {}
 
@@ -64,88 +49,15 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
-        // FORK (beevee85): omezení uživatele na vybrané dodavatele (FÁZE 2)
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $allowed = $user === [] ? null : $this->access->allowedIdsForUser($user);
+        $access = $this->resolver->resolve($request);
 
-        // 0. Bearer (API token) — pokud je token bound na konkrétního supplier-a,
-        //    forcuj ho a ignoruj header / query (token nesmí "skočit" do jiné firmy).
-        $apiToken = $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN);
-        if (is_array($apiToken) && ($apiToken['supplier_id'] ?? null) !== null) {
-            $tokenSid = (int) $apiToken['supplier_id'];
-            if ($allowed !== null && !in_array($tokenSid, $allowed, true)) {
-                return $this->forbidden();
-            }
-            return $handler->handle(
-                $request->withAttribute(self::ATTR_CURRENT_ID, $tokenSid),
-            );
+        if ($access->denied) {
+            $response = $this->responseFactory->createResponse(403);
+            return Json::error($response, 'forbidden_supplier', 'K této firmě nemáš oprávnění.', 403);
         }
-
-        // 1. Header X-Supplier-Id (axios v SPA)
-        $headerVal = trim($request->getHeaderLine(self::HEADER_NAME));
-        $requested = ctype_digit($headerVal) ? (int) $headerVal : 0;
-
-        // 2. Fallback: query param ?supplier_id=N (přímá navigace v prohlížeči — PDF download, ZIP export apod.)
-        if ($requested === 0) {
-            $q = $request->getQueryParams();
-            $qVal = isset($q['supplier_id']) ? trim((string) $q['supplier_id']) : '';
-            if (ctype_digit($qVal)) {
-                $requested = (int) $qVal;
-            }
-        }
-
-        // Omezený uživatel: povolený set je zdroj pravdy (FK garantuje existenci id).
-        if ($allowed !== null) {
-            if ($requested > 0 && !in_array($requested, $allowed, true)) {
-                if (!$this->scopeIgnored($request->getUri()->getPath())) {
-                    return $this->forbidden();
-                }
-                $requested = 0;
-            }
-            $resolved = $requested > 0 ? $requested : min($allowed);
-            return $handler->handle(
-                $request->withAttribute(self::ATTR_CURRENT_ID, $resolved),
-            );
-        }
-
-        $resolved = $this->resolve($requested);
 
         return $handler->handle(
-            $request->withAttribute(self::ATTR_CURRENT_ID, $resolved),
+            $request->withAttribute(self::ATTR_CURRENT_ID, $access->supplierId),
         );
-    }
-
-    /**
-     * Vrátí platné supplier_id:
-     *  - $requested pokud existuje v DB
-     *  - jinak MIN(id)
-     *  - jinak 0 (před setup)
-     */
-    private function resolve(int $requested): int
-    {
-        $pdo = $this->db->pdo();
-
-        if ($requested > 0) {
-            $stmt = $pdo->prepare('SELECT id FROM supplier WHERE id = ? LIMIT 1');
-            $stmt->execute([$requested]);
-            $id = (int) $stmt->fetchColumn();
-            if ($id > 0) return $id;
-        }
-
-        return (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
-    }
-
-    private function scopeIgnored(string $path): bool
-    {
-        foreach (self::SCOPE_IGNORED_PREFIXES as $prefix) {
-            if (str_starts_with($path, $prefix)) return true;
-        }
-        return false;
-    }
-
-    private function forbidden(): Response
-    {
-        $response = $this->responseFactory->createResponse(403);
-        return Json::error($response, 'supplier_forbidden', 'K tomuto dodavateli nemáš přístup.', 403);
     }
 }

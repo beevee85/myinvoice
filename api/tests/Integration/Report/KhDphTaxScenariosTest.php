@@ -2072,7 +2072,9 @@ final class KhDphTaxScenariosTest extends TestCase
 
     /**
      * BUG 3 (2026-07) — následné KH (khdph_forma='N') s datem zjištění důvodů;
-     * dodatečné přiznání (dapdph_forma='D') analogicky. Bez d_zjist musí build selhat.
+     * u DP3 jen opravné 'O' (dodatečné D/E jsou vypnuté — § 141/2 DŘ vyžaduje
+     * vykázání rozdílů proti poslední známé dani a builder umí jen plné hodnoty
+     * období; viz review PR #245 bod 2). Bez d_zjist musí build následného KH selhat.
      */
     public function testSubmissionFormAttributesAndDzjist(): void
     {
@@ -2082,11 +2084,22 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->assertSame('N', (string) $khXml->DPHKH1->VetaD['khdph_forma']);
         $this->assertSame('05.08.2099', (string) $khXml->DPHKH1->VetaD['d_zjist']);
 
+        // Opravné DP3 (O) projde, volitelně vyplněný d_zjist se propustí.
         $dphXml = new \SimpleXMLElement(
-            $this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly', 'D', '05.08.2099')['xml']
+            $this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly', 'O', '05.08.2099')['xml']
         );
-        $this->assertSame('D', (string) $dphXml->DPHDP3->VetaD['dapdph_forma']);
+        $this->assertSame('O', (string) $dphXml->DPHDP3->VetaD['dapdph_forma']);
         $this->assertSame('05.08.2099', (string) $dphXml->DPHDP3->VetaD['d_zjist']);
+
+        // Dodatečné formy D/E builder odmítá, dokud neumí rozdíly dle § 141/2 DŘ.
+        foreach (['D', 'E'] as $additional) {
+            try {
+                $this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly', $additional, '05.08.2099');
+                $this->fail("forma '{$additional}' musí být na DP3 odmítnuta");
+            } catch (\InvalidArgumentException $e) {
+                $this->assertStringContainsString('Neplatná forma', $e->getMessage());
+            }
+        }
 
         // Řádné podání d_zjist neemituje.
         $regular = new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']);

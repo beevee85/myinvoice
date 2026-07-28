@@ -61,10 +61,15 @@ V každé skupině jsou faktury seřazené podle data vystavení (nejnovější 
 >    může být nutné následné hlášení) a zaškrtnutím checkboxu. Odemčení platí
 >    jen do obnovení stránky. Do auditního logu se zapíše `invoice.force_edit`
 >    včetně seznamu změněných polí a starého/nového snapshotu.
-> 2. **Obnovit údaje klienta** (detail faktury → Pokročilé) — lehčí operace pro
->    typický případ „klientovi se změnilo DIČ / přešel do skupinové registrace":
->    přepíše POUZE snapshoty z aktuálních dat, částky, stav i číslo zůstávají.
->    Audit `invoice.rebuild_snapshots`.
+> 2. **Obnovit údaje klienta** (detail faktury → Pokročilé) — lehčí operace:
+>    přepíše POUZE snapshoty (klienta, **dodavatele i bankovního spojení**)
+>    z aktuálních dat; částky, stav i číslo zůstávají. Stávající PDF se zneplatní
+>    (stará verze se archivuje) a vygeneruje znovu — u dokladu v už podaném
+>    období se nové PDF může lišit od verze, kterou odběratel dostal.
+>    Pozor: akce **nemá vliv na kontrolní hlášení ani přiznání DPH** — výkazy
+>    čtou DIČ protistrany vždy z živé karty klienta, takže po změně DIČ nebo
+>    přechodu do skupinové registrace jsou správně i bez ní. Projeví se jen
+>    v PDF a v exportech (ISDOC, Pohoda). Audit `invoice.rebuild_snapshots`.
 
 ## 9.3 Hromadné akce
 
@@ -143,56 +148,3 @@ Funguje fulltext česky i anglicky.
   klik na řádek a hned máš tlačítko **Upomínka**.
 - **Klik na číslo faktury** otevře [Detail faktury](11_Faktura_PDF.md).
 - **Klik na ikonu PDF** stáhne přímo PDF (bez otvírání detailu).
-
-## 9.7 Mazání dokladů: storno vs. koš vs. trvalé smazání
-
-MyInvoice rozlišuje **tři různé operace** — nezaměňuj je:
-
-| Operace | Kdy ji použít | Vratnost | Kdo smí |
-|---|---|---|---|
-| **Storno / dobropis** | Doklad už viděla protistrana, odešel e-mailem, nebo vstoupil do DPH přiznání | trvalá auditní stopa | admin i účetní |
-| **Do koše** | Omyl — duplicitní doklad, chybný AI import, testovací záznam | vratné (Obnovit) | admin i účetní |
-| **Smazat trvale** | Definitivní odstranění omylu z koše | **nevratné** (zůstává jen snapshot v auditu) | **pouze admin** |
-
-**Jasné doporučení:** doklad, který už viděla protistrana nebo který je
-v podaném přiznání, se **nemaže, ale stornuje** (případně dobropisuje).
-Mazání je určené jen pro omyly, které nikdy neměly vzniknout.
-
-### Jak koš funguje
-
-- **Do koše** — v detailu dokladu menu **„…" → Pokročilé → Do koše**, nebo
-  hromadně přes zaškrtávátka v seznamu. Vyžaduje se **důvod smazání**
-  (min. 10 znaků), který se ukládá do auditního logu.
-- Doklad v koši **zmizí ze všech přehledů, Tržeb/Nákladů, Knihy DPH,
-  podkladů pro přiznání i párování banky**. Nelze ho editovat, tisknout,
-  odesílat ani párovat — jen zobrazit, obnovit, trvale smazat.
-- **Obnovit** — doklad se vrátí do všech přehledů **se stejným číslem**.
-- **Smazat trvale** — jen z koše, jen admin. Dialog vyžaduje opsání čísla
-  dokladu. Před smazáním se uloží kompletní snapshot (hlavička, položky,
-  úhrady, vazby) do auditní tabulky, takže doklad jde dohledat i po smazání.
-- **Vysypat koš** — smaže vše v koši najednou; blokované doklady přeskočí.
-
-### Blokující pravidla
-
-Doklad **nejde** dát do koše ani smazat, pokud:
-
-- jeho **DUZP spadá do období, ke kterému existuje podání v Archivu podání**
-  (DPH přiznání / kontrolní hlášení / souhrnné hlášení) — nikdy nejde přebít,
-- má **navázané úhrady, bankovní párování, zálohu, dobropis nebo storno** —
-  nikdy nejde přebít (nejdřív zruš vazby, nebo použij storno),
-- byl **odeslán klientovi / má veřejný odkaz**, nebo byl **exportován** do
-  externího účetnictví — tady může admin blokaci vědomě přebít checkboxem
-  „Vím, co dělám".
-
-### Číselná řada
-
-Při trvalém smazání **posledního dokladu v řadě** se čítač vrátí o jedna
-zpět — další vystavený doklad dostane stejné číslo a nevznikne mezera.
-Při smazání prostředního dokladu mezera vznikne a zapíše se do auditu
-(`numbering_gap`).
-
-### Nastavení
-
-**Nastavení → Koš pro doklady**: koš jde vypnout (pak „Do koše" maže rovnou
-nevratně, se stejným dialogem) a nastavit **retenci** — po zadaném počtu dní
-noční úloha (`cron-cleanup`) doklady z koše sama trvale smaže (0 = nikdy).

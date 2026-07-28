@@ -194,6 +194,30 @@ final class CzNaceAndRoundingTest extends TestCase
         )->execute([$this->supplierId]);
     }
 
+    public function testSupplierPutWithExpiredNace20CodeSavesWithWarning(): void
+    {
+        // Kód 62020/620200 platil v číselníku do 31. 12. 2025 (přechod na NACE
+        // rev. 2.1, nástupce 622000) — přesně scénář issue #157. Uložení se
+        // NEBLOKUJE (snapshot číselníku může zestárnout), ale odpověď nese
+        // cz_nace_warning s datem konce platnosti.
+        $resp = $this->putSupplier(['cz_nace_code' => '62020']);
+        self::assertSame(200, $resp->getStatusCode(), (string) $resp->getBody());
+        $body = self::json($resp);
+        self::assertArrayHasKey('cz_nace_warning', $body);
+        self::assertStringContainsString('31. 12. 2025', (string) $body['cz_nace_warning']);
+        self::assertStringContainsString('NACE rev. 2.1', (string) $body['cz_nace_warning']);
+
+        $stored = $this->db->pdo()->query(
+            "SELECT cz_nace_code FROM supplier WHERE id = {$this->supplierId}"
+        )->fetchColumn();
+        self::assertSame('620200', (string) $stored, 'ČSÚ zápis 62020 se kanonizuje na 620200.');
+
+        // Aktivní kód warning nemá — a vrátí DB do stavu pro ostatní testy.
+        $resp = $this->putSupplier(['cz_nace_code' => '731100']);
+        self::assertSame(200, $resp->getStatusCode(), (string) $resp->getBody());
+        self::assertArrayNotHasKey('cz_nace_warning', self::json($resp));
+    }
+
     public function testRoundingDifferenceOnLine40YieldsWarning49AndStill200(): void
     {
         $pdo = $this->db->pdo();

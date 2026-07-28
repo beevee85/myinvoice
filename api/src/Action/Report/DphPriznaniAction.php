@@ -40,8 +40,9 @@ final class DphPriznaniAction
     ) {}
 
     /**
-     * EPO identifikace: chybějící povinná pole → 422, viz EpoIdentityValidator.
-     * Bez toho vznikne validně vypadající XML, které EPO portál odmítne.
+     * EPO identifikace: chybějící XSD-povinná pole → 422 při STAŽENÍ XML, viz
+     * EpoIdentityValidator. Bez nich vznikne validně vypadající XML, které EPO
+     * portál odmítne. Náhled se neblokuje (pole vrací v `missing[]`).
      */
     private function epoIdentityError(Response $response, array $missing): Response
     {
@@ -163,10 +164,10 @@ final class DphPriznaniAction
 
         $period = (string) ($q['period'] ?? '');
         $period = in_array($period, ['monthly', 'quarterly'], true) ? $period : null;
+        // Náhled se NEBLOKUJE ani při chybějící identifikaci — čísla výkazu si
+        // uživatel musí umět zobrazit. Chybějící povinná pole jdou do
+        // `missing[]`, na jejich základě UI zakáže stažení XML.
         $epo = $this->epoValidator->forSupplier($supplierId, \MyInvoice\Service\Report\EpoIdentityValidator::DOC_DPHDP3);
-        if ($epo['missing'] !== []) {
-            return $this->epoIdentityError($response, $epo['missing']);
-        }
         try {
             $result = $this->builder->build($supplierId, $year, $month, $period);
         } catch (\Throwable $e) {
@@ -175,7 +176,8 @@ final class DphPriznaniAction
 
         return Json::ok($response, [
             'summary'  => $result['summary'],
-            // Doporučená pole (telefon, CZ-NACE…) jen varují — generování neblokují.
+            'missing'  => $epo['missing'],
+            // Doporučená pole (ÚzP, e-mail, opr_*, telefon, CZ-NACE…) jen varují.
             'warnings' => array_merge(
                 $result['warnings'],
                 $epo['warnings'],
@@ -246,7 +248,9 @@ final class DphPriznaniAction
         if ($epo['missing'] !== []) {
             return $this->epoIdentityError($response, $epo['missing']);
         }
-        // Forma podání (B/O/D/E) + datum zjištění důvodů pro dodatečné přiznání (§ 141 DŘ).
+        // Forma podání (B/O; dodatečné D/E dočasně nepodporováno — § 141/2 DŘ
+        // vyžaduje vykázání rozdílů, viz DphPriznaniBuilder::FORMS) + volitelné
+        // datum zjištění důvodů u O.
         $fp = \MyInvoice\Service\Report\ReportFormParams::fromQuery(
             $q,
             \MyInvoice\Service\Report\DphPriznaniBuilder::FORMS,

@@ -123,6 +123,13 @@ final class VatLedgerService
                    -- RAW kurz (bez COALESCE ...,1) — normalize() rozliší chybějící kurz
                    -- od CZK a nastaví příznak exchange_rate_missing (issue #238).
                    i.exchange_rate AS exchange_rate, COALESCE(cur.code, 'CZK') AS currency,
+                   -- Prodejní strana se ZÁMĚRNĚ nenormalizuje: vydaný dobropis vzniká
+                   -- přes CancelInvoiceAction se zápornými položkami a validateItem brání
+                   -- dvojí negaci, takže kladně uložený dobropis je tu jen teoretická
+                   -- možnost — vynucený ale není (InvoiceAmountPolicy ho z kontrol
+                   -- pozitivity jen vyjímá). TODO: až bude ekvivalent soft warningu
+                   -- `credit_note_positive_total` i pro vydané doklady, zvážit stejnou
+                   -- -ABS() normalizaci jako u přijatých (fetchPurchases).
                    i.total_with_vat AS inv_total, i.reverse_charge AS rc_flag,
                    c.company_name AS counterparty_name, c.dic AS counterparty_dic,
                    co.iso2 AS country_iso2, COALESCE(co.is_eu, 0) AS country_is_eu,
@@ -196,8 +203,22 @@ final class VatLedgerService
                    -- pořízení/AI import ukládá záporně (qty −1, jako CancelInvoiceAction),
                    -- ale část importů kladně (jen soft warning credit_note_positive_total,
                    -- reálný případ PF2602004). Prosté ×(−1) by správně uložený záporný
-                   -- dobropis dvojitě negovalo a odpočet ZVÝŠILO. (Vydané dobropisy
-                   -- v `invoices` jsou záporně vždy — fetchSales znaménko NEupravuje.)
+                   -- dobropis dvojitě negovalo a odpočet ZVÝŠILO.
+                   --
+                   -- LIMITACE: -ABS() se aplikuje na KAŽDOU položku dokladu (níže i na
+                   -- base/vat), takže u smíšeného opravného dokladu — třeba vrácení zboží
+                   -- jedním řádkem a kladný storno poplatek druhým — se vykáže záporně
+                   -- i ten kladný řádek. Rozlišit to dnes nejde: `document_kind` zná jen
+                   -- credit_note, vrubopis (opravný doklad se zvýšením) jako typ
+                   -- neexistuje, takže znaménko položky nemá proti čemu ověřit. Doklad
+                   -- s položkami obou znamének proto hlásíme warningem při uložení
+                   -- z editoru nebo přes API (`credit_note_mixed_sign_items`
+                   -- v PurchaseInvoiceValidation). Importní cesty warnings()
+                   -- nevolají — u nich se smíšenost typicky ani nedochová
+                   -- (AiPdfExtractor znaménka dobropisu sjednocuje).
+                   --
+                   -- (Vydané dobropisy v `invoices` znaménko NEnormalizujeme —
+                   -- viz komentář ve fetchSales.)
                    (CASE WHEN pi.document_kind = 'credit_note'
                          THEN -ABS(pi.total_with_vat) ELSE pi.total_with_vat END)
                        AS inv_total, pi.reverse_charge AS rc_flag,

@@ -236,23 +236,22 @@ final class EpoSupplierBlockBuilder
      * Normalizace CZ-NACE / OKEČ hodnoty pro `c_okec` při BUILDU výkazu (BUG 7).
      * Hodnoty z UI/ARES mohou být "73.11", "7311", "731100", ale i pouhý oddíl "74".
      *
-     * Číselník MFČR pro c_okec pracuje se 6místnými kódy (620900, 731100, …) —
-     * dvoumístný oddíl z ARES v něm neexistuje a EPO vrací propustnou chybu 30
-     * („Hlavní ekonomická činnost by měla odpovídat nějaké hodnotě z číselníku").
+     * Deleguje na EpoOkecCodebook::normalize() — kanonizaci proti snapshotu
+     * číselníku ČINNOSTI (OKEC) z Daňového portálu. Zápis třídy/podtřídy dle
+     * ČSÚ se dohledá doplněním nul zprava (73.11 / 7311 → 731100), kanonické
+     * hodnoty číselníku vč. bez-nulových kódů sekcí 01–09 („14800") projdou
+     * beze změny. Kód mimo číselník se NEBLOKUJE (snapshot může zestárnout;
+     * EPO hlásí jen propustnou chybu 30) — expiraci/neznámý kód hlásí
+     * completeness check v EpoIdentityValidator jako warning.
      *
-     * Pravidla: strip nečíselných znaků; 4místná třída → doplnit nulami zprava
-     * na 6 (7311 → 731100); 5místný → doplnit jednou nulou; 6místný ponechat;
-     * delší ořezat na 6. KRATŠÍ NEŽ 4 číslice → null = atribut se VYNECHÁ
-     * (c_okec je optional; poslat oddíl by vyvolalo chybu 30 — chybějící kód
-     * hlásí EpoIdentityValidator jako warning). Validitu proti číselníku zde
-     * NEKONTROLUJEME — uživatel zná svou klasifikaci.
+     * KRATŠÍ NEŽ 4 číslice → null = atribut se VYNECHÁ (c_okec je optional;
+     * oddíl z ARES v číselníku není a vyvolal by chybu 30 — chybějící kód
+     * hlásí EpoIdentityValidator jako warning).
      */
     public static function normalizeOkec(string $raw): ?string
     {
-        $digits = preg_replace('/\D/', '', $raw) ?? '';
-        if (strlen($digits) < 4) return null;
-        if (strlen($digits) > 6) $digits = substr($digits, 0, 6);
-        return str_pad($digits, 6, '0', STR_PAD_RIGHT);
+        $resolved = EpoOkecCodebook::normalize($raw);
+        return $resolved === null ? null : $resolved['code'];
     }
 
     /**
@@ -260,7 +259,7 @@ final class EpoSupplierBlockBuilder
      *
      * Vrací:
      *   - ''       pro prázdný vstup (pole se smaže — povolené, jen warning ve výkazech),
-     *   - 6místný kód pro platný vstup (stejná pravidla paddingu jako normalizeOkec),
+     *   - kanonický kód číselníku pro platný vstup (viz normalizeOkec),
      *   - null     pro NEPLATNÝ vstup (po stripu méně než 4 číslice, např. „74")
      *              → volající NESMÍ uložit a vrací validační chybu.
      */

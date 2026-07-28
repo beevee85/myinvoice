@@ -14,8 +14,11 @@ declare(strict_types=1);
  * odporují: zařazení do období (DUZP vs GREATEST) a SQL fallbacky se řídí
  * hlavičkou a při jakékoli změně klasifikace se výkazy rozpadnou.
  *
- * Od této opravy nekonzistenci blokuje PurchaseInvoiceRepository::replaceItems
- * (+ Create/Update akce) — tento skript dorovná HISTORICKÉ záznamy.
+ * Od této opravy nové rozpory vznikat nemají tam, kde klasifikaci vybírá
+ * uživatel: Create/Update akce přijaté faktury zapnou flag, jakmile je mezi
+ * VÝSLOVNĚ zadanými kódy nějaký v režimu přenesené povinnosti (a řeknou o tom
+ * warningem). Doklady z importů, kde kódy vzniknou až auto-defaultem, se
+ * záměrně nepřepisují — tento skript dorovná HISTORICKÉ záznamy ručně.
  *
  * CO SKRIPT DĚLÁ
  * --------------
@@ -28,6 +31,12 @@ declare(strict_types=1);
  *    GREATEST(DUZP, vystavení)) — u dokladů s DUZP a vystavením v různých
  *    měsících se může posunout měsíc výkazu. Skript takové doklady označí
  *    „POSUN OBDOBÍ?!" — před --apply projdi a případně omez --from/--to.
+ *
+ * ⚠️ VĚDOMĚ vypnutý reverse_charge: skript nerozliší kód zadaný uživatelem od
+ *    kódu dosazeného defaultem (zahraniční dodavatel + 0 % → 24e/24 nezávisle
+ *    na flagu). Doklad, u kterého jsi příznak schválně nechal vypnutý, by tedy
+ *    přepsal — proto je dry-run výchozí; seznam před --apply projdi a sporné
+ *    doklady vyřaď přes --supplier/--from/--to.
  *
  * Použití:
  *   php api/bin/backfill-reverse-charge-consistency.php                   # dry-run, vše

@@ -29,6 +29,19 @@ final class ReportFormParamsTest extends TestCase
 
         $r = ReportFormParams::fromQuery(['form' => 'X'], DphPriznaniBuilder::FORMS, DphPriznaniBuilder::FORMS_REQUIRING_DZJIST);
         $this->assertNotNull($r['error']);
+
+        // Dodatečné DP3 formy D/E jsou vypnuté, dokud builder neumí dopočet
+        // rozdílů proti poslední známé dani (§ 141/2 DŘ) — odmítají se jako
+        // neplatná forma, i s vyplněným d_zjist.
+        foreach (['D', 'E'] as $additional) {
+            $r = ReportFormParams::fromQuery(
+                ['form' => $additional, 'd_zjist' => '05.08.2026'],
+                DphPriznaniBuilder::FORMS,
+                DphPriznaniBuilder::FORMS_REQUIRING_DZJIST,
+            );
+            $this->assertNotNull($r['error'], "forma '{$additional}' musí být na DP3 odmítnuta");
+            $this->assertStringContainsString('Neplatná forma', (string) $r['error']);
+        }
     }
 
     public function testFollowUpRequiresDzjist(): void
@@ -42,10 +55,6 @@ final class ReportFormParamsTest extends TestCase
         $this->assertNull($r['error']);
         $this->assertSame('N', $r['form']);
         $this->assertSame('05.08.2026', $r['d_zjist']);
-
-        // Dodatečné DP3 (D) analogicky.
-        $r = ReportFormParams::fromQuery(['form' => 'D'], DphPriznaniBuilder::FORMS, DphPriznaniBuilder::FORMS_REQUIRING_DZJIST);
-        $this->assertNotNull($r['error']);
     }
 
     public function testCorrectiveFormAllowsOptionalDzjist(): void

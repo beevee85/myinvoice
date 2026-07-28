@@ -1289,29 +1289,16 @@ final class PurchaseInvoiceRepository
             ]);
         }
 
-        // Konzistence hlavičky s položkami (audit 2026-07, doklad PF2602010): dostala-li
-        // položka RC klasifikaci — explicitně z importu, nebo defaultem 24e/24 pro
-        // zahraničního dodavatele s 0 % (větev výše nezávisí na RC flagu!) — musí mít
-        // hlavička reverse_charge = 1. Výkazy se řídí položkou, ale zařazení do období
-        // a fallbacky hlavičkou; rozpor se při změně klasifikace rozpadne. Jediné hrdlo
-        // pro VŠECHNY cesty (UI, AI import, ISDOC, iDoklad/Fakturoid). Opačný směr
-        // (RC flag bez RC kódů) je legitimní — kódy doplní default dle flagu.
-        if (!$reverseCharge && $finalCodes !== []) {
-            $codes = array_keys($finalCodes);
-            $placeholders = implode(',', array_fill(0, count($codes), '?'));
-            $rcStmt = $pdo->prepare(
-                "SELECT 1 FROM vat_classifications
-                  WHERE archived = 0 AND is_reverse_charge = 1
-                    AND code IN ({$placeholders})
-                    AND (supplier_id IS NULL OR supplier_id = ?)
-                  LIMIT 1"
-            );
-            $rcStmt->execute([...$codes, (int) ($meta['supplier_id'] ?? 0)]);
-            if ($rcStmt->fetchColumn() !== false) {
-                $pdo->prepare('UPDATE purchase_invoices SET reverse_charge = 1 WHERE id = ?')
-                    ->execute([$purchaseInvoiceId]);
-            }
-        }
+        // Pozn.: konzistenci hlavičkového reverse_charge s klasifikací položek
+        // ZDE ZÁMĚRNĚ neřešíme. Flip příznaku patří do Create/Update akcí, které
+        // se dívají jen na kódy VÝSLOVNĚ zadané uživatelem (VatClassificationDefaulter
+        // ::anyReverseChargeCode) a vrací o tom warning. Kdyby se flipovalo tady,
+        // vstupem by byly i kódy dosazené defaultem (24e/24 pro zahraničního
+        // dodavatele s 0 % — větev výše nezávisí na RC flagu), takže doklad
+        // s vědomě vypnutým reverse_charge by se tiše přepisoval při každém
+        // uložení i re-importu. Výkazy rozpor hlavičky a položek unesou:
+        // VatLedgerService zařazuje i samovyměřuje podle flagu NEBO kódu
+        // (23/24/24e/25) — viz testImportedServiceSelfAssessesWithoutInvoiceFlag.
     }
 
     /**

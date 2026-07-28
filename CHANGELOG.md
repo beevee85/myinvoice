@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.52.0] — 2026-07-28
+
+### Added
+
+- **Omezení uživatele na vybrané firmy.** V *Systém → Uživatelé* je u každého účtu nová sekce **Přístup k firmám** — zaškrtnutím dodavatelů omezíš, co uživatel v instalaci vidí. Typický případ: externí účetní nebo auditor má vidět jen jednu z firem, které v aplikaci vedeš. Dokud správce nikomu nic nezaškrtne, chová se aplikace přesně jako dosud — prázdný výběr znamená přístup ke všem firmám, takže se stávajících instalací upgrade nedotkne. Role `admin` je z omezení vyjmutá vždy, instalaci proto nelze „vyzamknout". (#246)
+- **Role pro konkrétní firmu.** U každé přiřazené firmy lze zvolit roli, která pro ni přebije globální roli uživatele — globální *accountant* tak může být v jedné z firem jen *readonly*. Prázdná volba dědí globální roli. Per-firmu roli `admin` zvolit nelze: admin práva jsou celoinstanční (endpointy `/api/admin/*` nejsou vázané na firmu), takže by šlo o cestu k eskalaci na správce celé instalace. (#246)
+- **Omezení hlídá server, ne jen UI.** Požadavek na doklad či seznam pod nepovolenou firmou vrací `403` (`forbidden_supplier`), detail nepovolené firmy `404` (neprozrazuje, že existuje), přepínač firem i veřejné `GET /api/v1/suppliers` nabízejí jen povolené firmy a **API token** vázaný na nepovolenou firmu se nevytvoří ani nefunguje. Bez hlavičky `X-Supplier-Id` aplikace vybere první **přiřazenou** firmu, ne první v databázi. Když správce firmu uživateli odebere, aplikace si stale výběr sama zahodí a přepne se na povolenou — bez odhlášení. (#246)
+
+### Upgrade
+
+- **Migrace `0148` je čistě aditivní** — zakládá tabulku `user_suppliers` a žádnou existující nemění. Po nasazení se nic nezmění, dokud správce vědomě někomu přístup neomezí. Schéma je záměrně shodné se sesterským projektem MyÚčto.cz, aby byly databáze mezi sebou kompatibilní.
+
 ## [4.51.0] — 2026-07-26
 
 ### Added

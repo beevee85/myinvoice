@@ -100,8 +100,12 @@ export interface ProjectSummary {
 export interface VatStatusResult {
   id: number
   is_vat_payer: boolean
-  /** Zdroj výsledku: 'ares' (CZ dle IČO), 'vies' (zahr. dle DIČ), 'unknown' (nezjištěno → uložený příznak). */
-  source: 'ares' | 'vies' | 'unknown'
+  /**
+   * Zdroj výsledku: 'ares' (CZ dle IČO), 'vies' (zahr. dle DIČ), 'crpdph'
+   * (skupinová registrace CZ699… ověřená v registru plátců DPH — VIES ji nezná),
+   * 'unknown' (nezjištěno → uložený příznak).
+   */
+  source: 'ares' | 'vies' | 'crpdph' | 'unknown'
   ic: string | null
   dic: string | null
 }
@@ -113,20 +117,20 @@ export interface AresLookupResult {
     company_name: string
     ic: string
     dic: string
-    /** DIČ DPH skupiny (CZ699*) u členů skupinové registrace; jinak ''. */
-    dic_sk_dph?: string
     street: string
     city: string
     zip: string
     country_iso2: string
     is_vat_payer: boolean
+    /** DIČ skupinové registrace DPH (CZ699…) z registru plátců — člen skupiny má vlastní DIČ jiné. */
+    dic_sk_dph?: string
     date_active?: string
     legal_form?: string
     /** Zápis v OR pro PO (např. „Spisová značka C 45039 vedená u Krajského soudu v Plzni"). Prázdné u OSVČ. */
     commercial_register?: string
     /** Typ poplatníka odvozený z právní formy: 'fo' = OSVČ (DPFO), 'po' = firma (DPPO), '' = neurčeno. */
     taxpayer_type?: 'fo' | 'po' | ''
-    /** Převažující CZ-NACE normalizovaná na 6 míst; '' když ARES eviduje jen oddíl (viz cz_nace_note). */
+    /** Převažující CZ-NACE kanonizovaná proti číselníku ČINNOSTI (EpoOkecCodebook); '' když ARES eviduje jen oddíl (viz cz_nace_note). */
     cz_nace_code?: string
     /** Poznámka pro UI, když ARES eviduje jen oddíl NACE (<4 číslice) — uživatel doplní třídu ručně. */
     cz_nace_note?: string

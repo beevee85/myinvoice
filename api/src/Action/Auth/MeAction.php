@@ -12,7 +12,6 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\PasskeyCredentialRepository;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionLockPolicy;
-use MyInvoice\Service\Auth\UserSupplierAccess;
 use Psr\Clock\ClockInterface;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -23,11 +22,10 @@ final class MeAction
         private readonly Connection $db,
         private readonly Config $config,
         private readonly PasskeyCredentialRepository $credentials,
+        private readonly \MyInvoice\Repository\UserSupplierRepository $userSuppliers,
         private readonly MfaPolicyService $mfaPolicy,
         private readonly SessionLockPolicy $lockPolicy,
         private readonly ClockInterface $clock,
-        // FORK (beevee85): omezení uživatele na vybrané dodavatele (FÁZE 2)
-        private readonly UserSupplierAccess $access,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -36,16 +34,30 @@ final class MeAction
         $session = (array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []);
         $currentSupplierId = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
 
+        // Membership filtr (zrcadlí SettingsAction::listSuppliers) — přepínač firem
+        // smí nabídnout jen přiřazené firmy. Globální admin a uživatel bez
+        // membershipu vidí všechny (BC).
+        $allowed = ($user['role'] ?? '') === 'admin'
+            ? []
+            : $this->userSuppliers->allowedSupplierIds((int) ($user['id'] ?? 0));
+        $where  = '';
+        $params = [];
+        if ($allowed !== []) {
+            $where  = ' WHERE id IN (' . implode(',', array_fill(0, count($allowed), '?')) . ')';
+            $params = $allowed;
+        }
+
         $ossSelect = $this->db->hasColumn('supplier', 'oss_enabled') ? 'oss_enabled' : '0 AS oss_enabled';
-        $supplierStatement = $this->db->pdo()->query(
+        $supplierStatement = $this->db->pdo()->prepare(
             'SELECT id, company_name, ic, is_vat_payer, is_identified, ' . $ossSelect . ', taxpayer_type,
                     default_payment_due_days, default_payment_due_unit, default_prices_include_vat,
                     auto_send_reminders, payment_thanks_enabled, payment_thanks_default_checked
-               FROM supplier ORDER BY id'
+               FROM supplier' . $where . ' ORDER BY id'
         );
         if ($supplierStatement === false) {
             throw new \RuntimeException('Seznam dodavatelů se nepodařilo načíst.');
         }
+        $supplierStatement->execute($params);
         $suppliers = $supplierStatement->fetchAll(\PDO::FETCH_ASSOC);
         foreach ($suppliers as &$s) {
             $s['id']                       = (int) $s['id'];
@@ -65,16 +77,6 @@ final class MeAction
             // Děkovný e-mail (issue #57) — UI v mark-paid modalu podle nich zobrazí checkbox.
             $s['payment_thanks_enabled']         = (bool) ($s['payment_thanks_enabled'] ?? false);
             $s['payment_thanks_default_checked'] = (bool) ($s['payment_thanks_default_checked'] ?? false);
-        }
-        unset($s);
-
-        // FORK (beevee85): omezený uživatel dostane do switcheru jen povolené dodavatele.
-        $allowed = $this->access->allowedIdsForUser($user);
-        if ($allowed !== null) {
-            $suppliers = array_values(array_filter(
-                $suppliers,
-                static fn (array $s): bool => in_array($s['id'], $allowed, true),
-            ));
         }
 
         $totpEnabled  = (bool) ($user['totp_enabled'] ?? false);

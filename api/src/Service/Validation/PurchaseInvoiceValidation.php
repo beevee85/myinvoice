@@ -180,6 +180,15 @@ final class PurchaseInvoiceValidation
             $totalBase = (float) ($invoice['total_without_vat'] ?? 0);
             if ($totalBase > 0.005) {
                 $warn[] = 'credit_note_positive_total';
+            } elseif (self::hasMixedSignItems($invoice)) {
+                // Smíšený opravný doklad (např. vrácení zboží záporně + kladný storno
+                // poplatek): evidence DPH normalizuje KAŽDOU položku přes -ABS(), takže
+                // kladný řádek se vykáže záporně. Rozlišit to nejde — `document_kind`
+                // vrubopis nezná. Pozn.: warnings() volají jen Create/Update akce, takže
+                // upozornění dostane ruční pořízení a API; importní cesty (ISDOC, iDoklad,
+                // Fakturoid, AI) jdou přes repozitář mimo ně a navíc si znaménka zpravidla
+                // samy sjednotí.
+                $warn[] = 'credit_note_mixed_sign_items';
             }
         }
 
@@ -198,6 +207,9 @@ final class PurchaseInvoiceValidation
      * Má rozpis DPH (vat_breakdown per sazba) u některé nenulové sazby základ a daň
      * s opačným znaménkem? Toleruje nulu na jedné straně (0% položky, RC apod.).
      *
+     * FORK (beevee85): používá i PurchaseInvoiceRepository::find (příznak
+     * `vat_sign_mismatch` do payloadu) — proto public, ne private.
+     *
      * @param array<string,mixed> $invoice Záznam z PurchaseInvoiceRepository::find().
      */
     public static function hasVatSignMismatch(array $invoice): bool
@@ -214,6 +226,32 @@ final class PurchaseInvoiceValidation
             }
         }
         return false;
+    }
+
+    /**
+     * Má dobropis položky obou znamének? Počítá se ze základu položky
+     * (total_without_vat, jinak qty × jednotková cena) — nulové řádky ignorujeme.
+     *
+     * @param array<string,mixed> $invoice řádek dokladu vč. klíče `items`
+     */
+    private static function hasMixedSignItems(array $invoice): bool
+    {
+        $positive = false;
+        $negative = false;
+        foreach ((array) ($invoice['items'] ?? []) as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $base = array_key_exists('total_without_vat', $item)
+                ? (float) $item['total_without_vat']
+                : (float) ($item['quantity'] ?? 0) * (float) ($item['unit_price_without_vat'] ?? 0);
+            if ($base > 0.005) {
+                $positive = true;
+            } elseif ($base < -0.005) {
+                $negative = true;
+            }
+        }
+        return $positive && $negative;
     }
 
     private static function isValidDate(string $date): bool

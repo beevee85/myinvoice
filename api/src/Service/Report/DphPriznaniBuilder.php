@@ -23,16 +23,26 @@ final class DphPriznaniBuilder
         private readonly VatClassificationMapper $mapper,
     ) {}
 
-    /** Povolené formy podání (EPO XSD): B řádné, O opravné, D dodatečné, E dodatečné/opravné. */
-    public const FORMS = ['B', 'O', 'D', 'E'];
+    /**
+     * Povolené formy podání: B řádné, O opravné (§ 138 DŘ).
+     *
+     * Dodatečné formy D/E (§ 141 DŘ) jsou ZÁMĚRNĚ vypnuté: dodatečné přiznání
+     * se dle § 141 odst. 2 DŘ podává v ROZDÍLECH proti poslední známé dani,
+     * builder ale umí jen plné hodnoty za období — vygenerované XML by bylo
+     * věcně špatně (znovu přiznaná celá daň, v neprospěch poplatníka).
+     * Re-enable = vrátit 'D'/'E' sem a do FORMS_REQUIRING_DZJIST, až bude
+     * implementován dopočet rozdílů proti poslední známé dani.
+     * (Následné KH je jiný případ — podává se kompletní, KH formy se nemění.)
+     */
+    public const FORMS = ['B', 'O'];
     /** Formy, u kterých EPO vyžaduje datum zjištění důvodů (d_zjist) — dodatečná podání (§ 141 DŘ). */
-    public const FORMS_REQUIRING_DZJIST = ['D', 'E'];
+    public const FORMS_REQUIRING_DZJIST = [];
 
     /**
      * Sestaví XML pro DPH přiznání za daný měsíc/kvartál.
      *
      * @param string $period 'monthly' (default) nebo 'quarterly' (sumuje celý kvartál)
-     * @param string $form dapdph_forma — viz FORMS; u D/E je $dZjist povinné
+     * @param string $form dapdph_forma — viz FORMS; u O je $dZjist volitelné
      * @param string|null $dZjist datum zjištění důvodů pro podání (DD.MM.YYYY)
      * @return array{xml: string, summary: array<string, mixed>, warnings: list<string>}
      */
@@ -123,19 +133,21 @@ final class DphPriznaniBuilder
         } else {
             $vetaD->setAttribute('mesic', (string) $month);
         }
-        // B = řádné (default), O = opravné, D = dodatečné, E = dodatečné/opravné.
+        // B = řádné (default), O = opravné. Dodatečné D/E jsou vypnuté do
+        // implementace dopočtu rozdílů dle § 141/2 DŘ — viz komentář u FORMS.
         $vetaD->setAttribute('dapdph_forma', $form);
-        // Datum zjištění důvodů pro podání dodatečného přiznání (§ 141 DŘ) — EPO ho
-        // u D/E vyžaduje; u O je volitelné.
+        // Datum zjištění důvodů (§ 141 DŘ) — u O volitelně propustíme, když ho
+        // uživatel vyplní.
         if ($dZjist !== null && $dZjist !== '') {
             $vetaD->setAttribute('d_zjist', $dZjist);
         }
         $vetaD->setAttribute('dokument', 'DP3');   // identifikace typu výkazu
         // P = plátce DPH (default), I = identifikovaná osoba (S = skupina, N = neplátce)
         $vetaD->setAttribute('typ_platce', $isIdentified ? 'I' : 'P');
-        // CZ-NACE klasifikace (hlavní ekonomická činnost, 6-digit) — vyplňuje se
-        // z `supplier.cz_nace_code`. Hodnotu očekávanou EPO ověřuje uživatel
-        // proti číselníku https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/okec.
+        // CZ-NACE klasifikace (hlavní ekonomická činnost) — vyplňuje se
+        // z `supplier.cz_nace_code`, kanonizuje se proti snapshotu číselníku
+        // ČINNOSTI (viz EpoOkecCodebook); expirace/neznámý kód se hlásí
+        // ve warnings completeness checku, build neblokuje.
         $okec = EpoSupplierBlockBuilder::normalizeOkec((string) ($supplier['cz_nace_code'] ?? ''));
         if ($okec !== null) {
             $vetaD->setAttribute('c_okec', $okec);

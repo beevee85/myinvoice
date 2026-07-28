@@ -24,24 +24,33 @@ V **Nastavení → Daňové nastavení** vyplň:
 
 1. **Typ poplatníka** — FO (OSVČ) nebo PO (s.r.o., a.s.)
 2. **Perioda DPH přiznání** — Měsíční nebo Kvartální
-3. **Kód finančního úřadu** (např. 451 = Praha 1)
-4. **Kód územního pracoviště (ÚzP)** — najdeš na mojedane.gov.cz nebo v hlavičce dřívějšího podání jako `c_pracufo` (např. 2005 = ÚzP pro Prahu 5)
-5. **DIČ** a **e-mail** v Identifikaci firmy (povinné)
-6. U právnické osoby **oprávněnou osobu** (jméno, příjmení, postavení — typicky jednatel)
-7. Volitelně: telefon, CZ-NACE, datová schránka, sestavitel přiznání
-8. Volitelně pro OSS: OSS režim, země identifikace a měna podání
+3. **Kód finančního úřadu** (např. 451 = Praha 1) — povinné
+4. **DIČ** v Identifikaci firmy — povinné
+5. **Kód územního pracoviště (ÚzP)** — doporučené; najdeš na mojedane.gov.cz nebo v hlavičce dřívějšího podání jako `c_pracufo` (např. 2005 = ÚzP pro Prahu 5)
+6. **E-mail** v Identifikaci firmy — doporučený kontakt pro FÚ
+7. U právnické osoby **oprávněná osoba** (jméno, příjmení, postavení — typicky jednatel) — doporučené
+8. Volitelně: telefon, CZ-NACE, datová schránka, sestavitel přiznání
+9. Volitelně pro OSS: OSS režim, země identifikace a měna podání
 
 Detailní mapping všech polí v UI na XML atributy najdeš v sekci [Pole EPO / VetaP](#pole-epo-vetap) níže.
 
 > [!IMPORTANT]
-> **Bez povinných polí se XML nevygeneruje.** Aplikace před sestavením výkazu
-> kontroluje úplnost identifikace: kód FÚ, kód ÚzP, DIČ, typ poplatníka a e-mail
-> (u PO navíc oprávněnou osobu). Chybí-li něco, stránka výkazu zobrazí výčet
-> chybějících polí s odkazem do nastavení — dřív se vygenerovalo validně
+> **Bez povinných polí XML nestáhneš.** Aplikace před sestavením výkazu
+> kontroluje identifikaci daňového subjektu. Tvrdě blokují jen pole, která mají
+> v EPO schématu `use="required"` — **kód FÚ, DIČ a typ poplatníka**; bez nich
+> by podání neprošlo ani validací schématu, takže stažení XML vrátí chybu
+> s výčtem chybějících polí a odkazem do nastavení. Dřív se vygenerovalo validně
 > vypadající XML, které EPO odmítl až při podání, typicky v den lhůty.
-> Chybějící telefon nebo CZ-NACE generování neblokuje, jen se zobrazí upozornění.
-> Sekce Daňové nastavení sama zvýrazní prázdná povinná pole a nekompletnost
-> ohlásí štítkem v záhlaví.
+>
+> **Náhled výkazu se nikdy neblokuje** — čísla vidíš i s neúplným nastavením
+> (třeba když je opisuješ do formuláře na portálu), jen se nad náhledem
+> vypíše, co doplnit. Pole, která jsou ve schématu volitelná (ÚzP, e-mail,
+> oprávněná osoba u PO), a dále telefon či CZ-NACE generování neblokují — jen
+> se zobrazí upozornění. Sekce Daňové nastavení má v záhlaví štítek shrnující
+> stav (červený, když chybí povinné pole; oranžový, když jen doporučené)
+> a u svých polí hint — červený u povinných, oranžový u doporučených. DIČ,
+> e-mail a telefon žijí v sekci Identifikace firmy, takže se hlásí jen tím
+> štítkem a výpisem nad náhledem výkazu.
 
 > [!NOTE]
 > **Právnické osoby (PO/s.r.o./a.s.) podávají Kontrolní hlášení VŽDY měsíčně** (§ 101e odst. 1 ZDPH).
@@ -60,7 +69,7 @@ odmítne nebo bude generovat formálně neúplný výkaz.
 |---|---|---|---|
 | **Kód finančního úřadu** | `c_ufo` | Číselný kód územního finančního orgánu | např. `451` Praha 1, `463` Jihomoravský kraj. Najdeš na posledním podaném přiznání nebo v EPO. |
 | **Kód územního pracoviště** | `c_pracufo` | Konkrétní pracoviště v rámci FÚ | např. `3203` pracoviště Brno III. Volitelné, ale EPO ho někdy vyžaduje. |
-| **CZ-NACE kód (`cz_nace_code`)** | `c_okec` | Hlavní podnikatelská činnost (NACE) | 6místný kód číselníku MFČR, např. `731100` (reklamní agentury). Zadat lze i `73.11` — doplní se automaticky. Dvoumístný oddíl z ARES (např. `74`) číselník nezná a aplikace ho neuloží. Prázdné/neúplné → atribut se vynechá a EPO nahlásí propustnou chybu 30. |
+| **CZ-NACE kód (`cz_nace_code`)** | `c_okec` | Hlavní podnikatelská činnost (NACE) | Vybírá se **našeptávačem** nad číselníkem ČINNOSTI Daňového portálu ([rozhraní číselníků](https://adisspr.mfcr.cz/pmd/dokumentace/ciselniky)) — hledej podle názvu činnosti („reklamní") nebo podle kódu (`73`, `73.11`, u sekcí 01–09 i `01.48`). Nabízejí se **jen kódy platné k dnešku**; uloží se kanonická podoba číselníku (`731100`, u sekcí 01–09 bez vodicí nuly, tedy `14800` = 01.48.00). Kód mimo číselník lze zvolit taky (poslední položka nabídky) — uloží se s upozorněním. Pozor: číselník přešel k 1. 1. 2026 na NACE rev. 2.1, takže klasifikace převzatá z ARES může být expirovaná (např. `620200`, dnes `622000`) — pole to hlásí hned při otevření Nastavení. Prázdné/neúplné → atribut se vynechá a EPO nahlásí propustnou chybu 30. |
 
 ### Typ plátce a perioda
 
@@ -105,7 +114,7 @@ Naše DB tyto sloupce drží separátně (`supplier.street`, `street_number_pop`
 
 PO (právnické osoby) tyto pole nevyplňují — místo nich se použije `zkrobchjm` z firmy.
 
-### Oprávněná osoba k podpisu — POVINNÉ pro PO
+### Oprávněná osoba k podpisu — doporučené pro PO
 
 Pole `opr_*` identifikují fyzickou osobu, která je u právnické osoby oprávněná
 přiznání podepsat (typicky jednatel, předseda představenstva).
@@ -117,6 +126,10 @@ přiznání podepsat (typicky jednatel, předseda představenstva).
 | **Postavení** (`opr_postaveni`) | `opr_postaveni` | Funkce, typicky `jednatel`, `majitel`, `předseda představenstva` |
 
 U FO (OSVČ) zůstávají prázdná — fallback je `jmeno` + `prijmeni`.
+
+V EPO schématech jsou atributy `opr_*` deklarované jako `use="optional"`, takže
+generování XML neblokují — aplikace jen upozorní, že je u PO nemáš vyplněné.
+Finanční úřad je ale u právnických osob fakticky očekává, tak je doplň.
 
 ### Sestavitel přiznání (sest_*)
 
@@ -198,10 +211,18 @@ sekci VetaD/VetaP. Alternativně zavolej na svůj FÚ nebo se podívej na
 [seznam FÚ](https://www.financnisprava.cz/cs/financni-sprava/organy-financni-spravy/uzemni-pracoviste).
 
 **„EPO hlásí propustnou chybu 30 — Hlavní ekonomická činnost neodpovídá číselníku"**
-→ Vyplň `cz_nace_code` v Daňovém nastavení **6místným kódem** (např. `731100`;
-lze zadat i `73.11`, doplní se automaticky). Dvoumístný oddíl převzatý z ARES
-(např. `74`) číselník MFČR nezná — aplikace ho od této verze neuloží a do XML
-nepropíše (atribut se vynechá a náhled přiznání na to upozorní).
+→ Otevři **Nastavení → Daňové nastavení → CZ-NACE klasifikace** a vyber činnost
+z našeptávače (nabízí jen kódy platné k dnešku, hledá i podle názvu). Dvě časté
+příčiny chyby 30: **(1)** dvoumístný oddíl převzatý z ARES (např. `74`) —
+číselník ho nezná, aplikace ho neuloží a do XML nepropíše; **(2)** kód platný
+do 31. 12. 2025, který přechodem číselníku na NACE rev. 2.1 expiroval
+(např. `620200` → dnes `622000`) — aplikace ho označí upozorněním s datem konce
+platnosti hned u pole, takže stačí vybrat nástupce ze seznamu.
+
+> 🛈 Číselník je v aplikaci uložený jako snapshot (`api/resources/ciselniky/okec.txt`).
+> Zastaralý snapshot nic neblokuje (kód mimo něj se uloží i odešle, jen s upozorněním);
+> aktualizuje se skriptem `cmd/download-okec.{cmd,sh}` — stáhne aktuální číselník
+> z Daňového portálu, ověří formát a soubor přepíše.
 
 **„EPO hlásí propustnou chybu 49 na ř. 40/41 — daň neodpovídá základu"**
 → Nejde o chybu dat: EPO si daň dopočítává ze zaokrouhleného základu, zatímco
@@ -217,9 +238,15 @@ hlášení — **neupravuj ji**. Náhled přiznání rozdíl dopředu vypíše v
 
 - **Toggle Měsíčně / Kvartálně** — override podle `supplier.vat_period`
 - **Month / Year picker** — pro měsíční; **Q1/Q2/Q3/Q4 picker** pro kvartální
-- **Forma podání** — Řádné (výchozí) / Opravné (§ 138 DŘ) / Dodatečné (§ 141 DŘ).
-  U dodatečného je povinné **Datum zjištění** důvodů pro podání (date picker se
-  zobrazí u ne-řádných forem) — do XML se propíše jako `dapdph_forma` + `d_zjist`.
+- **Forma podání** — Řádné (výchozí) / Opravné (§ 138 DŘ — nahrazuje řádné
+  před uplynutím lhůty). **Datum zjištění** důvodů je u opravného volitelné —
+  do XML se propíše jako `dapdph_forma` + `d_zjist`.
+  **Dodatečné přiznání (§ 141 DŘ) aplikace zatím negeneruje:** podává se pouze
+  v **rozdílech** proti poslední známé dani (§ 141 odst. 2 DŘ) a dopočet
+  rozdílů není implementován — plné hodnoty za období by byly věcně špatně
+  (v neprospěch poplatníka). Pro dodatečné přiznání použij formulář na portálu
+  EPO / MOJE daně, hodnoty rozdílů spočítej z porovnání s posledním podaným
+  přiznáním.
 - **Stáhnout XML** — generuje DPHDP3 verze 03.01 pro EPO portál
 
 #### 4 KPI karty
@@ -342,12 +369,27 @@ default předpokládá **službu** a náhled Kontrolního hlášení u takového
 zobrazí adresné upozornění. Jde-li o **pořízení zboží z EU**, zvol ručně kód
 **23** (ř. 3); u **dovozu zboží ze 3. země** kód **25** (ř. 7).
 
-Má-li položka klasifikaci v režimu přenesené povinnosti (24e/23/24/25/5…),
-aplikace při uložení **automaticky zapne příznak reverse charge na hlavičce**
-dokladu (s upozorněním) — hlavička a položky si jinak odporují a doklad by se
-mohl zařadit do špatného období. Historická data srovná skript
+Vybereš-li na položce **výslovně** klasifikaci v režimu přenesené povinnosti
+(24e/23/24/25/5…), aplikace při uložení dokladu **automaticky zapne příznak
+reverse charge na hlavičce** a upozorní na to — hlavička a položky by si jinak
+odporovaly a doklad by se mohl zařadit do špatného období. Platí to pro uložení
+z editoru i pro API (POST/PUT přijaté faktury).
+
+Naopak **importy** (ISDOC, iDoklad, Fakturoid, AI extrakce) příznak nemění:
+tam klasifikace na položkách vzniká automaticky (zahraniční dodavatel s 0 %
+dostane 24e/24) a přepisovat kvůli tomu příznak, který zdrojový systém uvedl,
+by bylo tiché přepisování dat. Výkazy s tím počítají — zařazení do období
+i samovyměření reagují na příznak **nebo** na klasifikační kód položky.
+
+Pozor na jednu hranici: jakmile takový importovaný doklad otevřeš v editoru
+a uložíš, kódy uložené na položkách se odešlou jako tvoje volba, takže se
+příznak zapne (s upozorněním). Chceš-li u dokladu příznak trvale vypnutý,
+zvol na položkách klasifikaci mimo režim přenesené povinnosti.
+
+Historická data s rozporem srovná skript
 `php api/bin/backfill-reverse-charge-consistency.php` (výchozí režim dry-run,
-zápis až s `--apply`).
+zápis až s `--apply`) — ten ale kód zadaný ručně od defaultovaného nerozliší,
+takže výpis před zápisem projdi.
 
 U vystavených řádků se sazbou **0 %** se klasifikace záměrně nedoplňuje automaticky.
 Nulová sazba sama nerozlišuje osvobození bez nároku, vývoz, plnění mimo předmět

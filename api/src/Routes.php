@@ -51,6 +51,7 @@ use MyInvoice\Action\Admin\UserAdminAction;
 use MyInvoice\Action\Settings\EmailBrandingAction;
 use MyInvoice\Action\Settings\BrandingProfilesAction;
 use MyInvoice\Action\Settings\EmailProfilesAction;
+use MyInvoice\Action\Settings\NaceCodesAction;
 use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\SignatureDocumentSelectionAction;
@@ -594,6 +595,9 @@ final class Routes
         $app->post   ('/api/admin/users',           [UserAdminAction::class, 'create']);
         $app->put    ('/api/admin/users/{id:[0-9]+}', [UserAdminAction::class, 'update']);
         $app->delete ('/api/admin/users/{id:[0-9]+}', [UserAdminAction::class, 'delete']);
+        // Membership uživatel ↔ supplier (jemný tenant přístup, migrace 0148)
+        $app->get    ('/api/admin/users/{id:[0-9]+}/suppliers', [\MyInvoice\Action\Admin\UserSupplierAdminAction::class, 'list']);
+        $app->put    ('/api/admin/users/{id:[0-9]+}/suppliers', [\MyInvoice\Action\Admin\UserSupplierAdminAction::class, 'replace']);
 
         // Approval inbox (admin only) — globální seznam schvalování
         $app->get    ('/api/admin/approvals',       ApprovalListAction::class);
@@ -615,6 +619,7 @@ final class Routes
         $app->get ('/api/settings/supplier',                [SettingsAction::class, 'getSupplier']);
         $app->put ('/api/settings/supplier',                [SettingsAction::class, 'updateSupplier']);
         $app->put ('/api/settings/supplier/invoice-counter', SupplierInvoiceCounterAction::class);
+        $app->get ('/api/settings/nace-codes',              NaceCodesAction::class);
         $app->get    ('/api/settings/email-profiles',       [EmailProfilesAction::class, 'list']);
         $app->post   ('/api/settings/email-profiles',       [EmailProfilesAction::class, 'create']);
         $app->post   ('/api/settings/email-profiles/test',  [EmailProfilesAction::class, 'testDraft']);

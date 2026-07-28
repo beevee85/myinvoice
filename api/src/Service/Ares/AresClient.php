@@ -106,26 +106,15 @@ final class AresClient
             $psc = substr($psc, 0, 3) . ' ' . substr($psc, 3); // 30100 → "301 00"
         }
 
-        // Skupinová registrace DPH (§ 5a ZDPH): člen skupiny NEMÁ vlastní DIČ
-        // (dic=null, stavZdrojeDph=NEEXISTUJICI), ale JE plátcem přes skupinu —
-        // ARES to hlásí v stavZdrojeSkDph + dicSkDph (CZ699xxxxxx). Bez téhle
-        // větve se člen skupiny chybně klasifikoval jako neplátce (Direct auto
-        // Praha, IČO 25114719 → vynulované sazby DPH při AI importu).
-        $ownDph   = ($regs['stavZdrojeDph'] ?? '') === 'AKTIVNI';
-        $groupDph = ($regs['stavZdrojeSkDph'] ?? '') === 'AKTIVNI';
-        $dicSkDph = trim((string) ($raw['dicSkDph'] ?? ''));
-
         return [
             'company_name' => (string) ($raw['obchodniJmeno'] ?? ''),
             'ic'           => (string) ($raw['ico'] ?? ''),
             'dic'          => (string) ($raw['dic'] ?? ''),
-            // DIČ DPH skupiny — pro doklady/KH vystupuje člen skupiny pod tímto DIČ.
-            'dic_sk_dph'   => ($groupDph && $dicSkDph !== '') ? $dicSkDph : '',
             'street'       => $street,
             'city'         => (string) ($sidlo['nazevObce'] ?? ''),
             'zip'          => $psc,
             'country_iso2' => (string) ($sidlo['kodStatu'] ?? 'CZ'),
-            'is_vat_payer' => $ownDph || $groupDph,
+            'is_vat_payer' => ($regs['stavZdrojeDph'] ?? '') === 'AKTIVNI',
             'date_active'  => (string) ($raw['datumVzniku'] ?? ''),
             'legal_form'   => (string) ($raw['pravniForma'] ?? ''),
             // Číslo popisné / orientační zvlášť (pro EPO VetaP). cisloOrientacni může mít písmeno.
@@ -167,7 +156,9 @@ final class AresClient
      * činnosti. Je-li i nejdelší kód kratší než 4 číslice (jen oddíl, např. „74"),
      * vrací '' — takový kód číselník MFČR pro c_okec nezná (EPO propustná chyba 30)
      * a uživatel musí doplnit konkrétní třídu ručně (viz naceNote()).
-     * Výsledek se normalizuje na 6 míst (7311 → 731100).
+     * Výsledek se kanonizuje proti snapshotu číselníku ČINNOSTI (EpoOkecCodebook):
+     * zápis dle ČSÚ se dohledá doplněním nul zprava (7311 → 731100), kanonické
+     * hodnoty číselníku projdou beze změny.
      */
     private static function primaryNace(array $raw): string
     {

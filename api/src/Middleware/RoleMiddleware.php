@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Server\MiddlewareInterface;
@@ -171,6 +172,7 @@ final class RoleMiddleware implements MiddlewareInterface
 
     public function __construct(
         private readonly ResponseFactory $responseFactory,
+        private readonly SupplierAccessResolver $supplierAccess,
     ) {}
 
     public function process(Request $request, Handler $handler): Response
@@ -183,15 +185,42 @@ final class RoleMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $role = (string) ($user['role'] ?? '');
+
+        // Per-supplier role override (user_suppliers.role) — efektivní role pro
+        // aktuální firmu. RoleMiddleware běží PŘED SupplierScope, proto supplier
+        // resolvuje sdílený SupplierAccessResolver (memoizováno, SupplierScope ho
+        // znovu nepočítá). Efektivní roli propíšeme do ATTR_USER, aby ji viděly
+        // i Action-level guardy (SettingsAction/UserAdminAction čtou role z attrs)
+        // a hlavně /api/auth/me — FE si z něj řídí auth.canWrite, takže se počítá
+        // i na self-service cestách (proto před PUBLIC_OR_SELF větví).
+        // denied requesty neřešíme — SupplierScopeMiddleware je stejně ukončí 403.
+        //
+        // BEZPEČNOST: resolver vrací override=NULL pro globální adminy (ti si roli
+        // nemění). Pro non-adminy navíc tvrdě zastropujeme override na 'accountant' —
+        // per-supplier přiřazení NIKDY nesmí povýšit uživatele na globálního admina
+        // (admin endpointy /api/admin/* nejsou supplier-scoped; jinak by šlo přes
+        // override eskalovat na celoinstančního admina). 'admin' je i tak už mimo
+        // enum user_suppliers.role (migrace 0148), tohle je pojistka proti stray řádku.
+        if ($role !== '') {
+            $access = $this->supplierAccess->resolve($request);
+            if (!$access->denied && $access->roleOverride !== null) {
+                $override = $access->roleOverride === 'admin' ? 'accountant' : $access->roleOverride;
+                if ($override !== $role) {
+                    $role = $override;
+                    $user['role'] = $role;
+                    $request = $request->withAttribute(AuthMiddleware::ATTR_USER, $user);
+                }
+            }
+        }
+
         // Self-service / public — Auth už dovnitř pustí jen oprávněné, role nás nezajímá
         if (in_array($path, self::PUBLIC_OR_SELF, true)
             || str_starts_with($path, '/api/public/')
         ) {
             return $handler->handle($request);
         }
-
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $role = (string) ($user['role'] ?? '');
 
         // Bez role = bez přístupu (Auth měl už 401, ale defensive)
         if ($role === '') {

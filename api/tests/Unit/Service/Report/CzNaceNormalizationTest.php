@@ -11,10 +11,13 @@ use PHPUnit\Framework\TestCase;
 /**
  * Normalizace CZ-NACE (c_okec) — BUG 7.
  *
- * Číselník MFČR pracuje se 6místnými kódy (731100, 620900). ARES u řady
- * subjektů eviduje jen oddíl (2 číslice, např. „74") — ten se NESMÍ uložit
- * ani odeslat (EPO propustná chyba 30). Kratší platné vstupy se doplňují
- * nulami zprava: 73.11 → 731100, 62020 → 620200.
+ * Kanonizace proti snapshotu číselníku ČINNOSTI (EpoOkecCodebook): zápis dle
+ * ČSÚ se dohledá doplněním nul zprava (73.11 → 731100, 62020 → 620200),
+ * kanonické hodnoty číselníku — vč. kódů sekcí 01–09, které číselník ukládá
+ * numericky BEZ vodicí nuly (01.48.00 → „14800") — projdou beze změny.
+ * ARES u řady subjektů eviduje jen oddíl (2 číslice, např. „74") — ten se
+ * NESMÍ uložit ani odeslat (EPO propustná chyba 30). Platnost kódu
+ * (expirace při přechodu na NACE rev. 2.1) testuje EpoOkecCodebookTest.
  */
 final class CzNaceNormalizationTest extends TestCase
 {
@@ -33,6 +36,10 @@ final class CzNaceNormalizationTest extends TestCase
             ['620900', '620900'],
             ['73 11',  '731100'],   // mezery se odstraní
             ['7311001', '731100'],  // delší se ořeže na 6
+            ['14800',  '14800'],    // kanonická hodnota číselníku (01.48.00 bez vodicí nuly) beze změny
+            ['01480',  '14800'],    // ČSÚ zápis s vodicí nulou → kanonická podoba číselníku
+            ['0148',   '14800'],    // třída sekce 01 → kanonická podoba (ne „014800")
+            ['999999', '999999'],   // kód mimo číselník projde (jen warning, viz EpoOkecCodebookTest)
             ['',       ''],         // prázdné = smazání pole (povolené)
             ['   ',    ''],
         ];

@@ -12,7 +12,7 @@ use PHPUnit\Framework\TestCase;
  * je-li i ten kratší než 4 číslice (jen sekce/oddíl, např. „620" = 3 znaky,
  * „74" = 2), cz_nace_code zůstává prázdné + cz_nace_note vysvětlí proč —
  * číselník MFČR pro c_okec takový kód nezná (EPO propustná chyba 30).
- * Výsledek se normalizuje na 6 míst (73110 → 731100).
+ * Výsledek se kanonizuje proti snapshotu číselníku ČINNOSTI (73110 → 731100).
  *
  * Zachovaná regrese: jediná NACE jako numerický string se v PHP poli stával
  * int klíčem a funkce vracela int → TypeError (#76b). Vše musí být string.

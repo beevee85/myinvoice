@@ -21,6 +21,15 @@ export interface DphPriznaniPreview {
     supplier_vat_period: string
   }
   warnings: string[]
+  /** Chybějící POVINNÁ pole EPO identifikace — náhled neblokují, stažení XML ano. */
+  missing?: EpoMissingField[]
+}
+
+/** Pole identifikace daňového subjektu, které chybí v Nastavení → Daňové nastavení. */
+export interface EpoMissingField {
+  field: string
+  label: string
+  why: string
 }
 
 export interface DphSettings {
@@ -45,6 +54,8 @@ export interface KhPreview {
     submission_deadline: string
   }
   warnings: string[]
+  /** Chybějící POVINNÁ pole EPO identifikace — náhled neblokují, stažení XML ano. */
+  missing?: EpoMissingField[]
 }
 
 export interface DphTrendRow {
@@ -282,6 +293,8 @@ export const reportsApi = {
         submission_deadline: string
       }
       warnings: string[]
+      /** Chybějící POVINNÁ pole EPO identifikace — náhled neblokují, stažení XML ano. */
+      missing?: EpoMissingField[]
     }>('/reports/dphshv/preview', { params: { year, month, ...(period ? { period } : {}) } }).then(r => r.data),
 
   shvDownloadUrl: (year: number, month: number, period?: 'monthly' | 'quarterly') => {
@@ -393,8 +406,9 @@ export const reportsApi = {
     const params = new URLSearchParams({ year: String(year), month: String(month) })
     if (period) params.set('period', period)
     if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
-    // Forma podání (B řádné / O opravné / D dodatečné) + datum zjištění důvodů
-    // pro dodatečné přiznání (DD.MM.YYYY, povinné u D) — viz DphPriznaniAction.
+    // Forma podání (B řádné / O opravné; dodatečné D/E backend odmítá do
+    // implementace dopočtu rozdílů dle § 141/2 DŘ) + volitelné datum zjištění
+    // důvodů u O (DD.MM.YYYY) — viz DphPriznaniAction.
     if (form && form !== 'B') {
       params.set('form', form)
       if (dZjist) params.set('d_zjist', dZjist)

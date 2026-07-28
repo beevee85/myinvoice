@@ -485,7 +485,16 @@ async function submit() {
             </div>
           </div>
           <div v-if="viesResult" class="mt-2 text-xs">
-            <span v-if="viesResult.valid" class="text-primary-700">✓ {{ t('client.dic_valid', { dic: t('client.dic'), name: viesResult.name }) }}</span>
+            <!-- Registr plátců DPH (skupinová registrace CZ699…) ověří platnost, ale
+                 název subjektu nevrací — bez tohohle rozlišení by hláška končila
+                 visící pomlčkou („DIČ je platné — "). -->
+            <span v-if="viesResult.valid && viesResult.name" class="text-primary-700">✓ {{ t('client.dic_valid', { dic: t('client.dic'), name: viesResult.name }) }}</span>
+            <span v-else-if="viesResult.valid && viesResult.group_registration" class="text-primary-700">✓ {{ t('client.dic_valid_group', { dic: t('client.dic') }) }}</span>
+            <span v-else-if="viesResult.valid" class="text-primary-700">✓ {{ t('client.dic_valid_no_name', { dic: t('client.dic') }) }}</span>
+            <!-- Nedostupný registr/VIES je soft error (ViesClient vrací valid:false,
+                 source:'error') — hlásit ho jako „DIČ není platné" by byl falešný
+                 negativ, uživatel by opravoval správně zadané DIČ. -->
+            <span v-else-if="viesResult.source === 'error'" class="text-warning-700">{{ t('client.dic_check_unavailable') }}</span>
             <span v-else class="text-danger-500">✗ {{ t('client.dic_invalid', { dic: t('client.dic') }) }}</span>
           </div>
 

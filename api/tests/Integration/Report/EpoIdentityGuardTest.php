@@ -17,9 +17,14 @@ use Slim\Psr7\Response as Psr7Response;
 
 /**
  * EPO identifikace (BUG 6, oprava 2026-07): před generováním XML se kontroluje
- * úplnost povinných polí daňového subjektu. Chybí-li, endpointy vrací 422
- * `epo_identity_incomplete` s výčtem `missing[]` — dřív se vygenerovalo validně
- * vypadající XML, které EPO odmítlo až při podání.
+ * úplnost identifikace daňového subjektu. Chybí-li pole, které má v EPO
+ * schématu `use="required"` (kód FÚ, DIČ, typ poplatníka), vrací STAŽENÍ XML
+ * 422 `epo_identity_incomplete` s výčtem `missing[]` — dřív se vygenerovalo
+ * validně vypadající XML, které EPO odmítlo až při podání.
+ *
+ * NÁHLED se nikdy neblokuje (uživatel musí vidět čísla i s neúplným
+ * nastavením) a pole, která jsou v XSD `optional` (ÚzP, e-mail, opr_*),
+ * generování nezastaví — jsou jen doporučená (viz review PR #245 bod 3).
  *
  * Testy dočasně přepisují EPO pole PRVNÍHO supplier-a a v tearDown je vrací.
  * Období 2050-06 (prázdné; parsePeriod povoluje roky jen 2020–2050) → žádná data, jen VetaD/VetaP.
@@ -105,7 +110,7 @@ final class EpoIdentityGuardTest extends TestCase
             'taxpayer_type'         => 'po',
             'email'                 => 'epo-test@example.com',
             'phone'                 => '+420722944990',
-            'cz_nace_code'          => '620200',
+            'cz_nace_code'          => '622000', // aktivní kód číselníku (NACE 2.1); 620200 expirovalo 2025-12-31
             'opr_jmeno'             => 'Jan',
             'opr_prijmeni'          => 'Testovací',
             'opr_postaveni'         => 'jednatel',
@@ -135,25 +140,54 @@ final class EpoIdentityGuardTest extends TestCase
         return array_column($body['error']['missing'] ?? [], 'field');
     }
 
-    public function testMissingWorkplaceCodeIs422WithFieldInMissing(): void
+    public function testMissingFinancialOfficeCodeBlocksDownloadButNotPreview(): void
     {
-        $this->setSupplier(['workplace_code' => null] + $this->completeSupplier());
+        // c_ufo má v dphkh1.xsd use="required" → stažení XML 422…
+        $this->setSupplier(['financial_office_code' => null] + $this->completeSupplier());
 
         $resp = $this->kh->download($this->request('/api/reports/dphkh1'), new Psr7Response());
         self::assertSame(422, $resp->getStatusCode());
         $body = self::json($resp);
         self::assertSame('epo_identity_incomplete', $body['error']['code']);
-        self::assertContains('workplace_code', self::missingFields($body));
+        self::assertContains('financial_office_code', self::missingFields($body));
         self::assertSame('/admin/settings#epo', $body['error']['settings_url'] ?? null);
+
+        // …ale náhled se musí zobrazit, jen s výčtem chybějících polí v těle.
+        $resp = $this->kh->preview($this->request('/api/reports/dphkh1/preview'), new Psr7Response());
+        self::assertSame(200, $resp->getStatusCode(), (string) $resp->getBody());
+        $preview = self::json($resp);
+        self::assertArrayHasKey('summary', $preview);
+        self::assertSame(['financial_office_code'], array_column($preview['missing'] ?? [], 'field'));
     }
 
-    public function testPoWithoutOprPrijmeniIs422(): void
+    public function testMissingWorkplaceCodeIsWarningOnly(): void
     {
+        // c_pracufo je v XSD use="optional" — nesmí blokovat ani stažení XML.
+        $this->setSupplier(['workplace_code' => null] + $this->completeSupplier());
+
+        $resp = $this->kh->download($this->request('/api/reports/dphkh1'), new Psr7Response());
+        self::assertSame(200, $resp->getStatusCode(), (string) $resp->getBody());
+
+        $resp = $this->kh->preview($this->request('/api/reports/dphkh1/preview'), new Psr7Response());
+        self::assertSame(200, $resp->getStatusCode(), (string) $resp->getBody());
+        $preview = self::json($resp);
+        self::assertSame([], $preview['missing'] ?? []);
+        self::assertStringContainsString('územního pracoviště', implode(' | ', $preview['warnings'] ?? []));
+    }
+
+    public function testPoWithoutOprPrijmeniIsWarningOnly(): void
+    {
+        // opr_* jsou v XSD use="optional" — náhled i stažení projdou, jen varujeme.
         $this->setSupplier(['opr_prijmeni' => null] + $this->completeSupplier());
 
         $resp = $this->kh->preview($this->request('/api/reports/dphkh1/preview'), new Psr7Response());
-        self::assertSame(422, $resp->getStatusCode());
-        self::assertContains('opr_prijmeni', self::missingFields(self::json($resp)));
+        self::assertSame(200, $resp->getStatusCode(), (string) $resp->getBody());
+        $preview = self::json($resp);
+        self::assertSame([], $preview['missing'] ?? []);
+        self::assertStringContainsString('Příjmení oprávněné osoby', implode(' | ', $preview['warnings'] ?? []));
+
+        $resp = $this->kh->download($this->request('/api/reports/dphkh1'), new Psr7Response());
+        self::assertSame(200, $resp->getStatusCode(), (string) $resp->getBody());
     }
 
     public function testCompleteSupplierProducesXmlWithIdentityAttributes(): void

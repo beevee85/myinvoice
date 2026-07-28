@@ -32,9 +32,10 @@ final class KontrolniHlaseniAction
     ) {}
 
     /**
-     * EPO identifikace: chybějící povinná pole (kód FÚ/ÚzP, DIČ, e-mail, opr_*
-     * u PO) → 422. Bez toho vznikne validně vypadající XML, které EPO odmítne
-     * — uživatel to dřív zjistil až na Moje daně v den lhůty.
+     * EPO identifikace: chybějící XSD-povinná pole (kód FÚ, DIČ, typ poplatníka)
+     * → 422 při STAŽENÍ XML. Bez nich vznikne validně vypadající XML, které EPO
+     * odmítne — uživatel to dřív zjistil až na Moje daně v den lhůty. Náhled se
+     * neblokuje (chybějící pole vrací v `missing[]` vedle summary).
      */
     private function epoIdentityError(Response $response, array $missing): Response
     {
@@ -54,10 +55,11 @@ final class KontrolniHlaseniAction
         if ($year === null) {
             return Json::error($response, 'validation_failed', 'Neplatný rok/měsíc.', 400);
         }
+        // Náhled se NEBLOKUJE ani při chybějící identifikaci — čísla výkazu si
+        // uživatel musí umět zobrazit (i kdyby je jen opisoval do formuláře na
+        // EPO webu). Chybějící povinná pole jdou do `missing[]`, na jejich
+        // základě UI zakáže stažení XML.
         $epo = $this->epoValidator->forSupplier($supplierId, \MyInvoice\Service\Report\EpoIdentityValidator::DOC_DPHKH1);
-        if ($epo['missing'] !== []) {
-            return $this->epoIdentityError($response, $epo['missing']);
-        }
         try {
             $result = $this->builder->build($supplierId, $year, $month, $period);
         } catch (\Throwable $e) {
@@ -65,7 +67,8 @@ final class KontrolniHlaseniAction
         }
         return Json::ok($response, [
             'summary'  => $result['summary'],
-            // Doporučená pole (telefon…) jen varují — generování neblokují.
+            'missing'  => $epo['missing'],
+            // Doporučená pole (ÚzP, e-mail, opr_*, telefon…) jen varují.
             'warnings' => array_merge($result['warnings'], $epo['warnings']),
         ]);
     }

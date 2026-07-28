@@ -210,6 +210,16 @@ final class ForceEditUnlockTest extends TestCase
     {
         $id = $this->insertLockedInvoice('paid', 'FE2099-RBS', paidAt: '2099-06-20 10:00:00');
         $pdo = $this->db->pdo();
+        // Fixture nechává pdf_* a supplier/bank snapshot prázdné — bez těchto
+        // sentinelů by asserty níž prošly, i kdyby akce invalidaci PDF ani zápis
+        // snapshotů vůbec nedělala.
+        $pdo->prepare(
+            "UPDATE invoices
+                SET pdf_path = 'sup-1/2099/FE2099-RBS.pdf', pdf_generated_at = '2099-06-20 11:00:00',
+                    supplier_snapshot = '{\"company_name\":\"ZASTARALÝ DODAVATEL s.r.o.\"}',
+                    bank_snapshot = '{\"iban\":\"CZ0000000000000000000000\"}'
+              WHERE id = ?"
+        )->execute([$id]);
         $before = $pdo->query("SELECT * FROM invoices WHERE id = {$id}")->fetch(PDO::FETCH_ASSOC);
 
         $req = (new ServerRequestFactory())
@@ -229,6 +239,16 @@ final class ForceEditUnlockTest extends TestCase
         self::assertStringNotContainsString('ZASTARALÝ SNAPSHOT', (string) $after['client_snapshot'],
             'Snapshot klienta byl obnoven z live dat.');
         self::assertNotSame($before['client_snapshot'], $after['client_snapshot']);
+        // Přepisuje se i dodavatel a bankovní spojení, ne jen klient — na to
+        // upozorňuje potvrzovací dialog (review PR #245, poznámka ke snapshotům).
+        self::assertStringNotContainsString('ZASTARALÝ DODAVATEL', (string) $after['supplier_snapshot']);
+        self::assertNotSame($before['supplier_snapshot'], $after['supplier_snapshot']);
+        self::assertNotSame($before['bank_snapshot'], $after['bank_snapshot']);
+        // …a PDF se zneplatní, takže se při dalším stažení vygeneruje z NOVÝCH
+        // snapshotů — u dokladu v podaném období se může lišit od doručené verze.
+        self::assertNotNull($before['pdf_path'] ?? null, 'sanity: sentinel PDF byl nastaven');
+        self::assertNull($after['pdf_path'] ?? null, 'rebuild-snapshots invaliduje cached PDF.');
+        self::assertNull($after['pdf_generated_at'] ?? null);
 
         // Audit invoice.rebuild_snapshots existuje.
         $count = (int) $pdo->query(
