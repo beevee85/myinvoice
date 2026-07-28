@@ -48,6 +48,9 @@ final class DocumentTrashTest extends TestCase
     private int $userId = 0;
     /** @var int[] */
     private array $created = [];
+    /** Dočasně přepsaná číselná šablona supplieru (CI seed ji nemusí mít). */
+    private bool $numberFormatOverridden = false;
+    private string $originalNumberFormat = '';
 
     protected function setUp(): void
     {
@@ -114,6 +117,11 @@ final class DocumentTrashTest extends TestCase
             $pdo->prepare('DELETE FROM invoices WHERE id = ?')->execute([$id]);
         }
         $this->created = [];
+        if ($this->numberFormatOverridden) {
+            $pdo->prepare('UPDATE supplier SET invoice_number_format = ? WHERE id = ?')
+                ->execute([$this->originalNumberFormat !== '' ? $this->originalNumberFormat : null, $this->supplierId]);
+            $this->numberFormatOverridden = false;
+        }
         // Testovací counter období 209806 (rok 2098) — úklid, ať se testy dají opakovat.
         $pdo->prepare("DELETE FROM invoice_counters WHERE supplier_id = ? AND period IN ('209806', '2098', 'ALL')")
             ->execute([$this->supplierId]);
@@ -238,11 +246,16 @@ final class DocumentTrashTest extends TestCase
     public function testForceDeleteLastNumberReleasesCounterMiddleDoesNot(): void
     {
         $pdo = $this->db->pdo();
-        // Šablona řady: měsíční counter — použij výchozí supplier šablonu; nastav counter ručně.
-        // Vytvoř dva doklady renderované šablonou supplieru pro 6/2098 s countery 1 a 2.
+        // Šablona řady s měsíčním counterem. Nemá-li ji supplier nastavenou (CI seed),
+        // dočasně ji nastavíme a v tearDown vrátíme — jinak by se klíčové pokrytí
+        // číselných řad tiše přeskakovalo.
         $tpl = (string) ($pdo->query("SELECT invoice_number_format FROM supplier WHERE id = {$this->supplierId}")->fetchColumn() ?: '');
         if ($tpl === '' || !str_contains($tpl, '{C')) {
-            $this->markTestSkipped('Supplier nemá číselnou šablonu s counterem.');
+            $this->originalNumberFormat = $tpl;
+            $this->numberFormatOverridden = true;
+            $tpl = 'TR{YY}{MM}{CCC}';
+            $pdo->prepare('UPDATE supplier SET invoice_number_format = ? WHERE id = ?')
+                ->execute([$tpl, $this->supplierId]);
         }
         $date = new \DateTimeImmutable('2098-06-15');
         $vs1 = $this->varsymbol->render($tpl, $date, 1);

@@ -199,16 +199,25 @@ final class PurchaseSettlementService
             $this->repo->deleteSettlementRows($finalId, $taxDocId);
 
             if ($hadGeneratedRows) {
-                // Přestavět cíle z čerstvých řádků: zůstal-li pro sazbu odpočtový řádek
-                // jiného DDKPZ, dostane nový hrubý cíl (§ 37a); nezůstal-li žádný,
-                // override sazby zanikne a rekapitulace se dopočítá přirozeně z řádků.
-                // (Případný původní § 73 override z importu tím zanikne; jeho „vrácení"
-                // nelze rekonstruovat a přišpendlený settlementový cíl by byl horší.)
-                $touched = [];
-                foreach ($this->rowGroups($doc['items'] ?? []) as $g) {
-                    $touched[number_format($g['rate'], 2, '.', '')] = true;
+                // Symetrie k link(): hrubou hodnotu odpojeného DDKPZ vrátíme do cíle
+                // sazby zpět (stav přesně před párováním — vč. rekapitulace dle dokladu
+                // dodavatele, kterou by přirozený dopočet z řádků mohl minout o haléř).
+                $beforeByRate = $this->breakdownByRate($final['items'] ?? []);
+                $docByRate    = $this->breakdownByRate($doc['items'] ?? []);
+                $targets = [];
+                foreach ($docByRate as $key => $g) {
+                    $before = $beforeByRate[$key] ?? ['base' => 0.0, 'vat' => 0.0];
+                    $targets[$key] = [
+                        'rate'  => $g['rate'],
+                        'gross' => round(
+                            round((float) $before['base'] + (float) $before['vat'], 2)
+                            + round($g['base'] + $g['vat'], 2),
+                            2
+                        ),
+                    ];
                 }
-                $this->rebuildSettlementOverrides($finalId, $supplierId, $touched);
+                $this->applyGrossTargets($finalId, $supplierId, $final['vat_overrides'] ?? null, $targets);
+                $this->pinAllSettlementRows($finalId, $supplierId);
             }
 
             if ($started) {
@@ -238,8 +247,13 @@ final class PurchaseSettlementService
         $docNumber = (string) ($doc['vendor_invoice_number'] ?? $doc['varsymbol'] ?? ('#' . $taxDocId));
         $pricesIncludeVat = !empty($final['prices_include_vat']);
 
+        // Cíl § 37a se počítá z HODNOT DOKLADŮ, ne ze stavu řádků: nově vložené
+        // odpočtové řádky mají totály ještě nulové (dopočítá je až recompute), takže
+        // čtení „čerstvých" řádků by dalo cíl = původní částka.
+        $beforeByRate = $this->breakdownByRate($final['items'] ?? []);
+        $docByRate    = $this->breakdownByRate($doc['items'] ?? []);
+
         $rows = [];
-        $touchedRateKeys = [];
         foreach ($this->rowGroups($doc['items'] ?? []) as $g) {
             // Režim řádku musí odpovídat hlavičce konečné faktury: zdola = záporný základ,
             // shora = záporné brutto (InvoiceMath interpretuje cenu podle prices_include_vat).
@@ -254,69 +268,110 @@ final class PurchaseSettlementService
                 'vat_classification_code' => $g['vat_classification_code'],
                 'is_fixed_asset'          => $g['is_fixed_asset'],
             ];
-            $touchedRateKeys[number_format($g['rate'], 2, '.', '')] = true;
         }
         $this->repo->addSettlementRows($finalId, $taxDocId, $rows);
-        $this->rebuildSettlementOverrides($finalId, $supplierId, $touchedRateKeys);
+
+        // Hrubý rozdíl per sazba: (dosavadní hrubá hodnota sazby) − (hrubá hodnota DDKPZ).
+        $targets = [];
+        foreach ($docByRate as $key => $g) {
+            $before = $beforeByRate[$key] ?? ['base' => 0.0, 'vat' => 0.0];
+            $targets[$key] = [
+                'rate'  => $g['rate'],
+                'gross' => round(
+                    round((float) $before['base'] + (float) $before['vat'], 2)
+                    - round($g['base'] + $g['vat'], 2),
+                    2
+                ),
+            ];
+        }
+        $this->applyGrossTargets($finalId, $supplierId, $final['vat_overrides'] ?? null, $targets);
+
+        $this->pinAllSettlementRows($finalId, $supplierId);
     }
 
     /**
-     * Přestaví settlementové vat_overrides z ČERSTVÝCH řádků konečné faktury.
-     *
-     * § 37a se počítá na úrovni součtů dokladu, ne rozdílem dvou nezávisle
-     * zaokrouhlených řad: pro každou sazbu, která má aspoň jeden odpočtový řádek,
-     * je cílem HRUBÝ rozdíl (Σ total_with_vat všech řádků sazby — sčítá se exaktně,
-     * bez dalšího zaokrouhlování) a základ + daň se z něj odvodí koeficientem § 37
-     * (daň shora). Tím nikdy nevznikne kombinace kladný základ × záporná daň
-     * (obě hodnoty vycházejí z téhož čísla — u doplatku kladné, u přeplatku záporné,
-     * při plné záloze 0,00/0,00). Sazba skupiny odpovídá § 37a odst. 2: doplatek
-     * v sazbě plnění, přeplatek v sazbě zálohy (skupina JE sazba zálohy).
-     *
-     * $touchedRateKeys = sazby dotčené aktuální operací (link/unlink) — jejich staré
-     * override položky se zahodí i v případě, že po unlinků už žádný odpočtový řádek
-     * nezbyl (rekapitulace se pak dopočítá přirozeně z řádků). Overrides ostatních
-     * sazeb zůstávají nedotčené.
-     *
-     * @param array<string,bool> $touchedRateKeys
+     * Přišpendlí hodnoty VŠECH odpočtových řádků dokladu doslova dle jejich zdrojových
+     * DDKPZ. Volá se po každém recompute — ten totiž počítá řádky ze sazby a přepsal by
+     * i dřív přišpendlené odpočty (druhé párování by rozhodilo první).
      */
-    private function rebuildSettlementOverrides(int $finalId, int $supplierId, array $touchedRateKeys): void
+    private function pinAllSettlementRows(int $finalId, int $supplierId): void
     {
         $fresh = $this->repo->find($finalId, $supplierId);
         if ($fresh === null) {
             return;
         }
-        $settlementRates = []; // rateKey => rate (sazby s odpočtovým řádkem)
-        $grossByRate = [];     // rateKey => Σ total_with_vat všech řádků sazby
-        foreach ($fresh['items'] ?? [] as $it) {
-            $rate = (float) ($it['vat_rate_snapshot'] ?? 0.0);
-            $key  = number_format($rate, 2, '.', '');
-            $grossByRate[$key] = ($grossByRate[$key] ?? 0.0) + (float) ($it['total_with_vat'] ?? 0.0);
-            if (!empty($it['settlement_source_purchase_invoice_id'])) {
-                $settlementRates[$key] = $rate;
-            }
-        }
-
-        $merged = [];
-        foreach ((array) ($fresh['vat_overrides'] ?? []) as $o) {
-            if (!isset($o['rate'])) {
+        foreach ($fresh['settlement_documents'] ?? [] as $d) {
+            $src = $this->repo->find((int) $d['id'], $supplierId);
+            if ($src === null) {
                 continue;
             }
-            $key = number_format((float) $o['rate'], 2, '.', '');
-            if (isset($touchedRateKeys[$key]) || isset($settlementRates[$key])) {
-                continue; // starý cíl dotčené sazby — nahradí se, nebo zanikne
-            }
-            $merged[$key] = $o;
+            $this->repo->pinSettlementRowTotals($finalId, (int) $d['id'], array_map(
+                static fn (array $g) => ['base' => -$g['base'], 'vat' => -$g['vat'], 'rate' => $g['rate']],
+                $this->rowGroups($src['items'] ?? [])
+            ));
         }
-        foreach ($settlementRates as $key => $rate) {
-            $gross = round($grossByRate[$key] ?? 0.0, 2);
-            $vat   = round($gross * $rate / (100 + $rate), 2);
-            $base  = round($gross - $vat, 2);
-            $merged[$key] = ['rate' => $rate, 'base' => $base, 'vat' => $vat];
-        }
+    }
 
+    /**
+     * Zapíše cílovou rekapitulaci DPH pro dané sazby z HRUBÉHO rozdílu a přepočítá doklad.
+     *
+     * § 37a se počítá na úrovni součtů dokladu: základ i daň se odvodí z jednoho čísla
+     * (hrubý rozdíl) koeficientem § 37 — daň shora, základ jako zbytek. Tím nikdy
+     * nevznikne kombinace kladný základ × záporná daň (obě hodnoty mají znaménko
+     * hrubého rozdílu; při plné záloze 0,00/0,00). Sazba skupiny odpovídá § 37a
+     * odst. 2: doplatek v sazbě plnění, přeplatek v sazbě zálohy (skupina JE sazba
+     * zálohy). Overrides ostatních sazeb zůstávají nedotčené.
+     *
+     * @param mixed $existing aktuální vat_overrides (list<{rate,base?,vat?}>|null)
+     * @param array<string, array{rate:float, gross:float}> $targets
+     */
+    private function applyGrossTargets(int $finalId, int $supplierId, mixed $existing, array $targets): void
+    {
+        $merged = [];
+        foreach ((array) $existing as $o) {
+            if (isset($o['rate'])) {
+                $merged[number_format((float) $o['rate'], 2, '.', '')] = $o;
+            }
+        }
+        foreach ($targets as $key => $t) {
+            $rate  = (float) $t['rate'];
+            $gross = (float) $t['gross'];
+            $vat   = $rate > 0.0 ? round($gross * $rate / (100 + $rate), 2) : 0.0;
+            $merged[$key] = ['rate' => $rate, 'base' => round($gross - $vat, 2), 'vat' => $vat];
+        }
         $out = array_values($merged);
         $this->repo->setVatOverrides($finalId, $supplierId, $out !== [] ? $out : null);
         $this->calculator->recompute($finalId);
+    }
+
+    /**
+     * Seskupí řádky dokladu per sazba: rateKey → base/vat/rate. Vynechává skupiny
+     * s nulovým základem i daní. Slouží pro cíle vat_overrides (rekapitulace § 73
+     * i § 37a se vede per sazba).
+     *
+     * @param list<array<string,mixed>> $items
+     * @return array<string, array{base:float, vat:float, rate:float}>
+     */
+    private function breakdownByRate(array $items): array
+    {
+        $out = [];
+        foreach ($items as $it) {
+            $rate = (float) ($it['vat_rate_snapshot'] ?? 0.0);
+            $key  = number_format($rate, 2, '.', '');
+            if (!isset($out[$key])) {
+                $out[$key] = ['base' => 0.0, 'vat' => 0.0, 'rate' => $rate];
+            }
+            $out[$key]['base'] += (float) ($it['total_without_vat'] ?? 0.0);
+            $out[$key]['vat']  += (float) ($it['total_vat'] ?? 0.0);
+        }
+        foreach ($out as $key => $g) {
+            $out[$key]['base'] = round($g['base'], 2);
+            $out[$key]['vat']  = round($g['vat'], 2);
+            if ($out[$key]['base'] === 0.0 && $out[$key]['vat'] === 0.0) {
+                unset($out[$key]);
+            }
+        }
+        return $out;
     }
 
     /**

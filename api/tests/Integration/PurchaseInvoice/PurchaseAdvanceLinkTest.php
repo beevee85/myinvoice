@@ -211,13 +211,13 @@ final class PurchaseAdvanceLinkTest extends TestCase
     }
 
     /**
-     * Detail klienta (GetClientAction) — agregace nákladů `costs_by_year` NESMÍ
-     * dvojitě započítat spárované/zaplacené zálohy (to byl bug v sumacích i grafech
-     * u dodavatele). Accrual sémantika shodná s CRM (migrace 0065):
-     *   - řádná faktura (received)               → náklad
-     *   - spárovaná záloha                       → vyloučena (nese ji finální faktura)
-     *   - zaplacená nespárovaná záloha           → vyloučena (prepayment)
-     *   - nezaplacená nespárovaná záloha         → započítána (očekávaný náklad)
+     * Detail klienta (GetClientAction) — agregace nákladů `costs_by_year`.
+     * Od migrace 0906 je sémantika jednotná napříč nákladovými pohledy: zálohová
+     * faktura (advance) NENÍ daňový doklad ani nositel nákladu, takže se vylučuje
+     * VŽDY (bez ohledu na zaplacení/párování) — náklad nese daňový doklad k přijaté
+     * záloze (tax_document) nebo konečná faktura. Dřív se zaplacená nespárovaná
+     * záloha počítala (cash pohled), což se po zavedení DDKPZ dublovalo. Cash
+     * princip daňové evidence řeší samostatně TaxProfileRepository::monthExpenses.
      */
     public function testClientDetailCostsExcludePairedAndPaidAdvance(): void
     {
@@ -234,10 +234,10 @@ final class PurchaseAdvanceLinkTest extends TestCase
             static fn ($r) => (int) $r['year'] === self::YEAR && $r['currency'] === 'CZK'
         ));
         self::assertCount(1, $czk, 'jeden CZK řádek nákladů pro rok 2099');
-        self::assertEqualsWithDelta(23000.0, (float) $czk[0]['total'], 0.01,
-            'náklady = řádná faktura 20000 + nezaplacená nespárovaná záloha 3000; '
-            . 'spárovaná (5000) a zaplacená (7000) záloha musí být vyloučené');
-        self::assertSame(2, (int) $czk[0]['count'], 'do počtu jdou jen 2 doklady (faktura + otevřená záloha)');
+        self::assertEqualsWithDelta(20000.0, (float) $czk[0]['total'], 0.01,
+            'náklady = jen řádná faktura 20000; všechny zálohy (spárovaná 5000, '
+            . 'zaplacená 7000 i otevřená 3000) jsou vyloučené');
+        self::assertSame(1, (int) $czk[0]['count'], 'do počtu jde jen faktura');
     }
 
     /**

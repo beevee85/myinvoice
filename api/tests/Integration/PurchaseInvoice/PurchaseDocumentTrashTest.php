@@ -113,13 +113,15 @@ final class PurchaseDocumentTrashTest extends TestCase
         $pdo = $this->db->pdo();
         $snapshot = json_encode(['company_name' => 'Koš test dodavatel s.r.o.', 'ic' => '87654321'], JSON_UNESCAPED_UNICODE);
         $pdo->prepare(
+            // amount_to_pay je STORED generated (total_with_vat − advance_paid_amount) — nevkládá se.
             "INSERT INTO purchase_invoices
                 (supplier_id, vendor_id, varsymbol, vendor_invoice_number, document_kind, issue_date, tax_date, due_date,
-                 currency_id, status, total_without_vat, total_vat, total_with_vat, amount_to_pay, vendor_snapshot, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 100, 21, 121, 121, ?, ?)"
+                 received_at, currency_id, status, total_without_vat, total_vat, total_with_vat,
+                 vendor_snapshot, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 100, 21, 121, ?, ?)"
         )->execute([
             $this->supplierId, $this->vendorId, $varsymbol, 'VD-' . $varsymbol, $kind,
-            $taxDate, $taxDate, $taxDate, $this->currencyId, $status, $snapshot, $this->userId,
+            $taxDate, $taxDate, $taxDate, $taxDate, $this->currencyId, $status, $snapshot, $this->userId,
         ]);
         $id = (int) $pdo->lastInsertId();
         $this->created[] = $id;

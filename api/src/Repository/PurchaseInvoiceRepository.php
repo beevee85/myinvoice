@@ -418,6 +418,76 @@ final class PurchaseInvoiceRepository
         ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
+    /**
+     * Přišpendlí odpočtovým řádkům § 37a hodnoty DOSLOVA dle zdrojového DDKPZ.
+     *
+     * Kalkulátor počítá daň řádku ze sazby (16 528,93 × 21 % = 3 471,08), zatímco
+     * doklad k záloze nese daň spočtenou shora z úplaty (20 000 × 21/121 = 3 471,07).
+     * Odpočet musí sedět na doklad dodavatele (§ 37a pracuje se skutečně přiznanými
+     * hodnotami), proto se řádku hodnoty nastaví napevno a vzniklý haléř se přesune
+     * na nejsilnější NEodpočtový řádek téže sazby — součet za sazbu (a tím i celý
+     * doklad, přiznání a KH) zůstává nedotčený. Bez protiřádku se řádek nepřišpendlí
+     * (radši drobná odchylka řádku než rozbitý součet dokladu).
+     *
+     * $targets = hodnoty v pořadí vložení (addSettlementRows), už se záporným znaménkem.
+     *
+     * @param list<array{base:float, vat:float, rate:float}> $targets
+     */
+    public function pinSettlementRowTotals(int $finalId, int $sourceTaxDocId, array $targets): void
+    {
+        if ($targets === []) return;
+        $pdo = $this->db->pdo();
+        $rowsStmt = $pdo->prepare(
+            'SELECT id, vat_rate_snapshot, total_without_vat, total_vat
+               FROM purchase_invoice_items
+              WHERE purchase_invoice_id = ? AND settlement_source_purchase_invoice_id = ?
+              ORDER BY order_index, id'
+        );
+        $rowsStmt->execute([$finalId, $sourceTaxDocId]);
+        $rows = $rowsStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if (count($rows) !== count($targets)) {
+            return; // neočekávaný stav — raději nesahat
+        }
+
+        $update = $pdo->prepare(
+            'UPDATE purchase_invoice_items
+                SET total_without_vat = ?, total_vat = ?, total_with_vat = ?
+              WHERE id = ?'
+        );
+        $compStmt = $pdo->prepare(
+            'SELECT id, total_without_vat, total_vat
+               FROM purchase_invoice_items
+              WHERE purchase_invoice_id = ?
+                AND settlement_source_purchase_invoice_id IS NULL
+                AND ABS(vat_rate_snapshot - ?) < 0.005
+              ORDER BY ABS(total_without_vat) DESC
+              LIMIT 1'
+        );
+
+        foreach (array_values($targets) as $i => $t) {
+            $row = $rows[$i];
+            $deltaBase = round((float) $t['base'] - (float) $row['total_without_vat'], 2);
+            $deltaVat  = round((float) $t['vat'] - (float) $row['total_vat'], 2);
+            if ($deltaBase === 0.0 && $deltaVat === 0.0) {
+                continue;
+            }
+            $compStmt->execute([$finalId, (float) $t['rate']]);
+            $comp = $compStmt->fetch(PDO::FETCH_ASSOC);
+            if ($comp === false) {
+                continue; // není kam haléř přesunout — součet dokladu má přednost
+            }
+            $update->execute([
+                round((float) $t['base'], 2),
+                round((float) $t['vat'], 2),
+                round((float) $t['base'] + (float) $t['vat'], 2),
+                (int) $row['id'],
+            ]);
+            $compBase = round((float) $comp['total_without_vat'] - $deltaBase, 2);
+            $compVat  = round((float) $comp['total_vat'] - $deltaVat, 2);
+            $update->execute([$compBase, $compVat, round($compBase + $compVat, 2), (int) $comp['id']]);
+        }
+    }
+
     /** Smaže auto-generované odpočtové řádky § 37a daného zdroje z konečné faktury. */
     public function deleteSettlementRows(int $finalId, int $sourceTaxDocId): void
     {
