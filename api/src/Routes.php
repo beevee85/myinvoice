@@ -339,6 +339,11 @@ final class Routes
         $app->get    ('/api/invoices/{id:[0-9]+}/activity', InvoiceActivityAction::class);
         $app->put    ('/api/invoices/{id:[0-9]+}',  UpdateInvoiceAction::class);
         $app->delete ('/api/invoices/{id:[0-9]+}',  DeleteInvoiceAction::class);
+        // Koš dokladů (0905): obnova / trvalé smazání (admin) / preflight blokací / vysypání koše (admin)
+        $app->post   ('/api/invoices/{id:[0-9]+}/restore', \MyInvoice\Action\Invoice\RestoreInvoiceAction::class);
+        $app->delete ('/api/invoices/{id:[0-9]+}/force',   \MyInvoice\Action\Invoice\ForceDeleteInvoiceAction::class);
+        $app->post   ('/api/invoices/trash-preflight',     \MyInvoice\Action\Invoice\TrashPreflightAction::class);
+        $app->post   ('/api/invoices/trash/empty',         \MyInvoice\Action\Invoice\EmptyInvoiceTrashAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/issue',     IssueInvoiceAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/mark-paid', MarkPaidAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/unmark-paid', UnmarkPaidAction::class);
@@ -388,6 +393,11 @@ final class Routes
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}',                GetPurchaseInvoiceAction::class);
         $app->put    ('/api/purchase-invoices/{id:[0-9]+}',                UpdatePurchaseInvoiceAction::class);
         $app->delete ('/api/purchase-invoices/{id:[0-9]+}',                DeletePurchaseInvoiceAction::class);
+        // Koš dokladů (0905): obnova / trvalé smazání (admin) / preflight blokací / vysypání koše (admin)
+        $app->post   ('/api/purchase-invoices/{id:[0-9]+}/restore', \MyInvoice\Action\PurchaseInvoice\RestorePurchaseInvoiceAction::class);
+        $app->delete ('/api/purchase-invoices/{id:[0-9]+}/force',   \MyInvoice\Action\PurchaseInvoice\ForceDeletePurchaseInvoiceAction::class);
+        $app->post   ('/api/purchase-invoices/trash-preflight',     \MyInvoice\Action\PurchaseInvoice\PurchaseTrashPreflightAction::class);
+        $app->post   ('/api/purchase-invoices/trash/empty',         \MyInvoice\Action\PurchaseInvoice\EmptyPurchaseInvoiceTrashAction::class);
         $app->put    ('/api/purchase-invoices/{id:[0-9]+}/items',          SetPurchaseInvoiceItemsAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/exchange-rate', SetPurchaseInvoiceExchangeRateAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/transition',     TransitionPurchaseInvoiceStatusAction::class);

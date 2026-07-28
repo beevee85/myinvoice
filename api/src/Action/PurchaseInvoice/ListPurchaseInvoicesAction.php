@@ -42,6 +42,7 @@ final class ListPurchaseInvoicesAction
             'unpaid_only'   => !empty($filter['unpaid_only']),
             'overdue'       => !empty($filter['overdue']),
             'needs_review'  => !empty($filter['needs_review']),
+            'trash'         => !empty($filter['trash']),
             'payment_ordered' => $filter['payment_ordered'] ?? null,
             'import_batch_id' => $filter['import_batch_id'] ?? null,
             'supplier_id'   => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),

@@ -36,6 +36,7 @@ final class ListInvoicesAction
             'currency'    => $filter['currency']    ?? null,
             'unpaid_only' => !empty($filter['unpaid_only']),
             'overdue'     => !empty($filter['overdue']),
+            'trash'       => !empty($filter['trash']),
             'supplier_id' => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),
         ];
 
