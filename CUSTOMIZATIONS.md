@@ -44,7 +44,14 @@ Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná
 
 ## 2026-07-28 — KOŠ + TVRDÉ MAZÁNÍ DOKLADŮ (vydané i přijaté faktury) — větev feature/document-trash
 
-**Charakter: FORK FEATURE** (vzor iDoklad/Vyfakturuj; kandidát na upstream issue až po ověření v provozu). Migrace **0905**.
+**Charakter: FEATURE — KANDIDÁT PRO UPSTREAM** (vzor iDoklad/Vyfakturuj; uživatel 2026-07-28 potvrdil, že funkci chce nabídnout autorovi do oficiální větve — stejným postupem jako `pr/vat-report-fixes`, tj. issue + PR z forku). Migrace **0905**.
+
+**Před odesláním upstreamu vyřešit** (funkce vznikla nad forkem, upstream tyhle věci nemá):
+1. **Odstranit fork-only vazby z `DocumentTrashPolicy`** — blokace „vyúčtování zálohy" se opírá o DDKPZ sloupce z migrace 0904 (`settled_by_purchase_invoice_id`, `purchase_invoice_items.settlement_source_purchase_invoice_id`), které v upstreamu neexistují. Buď detekovat sloupce za běhu (vzor `supportsInternalNote`), nebo tuhle část blokace do PR nedávat.
+2. **BREAKING API**: `DELETE /api/v1/(purchase-)invoices/{id}` nově vyžaduje `{reason}`. Pro upstream navrhnout zpětně kompatibilní variantu (bez `reason` = dosavadní chování draft-only), jinak to autor odmítne — mění to veřejný kontrakt.
+3. **Migrace přečíslovat** z fork rozsahu 0905 do upstream řady (dnes 0147+) a ověřit, že nekoliduje.
+4. Dle `CONTRIBUTING.md`: PR musí nést i `openapi.yaml` (hotovo), kapitolu manuálu (hotovo — 9.7 + 17.9) a **`php tools/generateManualHtml.php`**, a projít `phpunit` + `pnpm type-check` + `build` (vše zelené).
+5. Zvážit, jestli do PR přidat i sweep `deleted_at IS NULL` v celém rozsahu (~150 podmínek) — je to velká plocha; alternativa je nabídnout ho jako druhý, menší PR po přijetí prvního.
 
 Tři oddělené operace: **storno/dobropis** (beze změny, primární cesta) → **Do koše** (soft delete, vratné, admin i účetní, povinný důvod ≥ 10 znaků) → **Smazat trvale** (jen admin, jen z koše, opsání čísla dokladu, snapshot). Dřívější mazání (draft-only / force=1) je nahrazeno.
 
