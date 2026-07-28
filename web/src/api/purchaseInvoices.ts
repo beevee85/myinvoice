@@ -1,7 +1,7 @@
 import { api } from './client'
 
 export type PurchaseInvoiceStatus = 'draft' | 'received' | 'booked' | 'paid' | 'cancelled'
-export type PurchaseDocumentKind = 'invoice' | 'receipt' | 'credit_note' | 'advance'
+export type PurchaseDocumentKind = 'invoice' | 'receipt' | 'credit_note' | 'advance' | 'tax_document'
 export type ExchangeRateSource = 'cnb' | 'manual' | 'idoklad' | 'fakturoid'
 /** Provenience platebního účtu pro QR platbu (viz migrace 0107). */
 export type PaymentAccountSource = 'isdoc' | 'ai' | 'ai_reextract' | 'qr_image' | 'manual'
@@ -43,6 +43,8 @@ export interface PurchaseInvoiceItem {
   total_with_vat?: number
   order_index: number
   vat_classification_code?: string | null
+  /** Auto-generovaný záporný odpočtový řádek § 37a — FK na zdrojový DDKPZ (tax_document). */
+  settlement_source_purchase_invoice_id?: number | null
   vat_code?: string
   vat_label_cs?: string
   vat_label_en?: string
@@ -199,6 +201,21 @@ export interface PurchaseInvoice {
   has_advance_candidates?: boolean
   /** Záloha bez vyúčtování: existuje nepropojená finální faktura téhož dodavatele? */
   has_settlement_candidates?: boolean
+  /** DDKPZ (tax_document): konečná faktura, která ho zúčtovává (§ 37a). */
+  settled_by_purchase_invoice_id?: number | null
+  settles_final?: PurchaseInvoiceBrief | null
+  /** Konečná faktura: napárované daňové doklady k záloze (§ 37a, N:1). */
+  settlement_documents?: PurchaseInvoiceBrief[]
+  /** Konečná faktura: odpočet záloh nesedí na napárované DDKPZ (nebo úplně chybí). */
+  settlement_deduction_mismatch?: boolean
+  /** Konečná faktura: existuje nenapárovaný DDKPZ téhož dodavatele? */
+  has_settlement_doc_candidates?: boolean
+  /** DDKPZ bez vazby: existuje konečná faktura téhož dodavatele? */
+  has_final_candidates?: boolean
+  /** DDKPZ vystaven > 15 dnů po dni přijetí úplaty (§ 28 odst. 8 ZDPH). */
+  tax_document_late?: boolean
+  /** Zaplacená záloha, ke které po 15 dnech neexistuje DDKPZ ani konečná faktura. */
+  advance_tax_document_missing?: boolean
   /**
    * Diagnostický popis problému z AI extrakce (např. AI sečetla mezisoučty
    * jako další položky → suma řádků se výrazně liší od AI-vráceného totalu).
@@ -476,6 +493,24 @@ export const purchaseInvoicesApi = {
     api.delete<PurchaseInvoice>(`/purchase-invoices/${id}/link-advance`).then(r => r.data),
   dismissAdvanceSuggestion: (id: number) =>
     api.delete<PurchaseInvoice>(`/purchase-invoices/${id}/advance-suggestion`).then(r => r.data),
+
+  // Daňový doklad k přijaté záloze (tax_document) ↔ konečná faktura (§ 37a)
+  settlementDocCandidates: (id: number) =>
+    api.get<{ candidates: PurchaseInvoiceBrief[] }>(`/purchase-invoices/${id}/settlement-doc-candidates`)
+      .then(r => r.data.candidates),
+  // Z detailu DDKPZ: kandidáti konečných faktur (zrcadlí validace link-settlement-doc)
+  finalCandidates: (id: number) =>
+    api.get<{ candidates: PurchaseInvoiceBrief[] }>(`/purchase-invoices/${id}/final-candidates`)
+      .then(r => r.data.candidates),
+  linkSettlementDoc: (id: number, taxDocumentId: number, applyDeduction = true) =>
+    api.post<PurchaseInvoice>(`/purchase-invoices/${id}/link-settlement-doc`, {
+      tax_document_id: taxDocumentId,
+      apply_deduction: applyDeduction,
+    }).then(r => r.data),
+  unlinkSettlementDoc: (id: number, taxDocumentId: number) =>
+    api.delete<PurchaseInvoice>(`/purchase-invoices/${id}/link-settlement-doc`, {
+      params: { tax_document_id: taxDocumentId },
+    }).then(r => r.data),
 
   uploadPdf: (id: number, file: File) => {
     const fd = new FormData()

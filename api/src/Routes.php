@@ -82,6 +82,10 @@ use MyInvoice\Action\Invoice\BulkReissueAction;
 use MyInvoice\Action\Invoice\CloneInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\AdvanceCandidatesAction;
 use MyInvoice\Action\PurchaseInvoice\SettlementCandidatesAction;
+use MyInvoice\Action\PurchaseInvoice\SettlementDocCandidatesAction;
+use MyInvoice\Action\PurchaseInvoice\FinalCandidatesAction as PurchaseFinalCandidatesAction;
+use MyInvoice\Action\PurchaseInvoice\LinkSettlementDocPurchaseInvoiceAction;
+use MyInvoice\Action\PurchaseInvoice\UnlinkSettlementDocPurchaseInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\CreatePurchaseInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\DeletePurchaseInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\DeletePurchaseInvoicePdfAction;
@@ -399,6 +403,11 @@ final class Routes
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/link-advance',     LinkAdvancePurchaseInvoiceAction::class);
         $app->delete ('/api/purchase-invoices/{id:[0-9]+}/link-advance',     UnlinkAdvancePurchaseInvoiceAction::class);
         $app->delete ('/api/purchase-invoices/{id:[0-9]+}/advance-suggestion', DismissAdvanceSuggestionAction::class);
+        // Daňový doklad k přijaté záloze (tax_document) ↔ konečná faktura (§ 37a)
+        $app->get    ('/api/purchase-invoices/{id:[0-9]+}/settlement-doc-candidates', SettlementDocCandidatesAction::class);
+        $app->get    ('/api/purchase-invoices/{id:[0-9]+}/final-candidates', PurchaseFinalCandidatesAction::class);
+        $app->post   ('/api/purchase-invoices/{id:[0-9]+}/link-settlement-doc', LinkSettlementDocPurchaseInvoiceAction::class);
+        $app->delete ('/api/purchase-invoices/{id:[0-9]+}/link-settlement-doc', UnlinkSettlementDocPurchaseInvoiceAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/pdf',            UploadPurchaseInvoicePdfAction::class);
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}/pdf',            DownloadPurchaseInvoicePdfAction::class);
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}/source',         DownloadPurchaseInvoiceSourceAction::class);

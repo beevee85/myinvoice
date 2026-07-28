@@ -11,6 +11,7 @@ import {
   type PurchaseDocumentKind,
   type ImportBatch,
 } from '@/api/purchaseInvoices'
+import { PURCHASE_DOCUMENT_KINDS, purchaseDocumentKindLabelKey } from '@/constants/purchaseDocumentKinds'
 import { formatMoney, formatDate, formatMonth, taxDateClass } from '@/composables/useFormat'
 import { useHotkey } from '@/composables/useHotkey'
 import { useRowLink } from '@/composables/useRowLink'
@@ -378,7 +379,8 @@ function invOf(id: number): PurchaseInvoiceListItem | null {
 }
 const kindEditableSelected = computed(() => selectedIds.value.filter(id => {
   const inv = invOf(id)
-  return inv && inv.status !== 'cancelled' && inv.document_kind !== 'advance'
+  // Stornované nelze měnit; advance/tax_document s vazbami odmítne backend per doklad.
+  return inv && inv.status !== 'cancelled'
 }))
 const bulkKindTarget = ref<PurchaseDocumentKind | ''>('')
 async function bulkSetKind() {
@@ -450,9 +452,7 @@ async function bulkSetKind() {
           :disabled="bulkBusy"
           class="cursor-pointer h-9 px-2 border border-primary-500 text-primary-700 bg-surface hover:bg-primary-50 disabled:opacity-50 text-sm font-medium rounded-md">
           <option value="">{{ t('purchase_invoice.bulk.set_kind', { n: kindEditableSelected.length }) }}</option>
-          <option value="invoice">{{ t('purchase_invoice.document_kind.invoice') }}</option>
-          <option value="receipt">{{ t('purchase_invoice.document_kind.receipt') }}</option>
-          <option value="credit_note">{{ t('purchase_invoice.document_kind.credit_note') }}</option>
+          <option v-for="k in PURCHASE_DOCUMENT_KINDS" :key="k" :value="k">{{ t(purchaseDocumentKindLabelKey(k)) }}</option>
         </select>
         <button v-if="(draftsSelected.length > 0) && auth.canWrite"
           @click="bulkDelete"
@@ -492,10 +492,7 @@ async function bulkSetKind() {
         </select>
         <select v-model="kindFilter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option value="">{{ t('purchase_invoice.filters.all_kinds') }}</option>
-          <option value="invoice">{{ t('purchase_invoice.document_kind.invoice') }}</option>
-          <option value="receipt">{{ t('purchase_invoice.document_kind.receipt') }}</option>
-          <option value="credit_note">{{ t('purchase_invoice.document_kind.credit_note') }}</option>
-          <option value="advance">{{ t('purchase_invoice.document_kind.advance') }}</option>
+          <option v-for="k in PURCHASE_DOCUMENT_KINDS" :key="k" :value="k">{{ t(purchaseDocumentKindLabelKey(k)) }}</option>
         </select>
         <div class="min-w-48 flex-1 max-w-xs">
           <SearchableSelect

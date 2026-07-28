@@ -42,12 +42,17 @@ final class ClientVatStatusAction
         // Když registr nerozhodl (null), vrať dosud uložený příznak (beze změny).
         $isVatPayer = $res['is_vat_payer'] ?? (bool) ($client['is_vat_payer'] ?? true);
 
+        // resolveAndPersist může doplnit chybějící DIČ z registru (člen DPH skupiny
+        // → DIČ skupiny CZ699*) — vrať aktuální stav po zápisu.
+        $fresh = $this->repo->find($id);
+        $freshDic = $fresh !== null ? ($fresh['dic'] ?? null) : $dic;
+
         return Json::ok($response, [
             'id'           => $id,
             'is_vat_payer' => $isVatPayer,
             'source'       => $res['source'],   // 'ares' | 'vies' | 'crpdph' | 'unknown'
             'ic'           => $ic,
-            'dic'          => $dic,
+            'dic'          => $freshDic !== null && $freshDic !== '' ? (string) $freshDic : null,
         ]);
     }
 }

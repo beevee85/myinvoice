@@ -142,6 +142,77 @@ async function dismissAdvanceSuggestion() {
   }
 }
 
+// ── Párování DDKPZ (tax_document) ↔ konečná faktura (§ 37a) ──
+// 'doc' = jsem na konečné faktuře, vybírám daňový doklad k záloze;
+// 'final' = jsem na DDKPZ, vybírám konečnou fakturu. Vazba se ukládá na DDKPZ
+// (settled_by_purchase_invoice_id); odpočtové řádky vznikají na konečné faktuře.
+const settlementModalOpen = ref(false)
+const settlementPairMode = ref<'doc' | 'final'>('doc')
+const settlementCandidatesList = ref<PurchaseInvoiceBrief[]>([])
+const loadingSettlementCandidates = ref(false)
+const linkingSettlement = ref(false)
+const applySettlementDeduction = ref(true)
+
+async function openSettlementModal(mode: 'doc' | 'final') {
+  if (!invoice.value) return
+  settlementPairMode.value = mode
+  applySettlementDeduction.value = true
+  settlementModalOpen.value = true
+  loadingSettlementCandidates.value = true
+  try {
+    settlementCandidatesList.value = mode === 'doc'
+      ? await purchaseInvoicesApi.settlementDocCandidates(invoice.value.id)
+      : await purchaseInvoicesApi.finalCandidates(invoice.value.id)
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    loadingSettlementCandidates.value = false
+  }
+}
+
+async function pickSettlementCandidate(candId: number) {
+  if (!invoice.value || linkingSettlement.value) return
+  linkingSettlement.value = true
+  try {
+    if (settlementPairMode.value === 'doc') {
+      // Jsem na konečné faktuře, candId = DDKPZ.
+      invoice.value = await purchaseInvoicesApi.linkSettlementDoc(invoice.value.id, candId, applySettlementDeduction.value)
+    } else {
+      // Jsem na DDKPZ, candId = konečná faktura → vazba na ni, pak reload.
+      await purchaseInvoicesApi.linkSettlementDoc(candId, invoice.value.id, applySettlementDeduction.value)
+      await load()
+    }
+    settlementModalOpen.value = false
+    toast.success(t('purchase_invoice.settlement_doc.linked'))
+    purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    linkingSettlement.value = false
+  }
+}
+
+// finalId/taxDocId — z konečné faktury předávám id DDKPZ, z DDKPZ id konečné faktury.
+async function unlinkSettlementDoc(finalId: number, taxDocId: number) {
+  if (!invoice.value || linkingSettlement.value) return
+  if (!confirm(t('purchase_invoice.settlement_doc.unlink_confirm'))) return
+  linkingSettlement.value = true
+  try {
+    if (invoice.value.id === finalId) {
+      invoice.value = await purchaseInvoicesApi.unlinkSettlementDoc(finalId, taxDocId)
+    } else {
+      await purchaseInvoicesApi.unlinkSettlementDoc(finalId, taxDocId)
+      await load()
+    }
+    toast.success(t('purchase_invoice.settlement_doc.unlinked'))
+    purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    linkingSettlement.value = false
+  }
+}
+
 // Activity log — paralel s /invoices/{id}/activity
 const activity = ref<Array<{
   id: number
@@ -599,6 +670,32 @@ const purchaseActions = computed<ActionItem[]>(() => {
       </button>
     </div>
 
+    <!-- DDKPZ zúčtovaný konečnou fakturou (§ 37a) -->
+    <div v-if="invoice.settles_final"
+      class="flex items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm">
+      <span class="text-primary-700 min-w-0">
+        {{ t('purchase_invoice.settlement_doc.settled_by_final') }}
+        <RouterLink :to="`/purchase-invoices/${invoice.settles_final.id}`" class="font-mono font-medium hover:underline">
+          {{ invoice.settles_final.varsymbol || invoice.settles_final.vendor_invoice_number || ('#' + invoice.settles_final.id) }}
+        </RouterLink>
+      </span>
+      <button v-if="auth.canWrite" type="button" @click="unlinkSettlementDoc(invoice.settles_final.id, invoice.id)" :disabled="linkingSettlement"
+        class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
+        {{ t('purchase_invoice.settlement_doc.unlink') }}
+      </button>
+    </div>
+
+    <!-- Hlídání § 37a a 15denní lhůty (§ 28 odst. 8 ZDPH) -->
+    <div v-if="invoice.settlement_deduction_mismatch" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md text-sm text-warning-700">
+      {{ t('purchase_invoice.settlement_doc.mismatch_warning') }}
+    </div>
+    <div v-if="invoice.tax_document_late" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md text-sm text-warning-700">
+      {{ t('purchase_invoice.settlement_doc.late_warning') }}
+    </div>
+    <div v-if="invoice.advance_tax_document_missing" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md text-sm text-warning-700">
+      {{ t('purchase_invoice.settlement_doc.advance_missing_warning') }}
+    </div>
+
     <!-- ═══ Datumy & metadata (3 sloupce ala vystavená InvoiceDetail) ═══ -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
       <!-- Datumy -->
@@ -815,6 +912,51 @@ const purchaseActions = computed<ActionItem[]>(() => {
       </template>
     </div>
 
+    <!-- ═══ Vyúčtování daňových dokladů k záloze (§ 37a) ═══ -->
+    <!-- DDKPZ bez zúčtování → nabídka spárovat s konečnou fakturou -->
+    <div v-if="invoice.document_kind === 'tax_document' && !invoice.settles_final"
+      class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
+      <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.settlement_doc.title') }}</h3>
+      <div class="flex items-center justify-between gap-3">
+        <p class="text-sm text-neutral-500">{{ t('purchase_invoice.settlement_doc.none_final') }}</p>
+        <button v-if="auth.canWrite && invoice.has_final_candidates" type="button" @click="openSettlementModal('final')"
+          class="cursor-pointer text-sm px-3 h-9 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md shrink-0">
+          {{ t('purchase_invoice.settlement_doc.pair_final') }}
+        </button>
+      </div>
+    </div>
+    <!-- Konečná faktura → seznam zúčtovaných DDKPZ + párování dalších -->
+    <div v-else-if="invoice.document_kind !== 'advance' && invoice.document_kind !== 'tax_document'
+        && ((invoice.settlement_documents?.length ?? 0) > 0 || invoice.has_settlement_doc_candidates)"
+      class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
+      <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.settlement_doc.title') }}</h3>
+      <ul v-if="(invoice.settlement_documents?.length ?? 0) > 0" class="space-y-2 mb-3">
+        <li v-for="doc in invoice.settlement_documents" :key="doc.id"
+          class="flex items-center justify-between gap-3 px-3 py-2 border border-neutral-200 rounded-md text-sm">
+          <span class="min-w-0">
+            <RouterLink :to="`/purchase-invoices/${doc.id}`" class="font-mono font-medium hover:underline">
+              {{ doc.vendor_invoice_number || doc.varsymbol || ('#' + doc.id) }}
+            </RouterLink>
+            <span class="text-neutral-500 font-mono ml-2">(−{{ formatMoney(doc.total_with_vat, doc.currency) }})</span>
+          </span>
+          <button v-if="auth.canWrite" type="button" @click="unlinkSettlementDoc(invoice.id, doc.id)" :disabled="linkingSettlement"
+            class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
+            {{ t('purchase_invoice.settlement_doc.unlink') }}
+          </button>
+        </li>
+      </ul>
+      <div class="flex items-center justify-between gap-3">
+        <p v-if="(invoice.settlement_documents?.length ?? 0) === 0" class="text-sm text-neutral-500">
+          {{ t('purchase_invoice.settlement_doc.none') }}
+        </p>
+        <span v-else></span>
+        <button v-if="auth.canWrite && invoice.has_settlement_doc_candidates" type="button" @click="openSettlementModal('doc')"
+          class="cursor-pointer text-sm px-3 h-9 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md shrink-0">
+          {{ t('purchase_invoice.settlement_doc.pair') }}
+        </button>
+      </div>
+    </div>
+
     <!-- Modal výběru zálohy k propojení -->
     <div v-if="advanceModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="advanceModalOpen = false">
       <div class="bg-surface rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
@@ -830,6 +972,38 @@ const purchaseActions = computed<ActionItem[]>(() => {
               <button type="button" @click="pickCandidate(cand.id)" :disabled="linkingAdvance"
                 class="cursor-pointer w-full text-left px-3 py-2 border border-neutral-200 rounded-md hover:border-primary-400 hover:bg-primary-50 disabled:opacity-50 flex justify-between items-center gap-3">
                 <span class="font-mono text-sm">{{ cand.varsymbol || cand.vendor_invoice_number || ('#' + cand.id) }}</span>
+                <span class="text-sm text-neutral-500">{{ cand.issue_date ? formatDate(cand.issue_date) : '' }} · {{ formatMoney(cand.total_with_vat, cand.currency) }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal výběru DDKPZ / konečné faktury (§ 37a) -->
+    <div v-if="settlementModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="settlementModalOpen = false">
+      <div class="bg-surface rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
+        <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between">
+          <h3 class="font-medium">{{ settlementPairMode === 'doc' ? t('purchase_invoice.settlement_doc.modal_title') : t('purchase_invoice.settlement_doc.modal_title_final') }}</h3>
+          <button type="button" @click="settlementModalOpen = false" class="cursor-pointer text-neutral-400 hover:text-neutral-600">✕</button>
+        </div>
+        <div class="p-4 overflow-y-auto space-y-3">
+          <label class="flex items-start gap-2 text-sm text-neutral-700">
+            <input type="checkbox" v-model="applySettlementDeduction" class="mt-0.5" />
+            <span>
+              {{ t('purchase_invoice.settlement_doc.apply_deduction') }}
+              <span class="block text-xs text-neutral-500">{{ t('purchase_invoice.settlement_doc.apply_deduction_hint') }}</span>
+            </span>
+          </label>
+          <div v-if="loadingSettlementCandidates" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
+          <div v-else-if="settlementCandidatesList.length === 0" class="text-sm text-neutral-500">
+            {{ settlementPairMode === 'doc' ? t('purchase_invoice.settlement_doc.no_candidates') : t('purchase_invoice.settlement_doc.no_candidates_final') }}
+          </div>
+          <ul v-else class="space-y-2">
+            <li v-for="cand in settlementCandidatesList" :key="cand.id">
+              <button type="button" @click="pickSettlementCandidate(cand.id)" :disabled="linkingSettlement"
+                class="cursor-pointer w-full text-left px-3 py-2 border border-neutral-200 rounded-md hover:border-primary-400 hover:bg-primary-50 disabled:opacity-50 flex justify-between items-center gap-3">
+                <span class="font-mono text-sm">{{ cand.vendor_invoice_number || cand.varsymbol || ('#' + cand.id) }}</span>
                 <span class="text-sm text-neutral-500">{{ cand.issue_date ? formatDate(cand.issue_date) : '' }} · {{ formatMoney(cand.total_with_vat, cand.currency) }}</span>
               </button>
             </li>

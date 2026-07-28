@@ -189,7 +189,7 @@ JSON schema:
   },
   "vendor_invoice_number": string|null,
   "varsymbol": string|null,
-  "document_kind": "invoice"|"credit_note"|"advance"|"receipt",
+  "document_kind": "invoice"|"credit_note"|"advance"|"receipt"|"tax_document",
   "issue_date": "YYYY-MM-DD",
   "tax_date": "YYYY-MM-DD"|null,
   "due_date": "YYYY-MM-DD"|null,
@@ -240,10 +240,20 @@ DŮLEŽITÉ k poli `document_kind`:
   "Opravná faktura", "Credit note", "Storno faktura", "Storno doklad",
   nebo doklad jinak signalizuje vrácení / opravu předchozí faktury
   (např. záporné částky, odkaz na opravovanou fakturu) → vrať `"credit_note"`.
+- Pokud doklad je "Daňový doklad k přijaté záloze", "Daňový doklad k přijaté
+  platbě", "Daňový doklad k záloze", "Daňový doklad o přijetí platby", "Daňový
+  zálohový list", "Tax document for received payment" → vrať `"tax_document"`.
+  Poznávací znaky: v hlavičce slovo „daňový doklad" SPOLU s odkazem na zálohu /
+  přijatou platbu, uvedený den přijetí platby (ten vrať jako `tax_date`),
+  rozpis DPH (základ + daň) a obvykle NULOVÁ částka „k úhradě" (platba už
+  proběhla). Číslo zálohové faktury, ke které se vztahuje, vrať v poli
+  `advance_reference`. POZOR: NEplést se zálohovou fakturou — ta rozpis DPH
+  nemá a teprve vyzývá k platbě.
 - Pokud doklad je "Zálohová faktura", "Proforma", "Proforma faktura",
-  "Zálohový list", "Advance invoice" → vrať `"advance"`.
+  "Zálohový list", "Advance invoice" (výzva k platbě BEZ rozpisu DPH,
+  typicky s textem „není daňový doklad") → vrať `"advance"`.
 - Pokud doklad je "Účtenka", "Paragon", "Pokladní doklad", "Receipt" → vrať `"receipt"`.
-- Jinak (běžná faktura / daňový doklad) → vrať `"invoice"`.
+- Jinak (běžná faktura / daňový doklad k dodání) → vrať `"invoice"`.
 
 DŮLEŽITÉ k poli `unit_prices_include_vat` (DPH v ceně položky):
 - Na ÚČTENKÁCH / PARAGONECH (`document_kind = "receipt"`) jsou ceny u položek

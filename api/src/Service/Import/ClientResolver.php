@@ -158,7 +158,10 @@ final class ClientResolver
                 ?? $viesData['company_name']
                 ?? ($parsedClient['company_name'] ?? 'Importovaný klient'),
             'ic'           => $ic,
-            'dic'          => $aresData['dic'] ?? $viesData['dic'] ?? ($parsedClient['dic'] ?? null) ?: null,
+            // Člen DPH skupiny nemá vlastní DIČ — pro doklady/KH se používá DIČ skupiny
+            // (ARES dicSkDph, tvar CZ699xxxxxx), proto je v prioritě hned za vlastním DIČ.
+            'dic'          => ($aresData['dic'] ?? '') ?: ($aresData['dic_sk_dph'] ?? '')
+                ?: ($viesData['dic'] ?? '') ?: ($parsedClient['dic'] ?? null) ?: null,
             'street'       => $aresData['street'] ?? $viesData['street'] ?? ($parsedClient['street'] ?? '') ?: '—',
             'city'         => $aresData['city']   ?? $viesData['city']   ?? ($parsedClient['city']   ?? '') ?: '—',
             'zip'          => $aresData['zip']    ?? $viesData['zip']    ?? ($parsedClient['zip']    ?? '') ?: '00000',

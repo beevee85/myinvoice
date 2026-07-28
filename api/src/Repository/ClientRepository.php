@@ -344,6 +344,22 @@ final class ClientRepository
     }
 
     /**
+     * Doplní DIČ z oficiálního registru (ARES/CRPDPH/VIES), ale JEN když klient žádné
+     * nemá — existující DIČ se nikdy nepřepisuje. U členů DPH skupiny sem přichází
+     * DIČ skupiny (CZ699xxxxxx), pod kterým subjekt vystupuje na dokladech i v KH.
+     */
+    public function setDicIfEmpty(int $id, string $dic): void
+    {
+        $dic = trim($dic);
+        if ($dic === '' || strlen($dic) > 20) {
+            return;
+        }
+        $this->db->pdo()
+            ->prepare("UPDATE clients SET dic = ? WHERE id = ? AND (dic IS NULL OR dic = '')")
+            ->execute([$dic, $id]);
+    }
+
+    /**
      * Označí klienta jako zákazníka (is_customer=1). Symetrické s markAsVendor.
      * Volá se např. při importu vystavené faktury pro nový kontakt.
      */

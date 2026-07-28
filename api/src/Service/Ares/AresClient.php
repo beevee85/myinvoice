@@ -106,15 +106,26 @@ final class AresClient
             $psc = substr($psc, 0, 3) . ' ' . substr($psc, 3); // 30100 → "301 00"
         }
 
+        // Skupinová registrace DPH (§ 5a ZDPH): člen skupiny NEMÁ vlastní DIČ
+        // (dic=null, stavZdrojeDph=NEEXISTUJICI), ale JE plátcem přes skupinu —
+        // ARES to hlásí v stavZdrojeSkDph + dicSkDph (CZ699xxxxxx). Bez téhle
+        // větve se člen skupiny chybně klasifikoval jako neplátce (Direct auto
+        // Praha, IČO 25114719 → vynulované sazby DPH při AI importu).
+        $ownDph   = ($regs['stavZdrojeDph'] ?? '') === 'AKTIVNI';
+        $groupDph = ($regs['stavZdrojeSkDph'] ?? '') === 'AKTIVNI';
+        $dicSkDph = trim((string) ($raw['dicSkDph'] ?? ''));
+
         return [
             'company_name' => (string) ($raw['obchodniJmeno'] ?? ''),
             'ic'           => (string) ($raw['ico'] ?? ''),
             'dic'          => (string) ($raw['dic'] ?? ''),
+            // DIČ DPH skupiny — pro doklady/KH vystupuje člen skupiny pod tímto DIČ.
+            'dic_sk_dph'   => ($groupDph && $dicSkDph !== '') ? $dicSkDph : '',
             'street'       => $street,
             'city'         => (string) ($sidlo['nazevObce'] ?? ''),
             'zip'          => $psc,
             'country_iso2' => (string) ($sidlo['kodStatu'] ?? 'CZ'),
-            'is_vat_payer' => ($regs['stavZdrojeDph'] ?? '') === 'AKTIVNI',
+            'is_vat_payer' => $ownDph || $groupDph,
             'date_active'  => (string) ($raw['datumVzniku'] ?? ''),
             'legal_form'   => (string) ($raw['pravniForma'] ?? ''),
             // Číslo popisné / orientační zvlášť (pro EPO VetaP). cisloOrientacni může mít písmeno.

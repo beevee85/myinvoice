@@ -80,6 +80,19 @@ final class TransitionPurchaseInvoiceStatusAction
             );
         }
 
+        // Storno dokladu zapojeného do vyúčtování záloh (záloha ↔ DDKPZ ↔ konečná
+        // faktura) by nechalo na protistraně viset odpočtové řádky § 37a / snížené
+        // vat_overrides, zatímco stornovaný doklad z DPH/KH i nákladů vypadne →
+        // trvale podhodnocený odpočet. Zrcadlí guard v DeletePurchaseInvoiceAction.
+        if ($target === 'cancelled' && $this->repo->hasSettlementLinks($id)) {
+            return Json::error(
+                $response,
+                'has_settlement_links',
+                'Doklad je propojený s vyúčtováním zálohy — nejdřív zrušte propojení.',
+                409,
+            );
+        }
+
         $paidDate = null;
         if ($target === 'paid') {
             $paidDate = !empty($body['paid_date']) ? (string) $body['paid_date'] : date('Y-m-d');

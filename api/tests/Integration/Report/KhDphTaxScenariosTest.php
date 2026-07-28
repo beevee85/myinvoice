@@ -1688,6 +1688,111 @@ final class KhDphTaxScenariosTest extends TestCase
     }
 
     /**
+     * DDKPZ (document_kind='tax_document') — daňový doklad k přijaté záloze je
+     * plnohodnotný daňový doklad: nad 10 000 Kč vč. DPH patří do B.2 (s ev. číslem
+     * dodavatele a DPPD = den přijetí úplaty) a odpočet na ř. 40 přiznání.
+     */
+    public function testPurchaseTaxDocumentOverLimitEntersB2AndRow40(): void
+    {
+        $vendor = $this->client('CZ dodavatel — DDKPZ', $this->czId, 'CZ699003841', vendor: true);
+        $d = sprintf('%04d-%02d-06', self::YEAR, self::MONTH);
+        // 20 000 vč. DPH shora: základ 16 528,93 + DPH 3 471,07 (§ 37).
+        $this->purchase('ZD-2099-001', $vendor, '40', false, 'tax_document', $d, $d, [[16528.93, 3471.07, 21.0]]);
+
+        $kh = (new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHKH1;
+        $this->assertCount(1, $kh->VetaB2, 'DDKPZ nad limit musí do B.2');
+        $this->assertSame('ZD-2099-001', (string) $kh->VetaB2[0]['c_evid_dd'], 'ev. číslo dle dokladu dodavatele');
+        $this->assertSame('699003841', (string) $kh->VetaB2[0]['dic_dod'], 'DIČ DPH skupiny bez CZ prefixu');
+        $this->assertSame('16528.93', (string) $kh->VetaB2[0]['zakl_dane1']);
+        $this->assertSame('3471.07', (string) $kh->VetaB2[0]['dan1']);
+
+        $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHDP3;
+        $this->assertSame('16529', (string) $dp->Veta4['pln23'], 'DDKPZ základ na ř. 40');
+        $this->assertSame('3471', (string) $dp->Veta4['odp_tuz23_nar'], 'DDKPZ daň na ř. 40');
+    }
+
+    /** DDKPZ do 10 000 Kč vč. DPH (i přesně 10 000) → B.3 sumace, ne B.2. */
+    public function testPurchaseTaxDocumentUnder10kGoesToB3(): void
+    {
+        $vendor = $this->client('CZ dodavatel — DDKPZ malý', $this->czId, 'CZ55566677', vendor: true);
+        $d = sprintf('%04d-%02d-08', self::YEAR, self::MONTH);
+        // 9 680 vč. DPH: základ 8 000 + DPH 1 680.
+        $this->purchase('ZD-2099-002', $vendor, '40', false, 'tax_document', $d, $d, [[8000.00, 1680.00, 21.0]]);
+
+        $kh = (new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHKH1;
+        $this->assertCount(0, $kh->VetaB2, 'DDKPZ do limitu nepatří do B.2');
+        $this->assertSame('8000.00', (string) $kh->VetaB3['zakl_dane1'], 'DDKPZ do limitu → B.3 sumace');
+    }
+
+    /**
+     * § 37a — konečná (vyúčtovací) faktura se zápornými odpočtovými řádky vstupuje
+     * do KH i přiznání POUZE rozdílem (limit 10k se posuzuje z |rozdílu| na dokladu,
+     * viz FAQ FS ke KH, oddíl VI/2): plná cena 393 381,83 + 82 610,18 minus zálohy
+     * 393 381,82 + 82 610,18 → rozdíl 0,01 + 0,00 → B.3, nikoli B.2.
+     */
+    public function testFinalInvoiceWithSettlementRowsEntersOnlyDifference(): void
+    {
+        $vendor = $this->client('CZ dodavatel — vyúčtování', $this->czId, 'CZ699003841', vendor: true);
+        $d = sprintf('%04d-%02d-10', self::YEAR, self::MONTH);
+        $this->purchase('FV-2099-816', $vendor, '40', false, 'invoice', $d, $d, [
+            [393381.83, 82610.18, 21.0],
+            [-16528.93, -3471.07, 21.0],
+            [-376852.89, -79139.11, 21.0],
+        ]);
+
+        $kh = (new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHKH1;
+        $this->assertCount(0, $kh->VetaB2, 'vyúčtovací faktura s odpočtem záloh nesmí do B.2 hrubou částkou');
+        $this->assertSame('0.01', (string) $kh->VetaB3['zakl_dane1'], 'do KH jde jen rozdíl dle § 37a');
+        $this->assertSame('0.00', (string) $kh->VetaB3['dan1']);
+    }
+
+    /**
+     * PurchaseSettlementService — párování DDKPZ na konečnou fakturu doplní záporné
+     * odpočtové řádky a přes vat_overrides sladí základ/daň HALÉŘOVĚ přesně na rozdíl
+     * dle § 37a (žádný přepočet sazbou — hodnoty přesně dle dokladů). Unlink vše vrátí.
+     */
+    public function testSettlementServiceLinkAppliesExactDeductionAndUnlinkRestores(): void
+    {
+        $container = Bootstrap::buildApp()->getContainer();
+        $svc = $container->get(\MyInvoice\Service\Invoice\PurchaseSettlementService::class);
+
+        $vendor = $this->client('CZ dodavatel — settlement svc', $this->czId, 'CZ699003841', vendor: true);
+        $d = sprintf('%04d-%02d-12', self::YEAR, self::MONTH);
+        $this->purchase('FV-SVC-816', $vendor, '40', false, 'invoice', $d, $d, [[393381.83, 82610.18, 21.0]]);
+        $finalId = end($this->purchaseIds);
+        $this->purchase('ZD-SVC-089', $vendor, '40', false, 'tax_document', $d, $d, [[16528.93, 3471.07, 21.0]]);
+        $zd1 = end($this->purchaseIds);
+        $this->purchase('ZD-SVC-122', $vendor, '40', false, 'tax_document', $d, $d, [[376852.89, 79139.11, 21.0]]);
+        $zd2 = end($this->purchaseIds);
+
+        $svc->link($finalId, $zd1, $this->supplierId);
+        $svc->link($finalId, $zd2, $this->supplierId);
+
+        $final = $this->piRepo->find($finalId, $this->supplierId);
+        $this->assertEqualsWithDelta(0.01, (float) $final['total_without_vat'], 0.001, '§ 37a: základ = rozdíl');
+        $this->assertEqualsWithDelta(0.00, (float) $final['total_vat'], 0.001, '§ 37a: daň = rozdíl (0)');
+        $this->assertCount(2, $final['settlement_documents']);
+        $settlementRows = array_filter($final['items'], fn (array $it) => !empty($it['settlement_source_purchase_invoice_id']));
+        $this->assertCount(2, $settlementRows, '2 auto-odpočtové řádky (per DDKPZ per sazba)');
+        $this->assertFalse($final['settlement_deduction_mismatch'], 'odpočet sedí na napárované doklady');
+
+        // Dvojí párování téhož DDKPZ musí selhat.
+        try {
+            $svc->link($finalId, $zd1, $this->supplierId);
+            $this->fail('Druhé párování téhož DDKPZ mělo selhat.');
+        } catch (\RuntimeException) {
+        }
+
+        $svc->unlink($finalId, $zd1, $this->supplierId);
+        $svc->unlink($finalId, $zd2, $this->supplierId);
+        $final = $this->piRepo->find($finalId, $this->supplierId);
+        $this->assertEqualsWithDelta(393381.83, (float) $final['total_without_vat'], 0.001, 'unlink vrací původní základ');
+        $this->assertEqualsWithDelta(82610.18, (float) $final['total_vat'], 0.001, 'unlink vrací původní daň');
+        $this->assertSame([], array_filter($final['items'], fn (array $it) => !empty($it['settlement_source_purchase_invoice_id'])));
+        $this->assertSame([], $final['settlement_documents']);
+    }
+
+    /**
      * BUG 3 (2026-07) — následné KH (khdph_forma='N') s datem zjištění důvodů;
      * dodatečné přiznání (dapdph_forma='D') analogicky. Bez d_zjist musí build selhat.
      */

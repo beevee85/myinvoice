@@ -11,8 +11,13 @@ namespace MyInvoice\Service\Validation;
  */
 final class PurchaseInvoiceValidation
 {
-    public const ALLOWED_DOC_KINDS = ['invoice', 'receipt', 'credit_note', 'advance'];
+    /** Jediný zdroj pravdy pro typy přijatých dokladů — FE zrcadlí ve web/src/constants/purchaseDocumentKinds.ts.
+     *  'tax_document' = daňový doklad k přijaté záloze (DDKPZ, § 28/1/d ZDPH) — zrcadlí vydanou stranu. */
+    public const ALLOWED_DOC_KINDS = ['invoice', 'receipt', 'credit_note', 'advance', 'tax_document'];
     public const ALLOWED_STATUSES  = ['draft', 'received', 'booked', 'paid', 'cancelled'];
+
+    /** Lhůta pro vystavení daňového dokladu od přijetí úplaty (§ 28 odst. 8 ZDPH), ve dnech. */
+    public const TAX_DOCUMENT_DEADLINE_DAYS = 15;
 
     /** Klasifikační kódy v režimu samovyměření příjemcem: tuzemský §92 (5), pořízení
      *  zboží z JČS (23), služba z EU/3. země (24, 24e), dovoz zboží ze 3. země (25). */

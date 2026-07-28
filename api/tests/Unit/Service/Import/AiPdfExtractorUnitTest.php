@@ -871,4 +871,61 @@ final class AiPdfExtractorUnitTest extends TestCase
         $ref = new \ReflectionMethod($this->extractor, 'applyRoundingFromPdfTotal');
         $ref->invoke($this->extractor, $id, $supplierId, $data, $isCredit);
     }
+
+    // ── documentShowsVat — rozpor „doklad s DPH × dodavatel neplátce" ───────
+
+    public function testDocumentShowsVat_recap_with_vat_true(): void
+    {
+        $this->assertTrue($this->invokeShowsVat([
+            'vat_recap' => [['rate' => 21, 'base' => 16528.93, 'vat' => 3471.07]],
+        ]));
+    }
+
+    public function testDocumentShowsVat_zero_rate_recap_false(): void
+    {
+        $this->assertFalse($this->invokeShowsVat([
+            'vat_recap' => [['rate' => 0, 'base' => 20000, 'vat' => 0]],
+        ]));
+    }
+
+    public function testDocumentShowsVat_totals_fallback_true(): void
+    {
+        // Bez rekapitulace, ale celkem s DPH > celkem bez DPH → doklad DPH obsahuje.
+        $this->assertTrue($this->invokeShowsVat([
+            'total_without_vat' => 393381.83,
+            'total_with_vat'    => 475992.00,
+        ]));
+    }
+
+    public function testDocumentShowsVat_no_vat_document_false(): void
+    {
+        $this->assertFalse($this->invokeShowsVat([
+            'total_without_vat' => 20000.0,
+            'total_with_vat'    => 20000.0,
+        ]));
+    }
+
+    // ── normalizeDocumentKind — jediný whitelist (ALLOWED_DOC_KINDS) ────────
+
+    public function testNormalizeKind_tax_document_passes(): void
+    {
+        $this->assertSame('tax_document', $this->invokeNormalizeKind('tax_document'));
+    }
+
+    public function testNormalizeKind_unknown_falls_back_to_invoice(): void
+    {
+        $this->assertSame('invoice', $this->invokeNormalizeKind('daňový doklad'));
+    }
+
+    private function invokeShowsVat(array $data): bool
+    {
+        $ref = new \ReflectionMethod(AiPdfExtractor::class, 'documentShowsVat');
+        return $ref->invoke(null, $data);
+    }
+
+    private function invokeNormalizeKind(string $kind): string
+    {
+        $ref = new \ReflectionMethod($this->extractor, 'normalizeDocumentKind');
+        return $ref->invoke($this->extractor, $kind);
+    }
 }

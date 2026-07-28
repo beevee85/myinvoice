@@ -139,7 +139,7 @@ async function lookupAres() {
     supplier.value.zip          = d.zip          || supplier.value.zip
     supplier.value.country_iso2 = d.country_iso2 || supplier.value.country_iso2 || 'CZ'
     supplier.value.ic           = d.ic           || ic
-    supplier.value.dic          = d.dic          || supplier.value.dic
+    supplier.value.dic          = d.dic || d.dic_sk_dph || supplier.value.dic
     supplier.value.is_vat_payer = d.is_vat_payer
     supplier.value.commercial_register = d.commercial_register || supplier.value.commercial_register
     if (d.taxpayer_type === 'fo' || d.taxpayer_type === 'po') supplier.value.taxpayer_type = d.taxpayer_type

@@ -369,7 +369,8 @@
       "invoice": "Invoice",
       "receipt": "Receipt",
       "credit_note": "Credit note",
-      "advance": "Advance"
+      "advance": "Advance",
+      "tax_document": "Advance payment tax document"
     },
     "fields": {
       "vendor": "Vendor",
@@ -553,6 +554,27 @@
       "ai_suggestion_body": "This invoice likely settles advance",
       "confirm": "Confirm",
       "dismiss": "Dismiss"
+    },
+    "settlement_doc": {
+      "title": "Advance payment tax documents (§ 37a settlement)",
+      "none": "No advance payment tax document is linked.",
+      "none_final": "This tax document is not yet settled by a final invoice.",
+      "settled_by_final": "Settled by final invoice",
+      "pair": "Link advance payment tax document",
+      "pair_final": "Link final invoice",
+      "modal_title": "Select an advance payment tax document",
+      "modal_title_final": "Select the final invoice",
+      "no_candidates": "No unlinked advance payment tax documents from this vendor.",
+      "no_candidates_final": "No final invoices from this vendor.",
+      "apply_deduction": "Add deduction rows (−base, −VAT) to the final invoice",
+      "apply_deduction_hint": "Turn off if the invoice already contains the advance deduction in its own rows (e.g. copied from the PDF).",
+      "linked": "Advance payment tax document linked.",
+      "unlinked": "Link removed.",
+      "unlink": "Unlink",
+      "unlink_confirm": "Unlink the advance payment tax document? Auto-generated deduction rows will be removed.",
+      "mismatch_warning": "The advance deduction on this invoice does not match the linked tax documents (§ 37a VAT Act) — check the negative deduction rows; risk of double cost/deduction.",
+      "late_warning": "The tax document was issued more than 15 days after the payment was received (§ 28(8) VAT Act).",
+      "advance_missing_warning": "No advance payment tax document or final invoice has been linked to this paid advance after 15 days (§ 28(8) VAT Act) — link the existing document, or request it from the vendor."
     },
     "scan_inbox": {
       "title": "Scan received invoices inbox",

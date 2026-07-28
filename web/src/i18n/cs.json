@@ -369,7 +369,8 @@
       "invoice": "Faktura",
       "receipt": "Doklad o úhradě",
       "credit_note": "Dobropis",
-      "advance": "Záloha"
+      "advance": "Záloha",
+      "tax_document": "Daňový doklad k přijaté záloze"
     },
     "fields": {
       "vendor": "Dodavatel",
@@ -553,6 +554,27 @@
       "ai_suggestion_body": "Tato faktura zřejmě vyúčtovává zálohu",
       "confirm": "Potvrdit",
       "dismiss": "Zamítnout"
+    },
+    "settlement_doc": {
+      "title": "Vyúčtování daňových dokladů k záloze (§ 37a)",
+      "none": "Žádný daňový doklad k záloze není spárován.",
+      "none_final": "Tento daňový doklad k záloze zatím není zúčtován konečnou fakturou.",
+      "settled_by_final": "Zúčtováno konečnou fakturou",
+      "pair": "Spárovat s daň. dokladem k záloze",
+      "pair_final": "Spárovat s konečnou fakturou",
+      "modal_title": "Vyber daňový doklad k záloze",
+      "modal_title_final": "Vyber konečnou fakturu",
+      "no_candidates": "Žádný nespárovaný daňový doklad k záloze od tohoto dodavatele.",
+      "no_candidates_final": "Žádná konečná faktura od tohoto dodavatele.",
+      "apply_deduction": "Doplnit odpočtové řádky (−základ, −DPH) na konečnou fakturu",
+      "apply_deduction_hint": "Vypni, pokud faktura odpočet záloh už obsahuje ve vlastních řádcích (např. přepsaný z PDF).",
+      "linked": "Daňový doklad k záloze spárován.",
+      "unlinked": "Propojení zrušeno.",
+      "unlink": "Zrušit propojení",
+      "unlink_confirm": "Zrušit propojení s daňovým dokladem k záloze? Automaticky doplněné odpočtové řádky budou odebrány.",
+      "mismatch_warning": "Odpočet záloh na této faktuře nesedí na spárované daňové doklady (§ 37a ZDPH) — zkontroluj záporné odpočtové řádky, hrozí dvojí náklad/odpočet.",
+      "late_warning": "Daňový doklad byl vystaven více než 15 dnů po dni přijetí úplaty (§ 28 odst. 8 ZDPH).",
+      "advance_missing_warning": "K zaplacené záloze není ani po 15 dnech spárován žádný daňový doklad k přijaté záloze ani konečná faktura (§ 28 odst. 8 ZDPH) — spáruj existující doklad, nebo ho vyžádej od dodavatele."
     },
     "scan_inbox": {
       "title": "Scan inbox přijatých faktur",

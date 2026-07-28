@@ -59,6 +59,18 @@ final class DeletePurchaseInvoiceAction
             }
         }
 
+        // Doklad zapojený do vyúčtování záloh (záloha ↔ DDKPZ ↔ konečná faktura) nelze
+        // smazat — nejdřív zrušit propojení, jinak by na protistraně zůstaly viset
+        // odpočtové řádky § 37a / rozbité nákladové agregace.
+        if ($this->repo->hasSettlementLinks($id)) {
+            return Json::error(
+                $response,
+                'has_settlement_links',
+                'Doklad je propojený s vyúčtováním zálohy — nejdřív zrušte propojení.',
+                409,
+            );
+        }
+
         // Před DB delete uchovat info o PDF (k orphan cleanup)
         $pdfPath = (string) ($existing['pdf_path'] ?? '');
         $pdfHash = (string) ($existing['pdf_hash'] ?? '');

@@ -89,11 +89,14 @@ final class IsdocParser
         // DocumentType dle ISDOC 6.0.2 číselníku DocumentTypeType:
         //   1 = faktura, 2 = dobropis, 3 = vrubopis, 4 = zálohová faktura (nedaňová),
         //   5 = daňový zálohový list, 6 = dobropis DZL, 7 = zjednodušený daň. doklad.
-        // Dobropis i jeho zálohová varianta → credit_note; obě zálohové varianty → proforma.
+        // Dobropis i jeho zálohová varianta → credit_note; 4 (nedaňová záloha) → proforma;
+        // 5 (daňový zálohový list = daňový doklad k přijaté platbě) → tax_document —
+        // dřív se degradoval na proformu a ztrácel charakter daňového dokladu (odpočet!).
         $docType = (int) ($this->text($xpath, 'i:DocumentType', $root) ?: '1');
         $invoiceType = match ($docType) {
             2, 6    => 'credit_note',
-            4, 5    => 'proforma',
+            4       => 'proforma',
+            5       => 'tax_document',
             default => 'invoice',
         };
 

@@ -116,9 +116,11 @@ final class PurchaseInvoiceExportService
         return [
             'id'              => $pi['id'],
             'invoice_type'    => match ($pi['document_kind'] ?? 'invoice') {
-                'credit_note' => 'credit_note',
-                'advance'     => 'proforma',
-                default       => 'invoice',
+                'credit_note'  => 'credit_note',
+                'advance'      => 'proforma',
+                // DDKPZ → ISDOC DocumentType 5 (daňový zálohový list), VATApplicable true
+                'tax_document' => 'tax_document',
+                default        => 'invoice',
             },
             'document_number' => $pi['vendor_invoice_number'] ?? $pi['varsymbol'] ?? ('P-' . $pi['id']),
             'internal_document_number' => $pi['varsymbol'] ?? null,

@@ -4684,6 +4684,78 @@ paths:
       responses:
         '200': { description: OK }
 
+  /api/v1/purchase-invoices/{id}/settlement-doc-candidates:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Purchase invoices]
+      summary: Kandidáti daňových dokladů k záloze (tax_document) pro párování s konečnou fakturou (§ 37a)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates: { type: array, items: { type: object } }
+
+  /api/v1/purchase-invoices/{id}/final-candidates:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Purchase invoices]
+      summary: Kandidáti konečných faktur pro párování z detailu daňového dokladu k záloze (§ 37a)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates: { type: array, items: { type: object } }
+
+  /api/v1/purchase-invoices/{id}/link-settlement-doc:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [Purchase invoices]
+      summary: Napáruje daňový doklad k přijaté záloze na konečnou fakturu (§ 37a — volitelně doplní záporné odpočtové řádky)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tax_document_id]
+              properties:
+                tax_document_id: { type: integer, format: int64 }
+                apply_deduction: { type: boolean, default: true, description: 'Doplnit záporné odpočtové řádky + sladit rekapitulaci DPH (vypnout, když doklad odpočet už obsahuje ve vlastních řádcích)' }
+      responses:
+        '200': { description: 'OK (aktualizovaná konečná faktura vč. settlement_documents)' }
+        '409': { description: Párování selhalo }
+    delete:
+      tags: [Purchase invoices]
+      summary: Zruší párování DDKPZ (odebere auto-generované odpočtové řádky a vrátí rekapitulaci)
+      parameters:
+        - { in: query, name: tax_document_id, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200': { description: OK }
+        '409': { description: Zrušení selhalo }
+
   /api/v1/purchase-invoices/{id}/dismiss-extraction-warning:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -7192,7 +7264,7 @@ components:
         vendor_id: { type: integer }
         varsymbol: { type: [string, "null"], description: "Naše interní číslo PF-YYYYMM-NNNN" }
         vendor_invoice_number: { type: string }
-        document_kind: { type: string, enum: [invoice, receipt, credit_note, advance] }
+        document_kind: { type: string, enum: [invoice, receipt, credit_note, advance, tax_document] }
         issue_date: { type: string, format: date }
         tax_date: { type: [string, "null"], format: date, description: "DUZP" }
         due_date: { type: string, format: date }
@@ -7270,7 +7342,7 @@ components:
         vendor_id: { type: integer }
         varsymbol: { type: [string, "null"] }
         vendor_invoice_number: { type: string }
-        document_kind: { type: string, enum: [invoice, receipt, credit_note, advance] }
+        document_kind: { type: string, enum: [invoice, receipt, credit_note, advance, tax_document] }
         advance_purchase_invoice_id: { type: [integer, "null"], description: "FK na zálohovou fakturu, kterou tento doklad vyúčtovává (párování zálohy)" }
         advance_link_suggested_id: { type: [integer, "null"], description: "AI/auto návrh na propojení zálohy (čeká na potvrzení)" }
         issue_date: { type: string, format: date }
@@ -7411,7 +7483,7 @@ components:
         vendor_id: { type: integer }
         vendor_invoice_number: { type: string, maxLength: 50 }
         varsymbol: { type: [string, "null"], maxLength: 20 }
-        document_kind: { type: string, enum: [invoice, receipt, credit_note, advance], default: invoice }
+        document_kind: { type: string, enum: [invoice, receipt, credit_note, advance, tax_document], default: invoice }
         issue_date: { type: string, format: date }
         tax_date: { type: [string, "null"], format: date }
         due_date: { type: string, format: date }

@@ -12,6 +12,7 @@ import {
   type ExchangeRateSource,
   type VatDeduction,
 } from '@/api/purchaseInvoices'
+import { PURCHASE_DOCUMENT_KINDS, purchaseDocumentKindLabelKey } from '@/constants/purchaseDocumentKinds'
 import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
@@ -719,6 +720,9 @@ async function submit() {
         vat_rate_id: it.vat_rate_id,
         order_index: i,
         vat_classification_code: it.vat_classification_code,
+        // Auto-odpočtový řádek § 37a si musí přes editor round-trip udržet vazbu
+        // na zdrojový daňový doklad k záloze (jinak by unlink neuměl řádek odebrat).
+        settlement_source_purchase_invoice_id: it.settlement_source_purchase_invoice_id ?? null,
       })),
     }
     let inv: PurchaseInvoice
@@ -1004,10 +1008,7 @@ function fieldErr(key: string): string | null {
           <div>
             <label class="block text-sm text-neutral-700 mb-1">{{ t('purchase_invoice.fields.document_kind') }}</label>
             <select v-model="form.document_kind" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
-              <option value="invoice">{{ t('purchase_invoice.document_kind.invoice') }}</option>
-              <option value="receipt">{{ t('purchase_invoice.document_kind.receipt') }}</option>
-              <option value="credit_note">{{ t('purchase_invoice.document_kind.credit_note') }}</option>
-              <option value="advance">{{ t('purchase_invoice.document_kind.advance') }}</option>
+              <option v-for="k in PURCHASE_DOCUMENT_KINDS" :key="k" :value="k">{{ t(purchaseDocumentKindLabelKey(k)) }}</option>
             </select>
           </div>
         </div>

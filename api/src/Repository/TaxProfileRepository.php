@@ -191,9 +191,11 @@ final class TaxProfileRepository
                 AND pi.status = 'paid'
                 AND pi.paid_at IS NOT NULL
                 AND DATE_FORMAT(pi.paid_at, '%Y-%m') = ?
+                AND COALESCE(pi.document_kind, '') <> 'tax_document'
                 AND NOT (COALESCE(pi.document_kind, '') = 'advance'
                      AND EXISTS (SELECT 1 FROM purchase_invoices adv_s
-                                 WHERE adv_s.advance_purchase_invoice_id = pi.id))"
+                                 WHERE adv_s.advance_purchase_invoice_id = pi.id
+                                   AND COALESCE(adv_s.document_kind, '') <> 'tax_document'))"
         );
         $stmt->execute([$supplierId, $ym]);
         return round((float) $stmt->fetchColumn(), 2);

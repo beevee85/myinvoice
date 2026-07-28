@@ -146,17 +146,19 @@ final class PurchaseInvoicePdfRenderer
     {
         if ($locale === 'en') {
             return match ($kind) {
-                'receipt'     => 'Receipt',
-                'credit_note' => 'Credit note',
-                'advance'     => 'Advance',
-                default       => 'Invoice',
+                'receipt'      => 'Receipt',
+                'credit_note'  => 'Credit note',
+                'advance'      => 'Advance',
+                'tax_document' => 'Advance payment tax document',
+                default        => 'Invoice',
             };
         }
         return match ($kind) {
-            'receipt'     => 'Přijatá účtenka',
-            'credit_note' => 'Přijatý dobropis',
-            'advance'     => 'Přijatá záloha',
-            default       => 'Přijatá faktura',
+            'receipt'      => 'Přijatá účtenka',
+            'credit_note'  => 'Přijatý dobropis',
+            'advance'      => 'Přijatá záloha',
+            'tax_document' => 'Daňový doklad k přijaté záloze',
+            default        => 'Přijatá faktura',
         };
     }
 

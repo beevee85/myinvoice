@@ -76,6 +76,37 @@ final class UpdatePurchaseInvoiceAction
 
         $body = (array) ($request->getParsedBody() ?? []);
 
+        // Auto-odpočtové řádky § 37a (settlement_source) nelze smazat editací, dokud
+        // párování DDKPZ trvá — smazáním by se rozbila symetrie unlinku (snížené
+        // vat_overrides by na dokladu zůstaly navždy). Správná cesta: „Zrušit
+        // propojení" u daňového dokladu (unlink řádky odebere i vrátí rekapitulaci).
+        $linkedSources = [];
+        foreach ((array) ($existing['settlement_documents'] ?? []) as $sd) {
+            if (($sd['status'] ?? '') !== 'cancelled') {
+                $linkedSources[(int) $sd['id']] = true;
+            }
+        }
+        if ($linkedSources !== [] && array_key_exists('items', $body)) {
+            $keptSources = [];
+            foreach ((array) $body['items'] as $it) {
+                $src = (int) (is_array($it) ? ($it['settlement_source_purchase_invoice_id'] ?? 0) : 0);
+                if ($src > 0) {
+                    $keptSources[$src] = true;
+                }
+            }
+            foreach ((array) ($existing['items'] ?? []) as $it) {
+                $src = (int) ($it['settlement_source_purchase_invoice_id'] ?? 0);
+                if ($src > 0 && isset($linkedSources[$src]) && !isset($keptSources[$src])) {
+                    return Json::error(
+                        $response,
+                        'settlement_rows_locked',
+                        'Odpočtové řádky daňového dokladu k záloze nelze smazat editací — nejdřív zrušte párování v detailu dokladu („Zrušit propojení").',
+                        409,
+                    );
+                }
+            }
+        }
+
         $errors = PurchaseInvoiceValidation::invoice($body, $this->repo->vatRateMap());
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);

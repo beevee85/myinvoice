@@ -33,8 +33,11 @@ final class VendorVatPayerResolver
 
     /**
      * Zjistí plátcovství a (pokud je výsledek jednoznačný) uloží ho na klienta.
+     * Když registr vrátí DIČ (vč. DIČ DPH skupiny CZ699* u členů skupinové
+     * registrace) a klient žádné nemá, doplní se — registry-backed enrichment,
+     * existující DIČ se NIKDY nepřepisuje.
      *
-     * @return array{is_vat_payer:?bool, source:'ares'|'vies'|'crpdph'|'unknown'}
+     * @return array{is_vat_payer:?bool, source:'ares'|'vies'|'crpdph'|'unknown', dic:?string}
      */
     public function resolveAndPersist(int $clientId, ?string $ic, ?string $dic): array
     {
@@ -42,23 +45,35 @@ final class VendorVatPayerResolver
         if ($res['is_vat_payer'] !== null) {
             $this->clients->setVatPayer($clientId, $res['is_vat_payer']);
         }
+        if (($res['dic'] ?? null) !== null && trim((string) $dic) === '') {
+            $this->clients->setDicIfEmpty($clientId, (string) $res['dic']);
+        }
         return $res;
     }
 
     /**
-     * Pure lookup bez zápisu — vrací is_vat_payer (true/false) nebo null (nezjištěno).
+     * Pure lookup bez zápisu — vrací is_vat_payer (true/false) nebo null (nezjištěno),
+     * plus DIČ z registru, pokud ho zdroj zná (u členů DPH skupiny DIČ skupiny CZ699*).
      *
-     * @return array{is_vat_payer:?bool, source:'ares'|'vies'|'crpdph'|'unknown'}
+     * @return array{is_vat_payer:?bool, source:'ares'|'vies'|'crpdph'|'unknown', dic:?string}
      */
     public function resolve(?string $ic, ?string $dic): array
     {
         $icDigits = preg_replace('/\D/', '', (string) $ic) ?? '';
 
-        // 1. CZ subjekt dle IČO → ARES (autoritativní stav registrace DPH).
+        // 1. CZ subjekt dle IČO → ARES (autoritativní stav registrace DPH; u členů
+        //    DPH skupiny vlastní registrace NEEXISTUJICI, ale skupinová AKTIVNI —
+        //    AresClient obě sloučí do is_vat_payer a vrátí dic_sk_dph).
         if (strlen($icDigits) === 8) {
             $resp = $this->ares->lookup($icDigits);
             if ($resp !== null && ($resp['found'] ?? false) && isset($resp['data'])) {
-                return ['is_vat_payer' => (bool) ($resp['data']['is_vat_payer'] ?? false), 'source' => 'ares'];
+                $aresDic = trim((string) ($resp['data']['dic'] ?? ''))
+                    ?: trim((string) ($resp['data']['dic_sk_dph'] ?? ''));
+                return [
+                    'is_vat_payer' => (bool) ($resp['data']['is_vat_payer'] ?? false),
+                    'source'       => 'ares',
+                    'dic'          => $aresDic !== '' ? $aresDic : null,
+                ];
             }
         }
 
@@ -75,24 +90,32 @@ final class VendorVatPayerResolver
                 try {
                     $g = $this->crpdph->lookup($dicTrim);
                     if (($g['source'] ?? '') !== 'error') {
-                        return ['is_vat_payer' => (bool) ($g['found'] ?? false), 'source' => 'crpdph'];
+                        return [
+                            'is_vat_payer' => (bool) ($g['found'] ?? false),
+                            'source'       => 'crpdph',
+                            'dic'          => !empty($g['found']) ? $dicTrim : null,
+                        ];
                     }
                 } catch (\Throwable) {
                     // CRPDPH timeout / chyba — necháme nezjištěno.
                 }
-                return ['is_vat_payer' => null, 'source' => 'unknown'];
+                return ['is_vat_payer' => null, 'source' => 'unknown', 'dic' => null];
             }
             try {
                 $v = $this->vies->lookup($dicTrim);
                 if (($v['source'] ?? '') !== 'error') {
-                    return ['is_vat_payer' => !empty($v['valid']), 'source' => 'vies'];
+                    return [
+                        'is_vat_payer' => !empty($v['valid']),
+                        'source'       => 'vies',
+                        'dic'          => !empty($v['valid']) ? $dicTrim : null,
+                    ];
                 }
             } catch (\Throwable) {
                 // VIES timeout / chyba — necháme nezjištěno.
             }
         }
 
-        return ['is_vat_payer' => null, 'source' => 'unknown'];
+        return ['is_vat_payer' => null, 'source' => 'unknown', 'dic' => null];
     }
 
     /**

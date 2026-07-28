@@ -493,8 +493,16 @@ final class AiPdfExtractor
         // Dodavatel NEPLÁTCE DPH → na dokladu žádná DPH a NENÍ nárok na odpočet.
         // Autoritativně z ARES (CZ IČO) / VIES (zahr. DIČ); fallback signál z dokladu.
         // Vynulujeme sazby (kdyby AI halucinovala 21 %) a níže vynutíme vat_deduction='none'.
+        //
+        // VÝJIMKA — ROZPOR: má-li samotný doklad rozpis DPH s nenulovou sazbou, má
+        // přednost doklad (§ 73 — eviduje se, co dodavatel vystavil). Karta dodavatele
+        // může být zastaralá/špatně rozpoznaná (typicky člen DPH skupiny CZ699* bez
+        // vlastního DIČ). Sazby v tom případě NEpřepisujeme, nárok na odpočet zůstane
+        // konzervativně vypnutý ('none') a doklad dostane blokující varování — rozhodne
+        // uživatel (ověří DIČ, případně přepne plátcovství na kartě dodavatele).
         $vendorNonPayer = self::isVendorNonPayer($vendorIsVatPayer, (array) ($data['vendor'] ?? []));
-        if ($vendorNonPayer) {
+        $vendorVatConflict = $vendorNonPayer && self::documentShowsVat($data);
+        if ($vendorNonPayer && !$vendorVatConflict) {
             $zeroRateId = $this->matchVatRateId($vatRates, 0.0) ?? $defaultVatRateId;
             foreach ($items as &$it) {
                 $it['vat_rate_id'] = $zeroRateId;
@@ -517,7 +525,7 @@ final class AiPdfExtractor
         //   - JEDNOŘÁDKOVÝ doklad → authoritativeRecapBaseLine ho nahradí 1 ks × základ
         //     z rekapitulace (čistší než 1 brutto řádek + koeficientové dorovnání).
         $grossLinesPricesInclVat = false;
-        if (!$vendorNonPayer) {
+        if (!$vendorNonPayer || $vendorVatConflict) {
             if (!$pricesIncludeVat && count($items) > 1 && self::linesAreGrossSingleRate($items, $data, $isCredit)) {
                 $this->logger->info('AI extractor: víceřádkové brutto ceny dle rekapitulace → režim ceny s DPH, řádky zachovány', [
                     'vendor_invoice_number' => $data['vendor_invoice_number'] ?? null,
@@ -717,8 +725,9 @@ final class AiPdfExtractor
         // ne vůči AI's hodnotě (AI dělá DPH math sama a občas se splete o haléř).
         // Preferujeme PDF rounded (`total_with_vat_rounded`), fallback na AI's
         // `total_with_vat` (mnoho AI extracts vrátí "K úhradě" jako total_with_vat
-        // bez explicitního total_with_vat_rounded).
-        $this->applyRoundingFromPdfTotal($id, $supplierId, $data, $isCredit);
+        // bez explicitního total_with_vat_rounded). Rozdíl ≥ 1 Kč se dřív TIŠE
+        // zahazoval — teď vrací varování (append až na konci, viz níže).
+        $pdfTotalWarning = $this->applyRoundingFromPdfTotal($id, $supplierId, $data, $isCredit);
         // Pro non-CZK currency: auto-apply ČNB kurz k tax_date (nebo issue_date).
         $this->applyCnbRate($id, $supplierId, $data);
         // Pokud AI detekovala "NEPLAŤTE, JIŽ UHRAZENO" / "PAID" → mark as paid.
@@ -733,7 +742,22 @@ final class AiPdfExtractor
         // U reverse charge se NEuvádí: dodavatel je sice neplátce české DPH, ale příjemce
         // si daň samovyměří a odpočet ('full') NÁLEŽÍ — hláška „odpočet zakázán" by byla
         // zavádějící (a věcně nesprávná, viz vat_deduction výše).
-        if ($vendorNonPayer && !$reverseCharge) {
+        if ($vendorVatConflict && !$reverseCharge) {
+            try {
+                $this->repo->setExtractionWarning(
+                    $id,
+                    $supplierId,
+                    'ROZPOR: doklad obsahuje rozpis DPH s nenulovou sazbou, ale dodavatel je '
+                        . 'na kartě veden jako neplátce DPH — ověřte DIČ a registraci '
+                        . '(pozor na členy DPH skupiny: DIČ tvaru CZ699… najdete v ARES jako '
+                        . '„DIČ skupiny"). Sazby byly ponechány podle dokladu, nárok na odpočet '
+                        . 'je zatím vypnut (bez nároku). Po ověření nastavte „Plátce DPH" na '
+                        . 'kartě dodavatele a odpočet v editoru dokladu.',
+                );
+            } catch (\Throwable) {
+                // Varování je „nice to have" — faktura už je vytvořená správně.
+            }
+        } elseif ($vendorNonPayer && !$reverseCharge) {
             try {
                 $this->repo->setExtractionWarning(
                     $id,
@@ -757,6 +781,15 @@ final class AiPdfExtractor
         if ($vatRecapWarning !== null && $vatRecapWarning !== '') {
             try {
                 $this->repo->appendExtractionWarning($id, $supplierId, $vatRecapWarning);
+            } catch (\Throwable) {
+                // Varování je „nice to have" — faktura už je vytvořená správně.
+            }
+        }
+        // Kontrola součtu: „K úhradě" z PDF vs. uložená hodnota — rozdíl ≥ 1 Kč
+        // znamená chybnou extrakci řádků → doklad vyžaduje ruční kontrolu.
+        if ($pdfTotalWarning !== null && $pdfTotalWarning !== '') {
+            try {
+                $this->repo->appendExtractionWarning($id, $supplierId, $pdfTotalWarning);
             } catch (\Throwable) {
                 // Varování je „nice to have" — faktura už je vytvořená správně.
             }
@@ -1420,7 +1453,7 @@ final class AiPdfExtractor
      * (po `recompute`) — AI dělá DPH math sama a občas se splete o haléř,
      * referenční musí být deterministický kalkulátor (`InvoiceMath`).
      */
-    private function applyRoundingFromPdfTotal(int $id, int $supplierId, array $data, bool $isCredit): void
+    private function applyRoundingFromPdfTotal(int $id, int $supplierId, array $data, bool $isCredit): ?string
     {
         $pdfTotal = null;
         if (isset($data['total_with_vat_rounded']) && $data['total_with_vat_rounded'] !== null) {
@@ -1428,13 +1461,13 @@ final class AiPdfExtractor
         } elseif (isset($data['total_with_vat']) && $data['total_with_vat'] !== null) {
             $pdfTotal = (float) $data['total_with_vat'];
         }
-        if ($pdfTotal === null || $pdfTotal === 0.0) return;
+        if ($pdfTotal === null || $pdfTotal === 0.0) return null;
         $pdfTotal = abs($pdfTotal);
 
         $current = $this->repo->find($id, $supplierId);
-        if ($current === null) return;
+        if ($current === null) return null;
         $exactTotal = (float) abs((float) ($current['total_with_vat'] ?? 0));
-        if ($exactTotal === 0.0) return;
+        if ($exactTotal === 0.0) return null;
 
         $diff = round($pdfTotal - $exactTotal, 2);
         if (abs($diff) > 0.0 && abs($diff) < 1.0) {
@@ -1446,7 +1479,38 @@ final class AiPdfExtractor
                     'error' => $e->getMessage(),
                 ]);
             }
+            return null;
         }
+        if (abs($diff) >= 1.0) {
+            // Dřív se rozdíl ≥ 1 Kč tiše zahodil a doklad vypadal v pořádku, i když
+            // se od PDF lišil o celé koruny. Teď vrací varování ke kontrole.
+            return sprintf(
+                'Kontrola součtu: „K úhradě" na dokladu je %s, ale uložený součet je %s '
+                    . '(rozdíl %s). Zkontrolujte řádky dokladu proti PDF.',
+                number_format($pdfTotal, 2, ',', ' '),
+                number_format($exactTotal, 2, ',', ' '),
+                number_format($diff, 2, ',', ' '),
+            );
+        }
+        return null;
+    }
+
+    /**
+     * Má doklad podle AI extrakce rozpis DPH s nenulovou sazbou? Primárně z věrné
+     * rekapitulace (vat_recap), fallback: rozdíl mezi celkem s DPH a bez DPH.
+     * Rozhoduje o rozporu „doklad s DPH × dodavatel neplátce" (sazby se pak
+     * nepřepisují na 0 %).
+     */
+    private static function documentShowsVat(array $data): bool
+    {
+        foreach ((array) ($data['vat_recap'] ?? []) as $r) {
+            if ((float) ($r['rate'] ?? 0) > 0.005 && abs((float) ($r['vat'] ?? 0)) > 0.005) {
+                return true;
+            }
+        }
+        $with    = (float) ($data['total_with_vat'] ?? 0);
+        $without = (float) ($data['total_without_vat'] ?? 0);
+        return $with > 0.0 && $without > 0.0 && ($with - $without) > 0.01;
     }
 
     /**
@@ -1541,7 +1605,7 @@ final class AiPdfExtractor
     private function normalizeDocumentKind(string $kind): string
     {
         $k = strtolower(trim($kind));
-        return in_array($k, ['invoice', 'credit_note', 'advance', 'receipt'], true)
+        return in_array($k, \MyInvoice\Service\Validation\PurchaseInvoiceValidation::ALLOWED_DOC_KINDS, true)
             ? $k
             : 'invoice';
     }

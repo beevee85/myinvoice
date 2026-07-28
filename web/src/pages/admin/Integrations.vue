@@ -8,6 +8,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { purchaseInvoicesApi, type PurchaseDocumentKind } from '@/api/purchaseInvoices'
+import { PURCHASE_DOCUMENT_KINDS, purchaseDocumentKindLabelKey } from '@/constants/purchaseDocumentKinds'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
 
 const { t } = useI18n()
@@ -1069,18 +1070,13 @@ onMounted(() => {
                     <template v-else>—</template>
                   </td>
                   <td class="px-2 py-1.5">
-                    <select v-if="item.status === 'ok' && item.result?.purchase_invoice_id && item.result?.document_kind !== 'advance'"
+                    <select v-if="item.status === 'ok' && item.result?.purchase_invoice_id"
                       :value="item.result.document_kind"
                       :disabled="kindBusyIdx === idx"
                       @change="changeBatchItemKind(item, idx, ($event.target as HTMLSelectElement).value as PurchaseDocumentKind)"
                       class="h-7 px-1.5 border border-neutral-300 rounded bg-surface text-[11px] disabled:opacity-50">
-                      <option value="invoice">{{ t('purchase_invoice.document_kind.invoice') }}</option>
-                      <option value="receipt">{{ t('purchase_invoice.document_kind.receipt') }}</option>
-                      <option value="credit_note">{{ t('purchase_invoice.document_kind.credit_note') }}</option>
+                      <option v-for="k in PURCHASE_DOCUMENT_KINDS" :key="k" :value="k">{{ t(purchaseDocumentKindLabelKey(k)) }}</option>
                     </select>
-                    <span v-else-if="item.result?.document_kind === 'advance'" class="text-[11px] text-neutral-500">
-                      {{ t('purchase_invoice.document_kind.advance') }}
-                    </span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
                   <td class="px-2 py-1.5 text-right">

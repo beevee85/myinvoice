@@ -113,6 +113,8 @@ export interface AresLookupResult {
     company_name: string
     ic: string
     dic: string
+    /** DIČ DPH skupiny (CZ699*) u členů skupinové registrace; jinak ''. */
+    dic_sk_dph?: string
     street: string
     city: string
     zip: string

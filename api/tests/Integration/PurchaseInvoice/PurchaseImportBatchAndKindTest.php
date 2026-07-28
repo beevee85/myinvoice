@@ -118,29 +118,42 @@ final class PurchaseImportBatchAndKindTest extends TestCase
         self::assertSame('invoice', $this->storedKind($id));
     }
 
-    public function testUpdateDocumentKindRejectsAdvanceAndInvalidAndCancelled(): void
+    public function testUpdateDocumentKindAdvanceGuardsInvalidAndCancelled(): void
     {
         $vendor = $this->vendor('Guard dodavatel', 'CZ21000003');
 
-        // advance → invoice zamítnuto
+        // advance BEZ vazeb → přechod povolen (sjednocení nabídky typů, DDKPZ feature):
+        // typický AI import, kde uživatel opravuje chybnou klasifikaci.
         $adv = $this->repo->createDraft($this->payload($vendor, 'PIK-ADV', 'advance'), $this->userId, $this->supplierId);
         $this->piIds[] = $adv;
-        self::assertNotNull($this->repo->updateDocumentKind($adv, $this->supplierId, 'invoice'),
-            'přechod ZE zálohy musí být odmítnut (settlement vazby)');
-        self::assertSame('advance', $this->storedKind($adv));
+        self::assertNull($this->repo->updateDocumentKind($adv, $this->supplierId, 'invoice'),
+            'přechod ZE zálohy bez vazeb je povolen');
+        self::assertSame('invoice', $this->storedKind($adv));
+        // …a zpět na zálohu (stále bez vazeb).
+        self::assertNull($this->repo->updateDocumentKind($adv, $this->supplierId, 'advance'));
 
-        // invoice → advance zamítnuto
-        $inv = $this->repo->createDraft($this->payload($vendor, 'PIK-INV', 'invoice'), $this->userId, $this->supplierId);
-        $this->piIds[] = $inv;
-        self::assertNotNull($this->repo->updateDocumentKind($inv, $this->supplierId, 'advance'),
-            'přechod NA zálohu musí být odmítnut');
+        // advance S vazbou (vyúčtovává ji jiný doklad) → přechod zamítnut.
+        $final = $this->repo->createDraft($this->payload($vendor, 'PIK-FIN', 'invoice'), $this->userId, $this->supplierId);
+        $this->piIds[] = $final;
+        $this->repo->linkAdvance($final, $adv, $this->supplierId);
+        self::assertNotNull($this->repo->updateDocumentKind($adv, $this->supplierId, 'invoice'),
+            'přechod ZE zálohy s aktivní vazbou musí být odmítnut');
+        self::assertSame('advance', $this->storedKind($adv));
+        self::assertNotNull($this->repo->updateDocumentKind($final, $this->supplierId, 'tax_document'),
+            'doklad s vazbou na zálohu nelze překlopit na daňový doklad k záloze');
+        $this->repo->unlinkAdvance($final, $this->supplierId);
+
+        // invoice bez vazeb → tax_document povolen (a zpět).
+        self::assertNull($this->repo->updateDocumentKind($final, $this->supplierId, 'tax_document'));
+        self::assertSame('tax_document', $this->storedKind($final));
+        self::assertNull($this->repo->updateDocumentKind($final, $this->supplierId, 'invoice'));
 
         // neplatný typ
-        self::assertNotNull($this->repo->updateDocumentKind($inv, $this->supplierId, 'nonsense'));
+        self::assertNotNull($this->repo->updateDocumentKind($final, $this->supplierId, 'nonsense'));
 
         // stornovaný doklad
-        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status='cancelled' WHERE id = ?")->execute([$inv]);
-        self::assertNotNull($this->repo->updateDocumentKind($inv, $this->supplierId, 'receipt'),
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status='cancelled' WHERE id = ?")->execute([$final]);
+        self::assertNotNull($this->repo->updateDocumentKind($final, $this->supplierId, 'receipt'),
             'stornovaný doklad nelze měnit');
     }
 

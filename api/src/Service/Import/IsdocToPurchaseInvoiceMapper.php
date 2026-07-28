@@ -226,9 +226,10 @@ final class IsdocToPurchaseInvoiceMapper
     private function mapDocumentKind(string $invoiceType): string
     {
         return match ($invoiceType) {
-            'credit_note' => 'credit_note',
-            'proforma'    => 'advance',
-            default       => 'invoice',
+            'credit_note'  => 'credit_note',
+            'proforma'     => 'advance',
+            'tax_document' => 'tax_document',
+            default        => 'invoice',
         };
     }
 

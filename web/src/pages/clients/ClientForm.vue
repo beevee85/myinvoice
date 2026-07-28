@@ -305,7 +305,8 @@ async function loadFromAres() {
     }
     const d = result.data
     form.value.company_name = d.company_name
-    form.value.dic = d.dic || null
+    // Člen DPH skupiny nemá vlastní DIČ — na dokladech/v KH vystupuje pod DIČ skupiny (CZ699*).
+    form.value.dic = d.dic || d.dic_sk_dph || null
     form.value.street = d.street
     form.value.city = d.city
     form.value.zip = d.zip
