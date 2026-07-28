@@ -1990,6 +1990,124 @@ final class KhDphTaxScenariosTest extends TestCase
     }
 
     /**
+     * P1/P2 (2026-07-28 večer) — konečná faktura po párování § 37a:
+     *  • řádky dokladu zůstávají PŘESNĚ jak je vystavil dodavatel (443 999,99 se
+     *    už nesmí objevit místo 444 000,00),
+     *  • odpočty doslova dle DDKPZ,
+     *  • haléřový rozdíl mezi rozpisem faktury (393 381,83 + 82 610,17) a rozpisy
+     *    DDKPZ (393 381,82 + 82 610,18) nese JEDEN zaokrouhlovací řádek,
+     *  • součet položek = rekapitulace = hlavička = 0,00.
+     */
+    public function testSettlementKeepsVendorRowsAndPutsResidueOnRoundingRow(): void
+    {
+        $container = Bootstrap::buildApp()->getContainer();
+        $svc = $container->get(\MyInvoice\Service\Invoice\PurchaseSettlementService::class);
+        $vendor = $this->client('CZ dodavatel — zaokrouhlení', $this->czId, 'CZ699003841', vendor: true);
+        $d = sprintf('%04d-%02d-19', self::YEAR, self::MONTH);
+        // Řádky přesně dle PDF FV15260816 (brutto 444 000 / 13 800 / 6 600 / 2 700 /
+        // 5 300 / 8 400 / −4 808) — jejich součet daní je 82 610,17.
+        $this->purchase('FV-ROUND', $vendor, '40', false, 'invoice', $d, $d, [
+            [366942.15, 77057.85, 21.0],
+            [11404.96, 2395.04, 21.0],
+            [5454.55, 1145.45, 21.0],
+            [2231.40, 468.60, 21.0],
+            [4380.17, 919.83, 21.0],
+            [6942.15, 1457.85, 21.0],
+            [-3973.55, -834.45, 21.0],
+        ]);
+        $finalId = end($this->purchaseIds);
+        $this->purchase('ZD-ROUND-1', $vendor, '40', false, 'tax_document', $d, $d, [[16528.93, 3471.07, 21.0]]);
+        $zd1 = end($this->purchaseIds);
+        $this->purchase('ZD-ROUND-2', $vendor, '40', false, 'tax_document', $d, $d, [[376852.89, 79139.11, 21.0]]);
+        $zd2 = end($this->purchaseIds);
+
+        $svc->link($finalId, $zd1, $this->supplierId);
+        $svc->link($finalId, $zd2, $this->supplierId);
+        $final = $this->piRepo->find($finalId, $this->supplierId);
+
+        // Hlavička i rekapitulace na nule, bez rozporu znamének.
+        $this->assertEqualsWithDelta(0.00, (float) $final['total_without_vat'], 0.001);
+        $this->assertEqualsWithDelta(0.00, (float) $final['total_vat'], 0.001);
+        $this->assertEqualsWithDelta(0.00, (float) $final['total_with_vat'], 0.001);
+        $this->assertFalse($final['vat_sign_mismatch']);
+
+        // Řádky dodavatele beze změny — hrubé částky přesně dle dokladu.
+        $vendorGross = [];
+        $roundingRows = [];
+        $sumBase = 0.0; $sumVat = 0.0; $sumGross = 0.0;
+        foreach ($final['items'] as $it) {
+            $sumBase  += (float) $it['total_without_vat'];
+            $sumVat   += (float) $it['total_vat'];
+            $sumGross += (float) $it['total_with_vat'];
+            if (!empty($it['is_settlement_rounding'])) {
+                $roundingRows[] = $it;
+            } elseif (empty($it['settlement_source_purchase_invoice_id'])) {
+                $vendorGross[] = round((float) $it['total_with_vat'], 2);
+            }
+        }
+        $this->assertSame(
+            [444000.00, 13800.00, 6600.00, 2700.00, 5300.00, 8400.00, -4808.00],
+            $vendorGross,
+            'Řádky faktury musejí zůstat přesně jak je vystavil dodavatel.',
+        );
+        $this->assertCount(1, $roundingRows, 'Zbytek nese právě jeden zaokrouhlovací řádek.');
+        $this->assertEqualsWithDelta(-0.01, (float) $roundingRows[0]['total_without_vat'], 0.001);
+        $this->assertEqualsWithDelta(0.01, (float) $roundingRows[0]['total_vat'], 0.001);
+
+        // Součet položek = hlavička = rekapitulace.
+        $this->assertEqualsWithDelta(0.00, round($sumBase, 2), 0.001, 'součet základů položek');
+        $this->assertEqualsWithDelta(0.00, round($sumVat, 2), 0.001, 'součet daní položek');
+        $this->assertEqualsWithDelta(0.00, round($sumGross, 2), 0.001, 'součet položek s DPH');
+        foreach ($final['vat_breakdown'] as $b) {
+            $this->assertEqualsWithDelta(0.00, (float) $b['without_vat'], 0.001);
+            $this->assertEqualsWithDelta(0.00, (float) $b['vat'], 0.001);
+        }
+
+        // Odpočtové řádky odkazují i na zálohovou fakturu (celý řetězec v popisu).
+        $descriptions = array_column($final['items'], 'description');
+        $withRef = array_filter($descriptions, static fn (string $t) => str_contains($t, 'ZD-ROUND-1'));
+        $this->assertNotEmpty($withRef);
+
+        // Odpojení uklidí i zaokrouhlovací řádek.
+        $svc->unlink($finalId, $zd1, $this->supplierId);
+        $svc->unlink($finalId, $zd2, $this->supplierId);
+        $restored = $this->piRepo->find($finalId, $this->supplierId);
+        $this->assertSame(
+            [],
+            array_filter($restored['items'], static fn (array $it) => !empty($it['is_settlement_rounding'])),
+            'Po odpojení nesmí zaokrouhlovací řádek zůstat.',
+        );
+    }
+
+    /**
+     * P1 (2026-07-28 večer) — sazba „Mimo DPH" (CZ-NA) je mimo předmět daně:
+     * nesmí se objevit v přiznání ani v KH, na rozdíl od osvobozeného plnění.
+     */
+    public function testOutOfScopeRateNeverEntersReports(): void
+    {
+        $pdo = $this->db->pdo();
+        $naId = (int) $pdo->query("SELECT id FROM vat_rates WHERE code = 'CZ-NA'")->fetchColumn();
+        $this->assertGreaterThan(0, $naId, 'Sazba CZ-NA musí být v číselníku (migrace 0906).');
+
+        $vendor = $this->client('CZ dodavatel — mimo DPH', $this->czId, 'CZ699003841', vendor: true);
+        $d = sprintf('%04d-%02d-20', self::YEAR, self::MONTH);
+        // Hlavičkový klasifikační kód 40 schválně vyplněn — položka „mimo DPH" se
+        // na něj NESMÍ opřít (COALESCE fallback ve VatLedgerService).
+        $this->purchase('MIMO-DPH', $vendor, '40', false, 'invoice', $d, $d, [[50000.00, 0.00, 0.0]]);
+        $id = end($this->purchaseIds);
+        $pdo->prepare('UPDATE purchase_invoice_items SET vat_rate_id = ?, vat_classification_code = NULL WHERE purchase_invoice_id = ?')
+            ->execute([$naId, $id]);
+
+        $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
+        $this->assertSame('', (string) $dp->Veta4['pln23'], 'plnění mimo předmět daně nesmí na ř. 40');
+        $this->assertSame('', (string) $dp->Veta1['pln23'], 'ani na ř. 1');
+
+        $kh = new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']);
+        $this->assertCount(0, $kh->DPHKH1->VetaB2, 'mimo předmět daně nepatří do B.2');
+        $this->assertCount(0, $kh->DPHKH1->VetaB3, 'ani do B.3');
+    }
+
+    /**
      * BOD 3 (2026-07-28) — záloha (advance) NIKDY nevstupuje do přiznání, KH ani
      * nákladů/DzP, ani ve stavu paid s vyplněnou klasifikací a sazbou (dosud kryto
      * jen pro koncepty; reálné zálohy 55/56 byly draft).

@@ -286,6 +286,12 @@ final class VatLedgerService
                     OR (COALESCE(pii.total_vat, 0) = 0
                         AND (pi.reverse_charge = 1
                              OR COALESCE(pii.vat_classification_code, pi.vat_classification_code) IN ('5','23','24','24e','25'))))
+               -- Sazba CZ-NA (mimo DPH) = plnění mimo předmět daně (zálohové výzvy,
+               -- zaokrouhlovací řádky) → do přiznání ani KH NIKDY. Pojistka nezávislá
+               -- na klasifikaci: kód 'NA' na položce by sice stačil, ale prázdná
+               -- klasifikace by spadla na kód HLAVIČKY (COALESCE výše).
+               AND NOT EXISTS (SELECT 1 FROM vat_rates vr_na
+                                WHERE vr_na.id = pii.vat_rate_id AND vr_na.code = 'CZ-NA')
                -- Období odpočtu (tuzemská plnění) = pozdější z (DUZP, vystavení). Nárok
                -- na odpočet nelze uplatnit dřív, než plátce drží daňový doklad (§ 73
                -- odst. 1 písm. a ZDPH), takže faktura se zpětným DUZP, ale vystavená

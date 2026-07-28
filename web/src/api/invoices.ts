@@ -98,6 +98,10 @@ export interface InvoiceItem {
 
 export interface VatBreakdownRow {
   rate: number
+  /** Kód a popisky sazby z číselníku — odlišují „Osvobozeno" od „Mimo DPH" (obě 0 %). */
+  vat_code?: string | null
+  vat_label_cs?: string | null
+  vat_label_en?: string | null
   base: number
   vat: number
 }
@@ -254,6 +258,9 @@ export interface CzkRecap {
   fallback_used: boolean
   breakdown: Array<{
     rate: number
+    vat_code?: string | null
+    vat_label_cs?: string | null
+    vat_label_en?: string | null
     base_czk: number
     vat_czk: number
     with_vat_czk: number

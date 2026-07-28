@@ -96,6 +96,8 @@ final class AiPdfExtractor
             return [
                 'ok'                  => true,
                 'purchase_invoice_id' => $existingId,
+                // Bez typu by select v dávkovém importu spadl na první volbu („Faktura").
+                'document_kind'       => $this->loadDocumentKind($existingId, $supplierId),
                 'source'              => 'duplicate',
                 'duplicate'           => true,
                 'message'             => 'PDF je již importován jako faktura #' . $existingId,
@@ -292,6 +294,7 @@ final class AiPdfExtractor
                 return [
                     'ok'                  => true,
                     'purchase_invoice_id' => $existingId,
+                    'document_kind'       => $this->loadDocumentKind($existingId, $supplierId),
                     'source'              => 'duplicate',
                     'duplicate'           => true,
                     'message'             => 'ISDOCX je již importován jako faktura #' . $existingId,
@@ -337,6 +340,7 @@ final class AiPdfExtractor
         return [
             'ok'                  => true,
             'purchase_invoice_id' => (int) $r['purchase_invoice_id'],
+            'document_kind'       => $this->loadDocumentKind((int) $r['purchase_invoice_id'], $supplierId),
             'vendor_id'           => $r['vendor_id'] ?? null,
             'source'              => 'isdocx',
         ];
@@ -753,6 +757,7 @@ final class AiPdfExtractor
                         . '„DIČ skupiny"). Sazby byly ponechány podle dokladu, nárok na odpočet '
                         . 'je zatím vypnut (bez nároku). Po ověření nastavte „Plátce DPH" na '
                         . 'kartě dodavatele a odpočet v editoru dokladu.',
+                    blocking: true,
                 );
             } catch (\Throwable) {
                 // Varování je „nice to have" — faktura už je vytvořená správně.
@@ -1602,6 +1607,13 @@ final class AiPdfExtractor
      * Normalizuje document_kind z AI odpovědi na povolený enum
      * (whitelist matchující ENUM v `purchase_invoices.document_kind`).
      */
+    /** Typ uloženého dokladu — pro výsledek importu (dávkový select ho předvyplňuje). */
+    private function loadDocumentKind(int $purchaseInvoiceId, int $supplierId): ?string
+    {
+        $row = $this->repo->find($purchaseInvoiceId, $supplierId);
+        return $row !== null ? (string) ($row['document_kind'] ?? 'invoice') : null;
+    }
+
     private function normalizeDocumentKind(string $kind): string
     {
         $k = strtolower(trim($kind));

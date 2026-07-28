@@ -204,6 +204,7 @@ final class PurchaseSettlementService
         try {
             $this->repo->setSettledBy($taxDocId, null, $supplierId);
             $this->repo->deleteSettlementRows($finalId, $taxDocId);
+            $this->repo->deleteSettlementRoundingRows($finalId);
 
             if ($hadGeneratedRows) {
                 // Symetrie k link(): hrubou hodnotu odpojeného DDKPZ vrátíme do cíle
@@ -266,6 +267,16 @@ final class PurchaseSettlementService
         }
 
         $docNumber = (string) ($doc['vendor_invoice_number'] ?? $doc['varsymbol'] ?? ('#' . $taxDocId));
+        // Odkaz na zálohovou fakturu, ke které byl daňový doklad vystaven — z konečné
+        // faktury je tak vidět celý řetězec záloha → DDKPZ → vyúčtování bez proklikávání.
+        $advanceRef = '';
+        $linkedAdvance = $doc['linked_advance'] ?? null;
+        if (is_array($linkedAdvance)) {
+            $advNumber = (string) ($linkedAdvance['vendor_invoice_number'] ?? $linkedAdvance['varsymbol'] ?? '');
+            if ($advNumber !== '') {
+                $advanceRef = ' (' . $advNumber . ')';
+            }
+        }
         $pricesIncludeVat = !empty($final['prices_include_vat']);
 
         // Cíl § 37a se počítá z HODNOT DOKLADŮ, ne ze stavu řádků: nově vložené
@@ -273,6 +284,11 @@ final class PurchaseSettlementService
         // čtení „čerstvých" řádků by dalo cíl = původní částka.
         $beforeByRate = $this->breakdownByRate($final['items'] ?? []);
         $docByRate    = $this->breakdownByRate($doc['items'] ?? []);
+
+        // Snapshot řádků PŘED přepočtem: doklad se eviduje tak, jak ho vystavil
+        // dodavatel (§ 73 / § 100 ZDPH), takže se řádky po přepočtu vrátí na původní
+        // hodnoty a haléřový rozdíl ponese samostatný řádek „Zaokrouhlení § 37a".
+        $rowSnapshot = $this->repo->snapshotItemTotals($finalId);
 
         $rows = [];
         foreach ($this->rowGroups($doc['items'] ?? []) as $g) {
@@ -282,7 +298,7 @@ final class PurchaseSettlementService
                 ? -round($g['base'] + $g['vat'], 2)
                 : -$g['base'];
             $rows[] = [
-                'description'             => 'Odpočet zálohy — daňový doklad ' . $docNumber,
+                'description'             => 'Odpočet zálohy — daňový doklad ' . $docNumber . $advanceRef,
                 'unit_price'              => $unitPrice,
                 'vat_rate_id'             => $g['vat_rate_id'],
                 'rate'                    => $g['rate'],
@@ -307,7 +323,67 @@ final class PurchaseSettlementService
         }
         $this->applyGrossTargets($finalId, $supplierId, $final['vat_overrides'] ?? null, $targets);
 
+        // Řádky zpět dle dokladů (faktura z PDF, odpočty dle DDKPZ) a zbytek proti
+        // cíli § 37a na jeden viditelný zaokrouhlovací řádek.
+        $this->repo->restoreItemTotals($rowSnapshot);
         $this->pinAllSettlementRows($finalId, $supplierId);
+        $this->syncRoundingRows($finalId, $supplierId, $targets);
+    }
+
+    /**
+     * Dorovná rozdíl mezi součtem řádků sazby a cílem § 37a jedním viditelným řádkem
+     * „Zaokrouhlení § 37a" — místo rozpouštění haléřů do zdanitelných položek, které
+     * musejí sedět na doklad dodavatele.
+     *
+     * Řádek je ve stejné sazbě jako rozdíl, který nuluje — tím sazba vstoupí do
+     * přiznání i KH správnou (nulovou) hodnotou. Kdyby stál „mimo DPH", zůstal by
+     * v sazbě rozdíl 0,01 / −0,01 a doklad by hlásil rozpor znamének.
+     *
+     * @param array<string, array{rate:float, gross:float}> $targets
+     */
+    private function syncRoundingRows(int $finalId, int $supplierId, array $targets): void
+    {
+        $fresh = $this->repo->find($finalId, $supplierId);
+        if ($fresh === null) {
+            return;
+        }
+        $sums = [];
+        $rateIds = [];
+        $codes = [];
+        foreach ($fresh['items'] ?? [] as $it) {
+            if (!empty($it['is_settlement_rounding'])) {
+                continue;
+            }
+            $rate = (float) ($it['vat_rate_snapshot'] ?? 0);
+            $key  = number_format($rate, 2, '.', '');
+            $sums[$key] ??= ['base' => 0.0, 'vat' => 0.0];
+            $sums[$key]['base'] += (float) ($it['total_without_vat'] ?? 0);
+            $sums[$key]['vat']  += (float) ($it['total_vat'] ?? 0);
+            $rateIds[$key] ??= (int) ($it['vat_rate_id'] ?? 0);
+            if (!isset($codes[$key]) && !empty($it['vat_classification_code'])) {
+                $codes[$key] = (string) $it['vat_classification_code'];
+            }
+        }
+
+        foreach ($targets as $key => $t) {
+            $rate  = (float) $t['rate'];
+            $gross = (float) $t['gross'];
+            $vatTarget  = $rate > 0.0 ? round($gross * $rate / (100 + $rate), 2) : 0.0;
+            $baseTarget = round($gross - $vatTarget, 2);
+            $sum = $sums[$key] ?? ['base' => 0.0, 'vat' => 0.0];
+            $this->repo->syncSettlementRoundingRow(
+                $finalId,
+                $rateIds[$key] ?? 0,
+                $rate,
+                round($baseTarget - round($sum['base'], 2), 2),
+                round($vatTarget - round($sum['vat'], 2), 2),
+                $codes[$key] ?? null,
+                'Zaokrouhlení § 37a (rozdíl rozpisu faktury a daňových dokladů k záloze)',
+            );
+        }
+
+        // Hlavičkové součty ze skutečně uložených řádků (řádky se nepřepočítávají).
+        $this->repo->syncHeaderTotalsFromItems($finalId, $supplierId);
     }
 
     /**

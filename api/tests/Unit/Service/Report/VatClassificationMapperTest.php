@@ -194,6 +194,9 @@ final class VatClassificationMapperTest extends TestCase
         $this->pdo->exec("CREATE TABLE currencies (
             id INTEGER PRIMARY KEY, code TEXT NOT NULL
         )");
+        // Číselník sazeb — VatLedgerService z něj vylučuje sazbu „mimo předmět DPH" (CZ-NA).
+        $this->pdo->exec("CREATE TABLE vat_rates (id INTEGER PRIMARY KEY, code TEXT NOT NULL, rate_percent REAL NOT NULL DEFAULT 0)");
+        $this->pdo->exec("INSERT INTO vat_rates (id, code, rate_percent) VALUES (1, 'CZ-21', 21), (2, 'CZ-12', 12), (3, 'CZ-0', 0), (7, 'CZ-NA', 0)");
         $this->pdo->exec("INSERT INTO currencies (id, code) VALUES (1, 'CZK'), (2, 'EUR')");
 
         // VatLedgerService JOINuje clients + countries (kvůli protistraně/zemi pro KH).
@@ -254,6 +257,7 @@ final class VatClassificationMapperTest extends TestCase
         $this->pdo->exec("CREATE TABLE purchase_invoice_items (
             id INTEGER PRIMARY KEY,
             purchase_invoice_id INTEGER NOT NULL,
+            vat_rate_id INTEGER,
             vat_rate_snapshot REAL NOT NULL,
             description TEXT NULL,
             total_without_vat REAL NOT NULL,

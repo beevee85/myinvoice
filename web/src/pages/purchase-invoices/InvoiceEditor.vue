@@ -13,6 +13,7 @@ import {
   type VatDeduction,
 } from '@/api/purchaseInvoices'
 import { PURCHASE_DOCUMENT_KINDS, purchaseDocumentKindLabelKey } from '@/constants/purchaseDocumentKinds'
+import { vatRateLabel as sharedVatRateLabel } from '@/utils/vatRate'
 import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
@@ -33,7 +34,7 @@ import ExchangeRateInput from '@/components/purchase/ExchangeRateInput.vue'
 
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
 
@@ -406,7 +407,11 @@ function populate(inv: PurchaseInvoice) {
   form.value.varsymbol = inv.varsymbol || ''
   form.value.document_kind = inv.document_kind
   form.value.issue_date = inv.issue_date
-  form.value.tax_date = inv.tax_date || inv.issue_date
+  // Zálohová faktura DUZP nemá (§ 20a — vzniká až přijetím úplaty) a pole je skryté;
+  // předvyplnění datem vystavení by ho při uložení znovu zapsalo.
+  form.value.tax_date = inv.document_kind === 'advance'
+    ? (inv.tax_date ?? '')
+    : (inv.tax_date || inv.issue_date)
   form.value.due_date = inv.due_date
   form.value.received_at = inv.received_at
   form.value.currency_id = inv.currency_id
@@ -523,11 +528,10 @@ const unitPriceHeaderLabel = computed(() => form.value.prices_include_vat
   ? t('purchase_invoice.items.unit_price_gross')
   : t('purchase_invoice.items.unit_price'))
 
-// Popisek sazby — odliš dvě 0% sazby (osvobozeno vs. přenesená DPH), jako u vydané faktury.
+// Popisek sazby bere sdílený helper z číselníku (label_cs/label_en) — jinak by
+// „Osvobozeno" a „Mimo DPH" (obě 0 %) vyšly stejně. Viz web/src/utils/vatRate.ts.
 function vatRateLabel(r: VatRate): string {
-  if (Number(r.rate_percent) > 0) return `${r.rate_percent} %`
-  if (r.is_reverse_charge) return t('invoice.vat_rate_label.reverse_charge')
-  return t('invoice.vat_rate_label.exempt')
+  return sharedVatRateLabel(r, locale.value, t)
 }
 
 // ── Rekapitulace DPH per sazba + ruční override dle dokladu (§ 73 ZDPH) ──

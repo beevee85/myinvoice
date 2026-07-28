@@ -1854,6 +1854,7 @@
     },
     "vat_rate_label": {
       "exempt": "0 % (osvob.)",
+      "out_of_scope": "mimo DPH",
       "reverse_charge": "0 % (RC)"
     },
     "exchange_rate_label": "Kurz CZK / 1 {currency}",

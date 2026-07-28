@@ -174,6 +174,9 @@ final class VatLedgerServiceCreditNoteTest extends TestCase
     private function createSchema(): void
     {
         $this->pdo->exec("CREATE TABLE currencies (id INTEGER PRIMARY KEY, code TEXT NOT NULL)");
+        // Číselník sazeb — VatLedgerService z něj vylučuje sazbu „mimo předmět DPH" (CZ-NA).
+        $this->pdo->exec("CREATE TABLE vat_rates (id INTEGER PRIMARY KEY, code TEXT NOT NULL, rate_percent REAL NOT NULL DEFAULT 0)");
+        $this->pdo->exec("INSERT INTO vat_rates (id, code, rate_percent) VALUES (1, 'CZ-21', 21), (2, 'CZ-12', 12), (3, 'CZ-0', 0), (7, 'CZ-NA', 0)");
         $this->pdo->exec("INSERT INTO currencies (id, code) VALUES (1, 'CZK')");
         $this->pdo->exec("CREATE TABLE countries (id INTEGER PRIMARY KEY, iso2 TEXT NOT NULL, is_eu INTEGER NOT NULL DEFAULT 0)");
         $this->pdo->exec("INSERT INTO countries (id, iso2, is_eu) VALUES (1,'CZ',1), (4,'DE',1), (9,'US',0)");
@@ -215,7 +218,8 @@ final class VatLedgerServiceCreditNoteTest extends TestCase
             deleted_at TEXT NULL
         )");
         $this->pdo->exec("CREATE TABLE purchase_invoice_items (
-            id INTEGER PRIMARY KEY, purchase_invoice_id INTEGER NOT NULL, vat_rate_snapshot REAL NOT NULL,
+            id INTEGER PRIMARY KEY, purchase_invoice_id INTEGER NOT NULL, vat_rate_id INTEGER,
+            vat_rate_snapshot REAL NOT NULL,
             description TEXT NULL, total_without_vat REAL NOT NULL, total_vat REAL NOT NULL,
             vat_classification_code TEXT NULL, is_fixed_asset INTEGER NOT NULL DEFAULT 0
         )");

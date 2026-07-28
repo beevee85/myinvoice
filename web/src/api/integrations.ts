@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { PurchaseDocumentKind } from './purchaseInvoices'
 
 /**
  * Externí integrace — iDoklad, Fakturoid (fáze 2b), Anthropic AI (fáze 2c).
@@ -105,7 +106,7 @@ export interface AiExtractResult {
   purchase_invoice_id?: number
   vendor_id?: number
   vendor_name?: string
-  document_kind?: 'invoice' | 'receipt' | 'credit_note' | 'advance'
+  document_kind?: PurchaseDocumentKind
   total_with_vat?: number | null
   currency?: string
   source: 'isdoc_embedded' | 'isdocx' | 'duplicate' | 'ai' | 'ai_failed' | 'ai_invalid' | 'wrong_tenant' | 'no_vendor' | 'create_failed'

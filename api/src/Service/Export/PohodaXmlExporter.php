@@ -180,7 +180,12 @@ final class PohodaXmlExporter
                 };
             $this->el($dom, $hdr, self::NS_INV, 'inv:invoiceType', $invType);
 
-            $vs = (string) ($invoice['varsymbol'] ?? '');
+            // U PŘIJATÝCH je `varsymbol` NAŠE interní řada (DZ2605001) — do platebního
+            // pole Pohody patří variabilní symbol, pod kterým platba reálně proběhla,
+            // jinak se rozbije likvidace/párování plateb.
+            $vs = $isPurchase
+                ? (string) ($invoice['payment_variable_symbol'] ?? $invoice['varsymbol'] ?? '')
+                : (string) ($invoice['varsymbol'] ?? '');
             // Evidenční číslo dokladu (numberRequested) jen u VYDANÝCH — je to NAŠE číslo
             // z naší číselné řady. U PŘIJATÉ faktury je `varsymbol` číslo DODAVATELE; vnucovat
             // ho do naší řady (navíc numberRequested má checkDuplicity=true → import spadne na
@@ -198,6 +203,17 @@ final class PohodaXmlExporter
             $symVar = VariableSymbolNormalizer::forPayment($vs);
             if ($symVar !== '') {
                 $this->el($dom, $hdr, self::NS_INV, 'inv:symVar', $symVar);
+            }
+
+            // Evidenční číslo daňového dokladu pro kontrolní hlášení: u PŘIJATÝCH ho
+            // Pohoda bere z pole „Doklad" (inv:originalDocument). Bez něj nemá KH co
+            // do oddílu B.2 uvést a doklad spadne do B.3 (souhrnně, bez čísla).
+            // XSD pořadí hlavičky: … number, symVar, originalDocument, symPar, date …
+            if ($isPurchase) {
+                $docNumber = trim((string) ($invoice['document_number'] ?? ''));
+                if ($docNumber !== '') {
+                    $this->el($dom, $hdr, self::NS_INV, 'inv:originalDocument', mb_substr($docNumber, 0, 32));
+                }
             }
             $this->el($dom, $hdr, self::NS_INV, 'inv:date', (string) $invoice['issue_date']);
             if (!empty($invoice['tax_date'])) {

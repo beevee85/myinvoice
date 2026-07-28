@@ -14,7 +14,8 @@ import {
 } from '@/api/settings'
 import { adminApi, type InvoiceSmtpLog } from '@/api/admin'
 import { apiErrorMessage } from '@/api/errors'
-import { formatMoney, formatDate, formatPercent, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
+import { vatRateSnapshotLabel } from '@/utils/vatRate'
+import { formatMoney, formatDate, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useHotkey } from '@/composables/useHotkey'
@@ -1927,7 +1928,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
             <td class="num">{{ item.item_kind === 'discount' ? '' : item.quantity }}</td>
             <td class="text-neutral-600">{{ item.item_kind === 'discount' ? '' : item.unit }}</td>
             <td class="num">{{ item.item_kind === 'discount' ? '' : formatMoney(displayUnitPriceNet(item), invoice.currency) }}</td>
-            <td v-if="supplierIsVatPayer" class="num text-xs">{{ formatPercent(item.vat_rate_snapshot ?? 0) }}</td>
+            <td v-if="supplierIsVatPayer" class="num text-xs">{{ vatRateSnapshotLabel(item.vat_rate_snapshot ?? 0, locale, item.vat_label_cs, item.vat_label_en) }}</td>
             <td v-if="supplierIsVatPayer" class="num">{{ formatMoney(item.total_without_vat ?? 0, invoice.currency) }}</td>
             <td class="num font-medium">{{ formatMoney(supplierIsVatPayer ? (item.total_with_vat ?? 0) : (item.total_without_vat ?? 0), invoice.currency) }}</td>
           </tr>
@@ -1947,7 +1948,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
               <span class="font-mono">{{ formatMoney(displayUnitPriceNet(item), invoice.currency) }}</span>
               <template v-if="supplierIsVatPayer">
                 <span class="text-neutral-400 mx-1.5">·</span>
-                <span>{{ formatPercent(item.vat_rate_snapshot ?? 0) }}</span>
+                <span>{{ vatRateSnapshotLabel(item.vat_rate_snapshot ?? 0, locale, item.vat_label_cs, item.vat_label_en) }}</span>
               </template>
             </span>
           </div>
@@ -1966,11 +1967,11 @@ const invoiceActions = computed<ActionItem[]>(() => {
         <dl class="space-y-1 text-sm">
           <template v-if="supplierIsVatPayer">
             <div v-for="b in invoice.vat_breakdown" :key="b.rate" class="flex justify-between">
-              <dt class="text-neutral-500">{{ t('invoice.totals.base') }} {{ formatPercent(b.rate) }}</dt>
+              <dt class="text-neutral-500">{{ t('invoice.totals.base') }} {{ vatRateSnapshotLabel(b.rate, locale, b.vat_label_cs, b.vat_label_en) }}</dt>
               <dd class="font-mono">{{ formatMoney(b.base, invoice.currency) }}</dd>
             </div>
             <div v-for="b in invoice.vat_breakdown" :key="'v'+b.rate" v-show="b.vat > 0" class="flex justify-between">
-              <dt class="text-neutral-500">{{ t('invoice.totals.vat') }} {{ formatPercent(b.rate) }}</dt>
+              <dt class="text-neutral-500">{{ t('invoice.totals.vat') }} {{ vatRateSnapshotLabel(b.rate, locale, b.vat_label_cs, b.vat_label_en) }}</dt>
               <dd class="font-mono">{{ formatMoney(b.vat, invoice.currency) }}</dd>
             </div>
           </template>
@@ -2206,11 +2207,11 @@ const invoiceActions = computed<ActionItem[]>(() => {
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <dl class="space-y-1 text-sm">
           <div v-for="b in invoice.czk_recap.breakdown" :key="'cb'+b.rate" class="flex justify-between">
-            <dt class="text-neutral-500">{{ t('invoice.totals.base') }} {{ formatPercent(b.rate) }}</dt>
+            <dt class="text-neutral-500">{{ t('invoice.totals.base') }} {{ vatRateSnapshotLabel(b.rate, locale, b.vat_label_cs, b.vat_label_en) }}</dt>
             <dd class="font-mono">{{ formatMoney(b.base_czk, 'CZK') }}</dd>
           </div>
           <div v-for="b in invoice.czk_recap.breakdown" :key="'cv'+b.rate" v-show="b.vat_czk > 0" class="flex justify-between">
-            <dt class="text-neutral-500">{{ t('invoice.totals.vat') }} {{ formatPercent(b.rate) }}</dt>
+            <dt class="text-neutral-500">{{ t('invoice.totals.vat') }} {{ vatRateSnapshotLabel(b.rate, locale, b.vat_label_cs, b.vat_label_en) }}</dt>
             <dd class="font-mono">{{ formatMoney(b.vat_czk, 'CZK') }}</dd>
           </div>
         </dl>

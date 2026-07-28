@@ -1854,6 +1854,7 @@
     },
     "vat_rate_label": {
       "exempt": "0 % (exempt)",
+      "out_of_scope": "outside VAT scope",
       "reverse_charge": "0 % (RC)"
     },
     "exchange_rate_label": "Rate CZK / 1 {currency}",

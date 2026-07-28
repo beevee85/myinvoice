@@ -11,8 +11,9 @@ import { useAuthStore } from '@/stores/auth'
 import { apiErrorMessage } from '@/api/errors'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import DocumentTrashModal, { type TrashModalDoc } from '@/components/invoices/DocumentTrashModal.vue'
+import { vatRateSnapshotLabel } from '@/utils/vatRate'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
@@ -858,7 +859,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
             <td class="py-2 px-2 text-right font-mono">{{ it.quantity }}</td>
             <td class="py-2 px-2">{{ it.unit }}</td>
             <td class="py-2 px-2 text-right font-mono">{{ formatMoney(displayUnitPriceNet(it), invoice.currency) }}</td>
-            <td class="py-2 px-2 text-right">{{ it.vat_rate_snapshot }}%</td>
+            <td class="py-2 px-2 text-right">{{ vatRateSnapshotLabel(it.vat_rate_snapshot, locale, it.vat_label_cs, it.vat_label_en) }}</td>
             <td class="py-2 px-5 text-right font-mono">{{ formatMoney(it.total_with_vat, invoice.currency) }}</td>
           </tr>
         </tbody>
@@ -887,7 +888,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
           </thead>
           <tbody>
             <tr v-for="b in invoice.vat_breakdown" :key="b.vat_rate" class="border-b border-neutral-50">
-              <td class="py-1.5">{{ b.vat_rate }}%</td>
+              <td class="py-1.5">{{ vatRateSnapshotLabel(b.vat_rate, locale, b.vat_label_cs, b.vat_label_en) }}</td>
               <td class="py-1.5 text-right font-mono">{{ formatMoney(b.without_vat, invoice.currency) }}</td>
               <td class="py-1.5 text-right font-mono">{{ formatMoney(b.vat, invoice.currency) }}</td>
               <td class="py-1.5 text-right font-mono">{{ formatMoney(b.with_vat, invoice.currency) }}</td>

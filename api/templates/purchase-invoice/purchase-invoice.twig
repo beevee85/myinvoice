@@ -137,7 +137,7 @@
       <td>{{ item.description }}</td>
       <td class="num">{{ item.quantity|number_format(2, ',', ' ') }} {{ item.unit|default('ks') }}</td>
       <td class="num">{{ item.unit_price_without_vat|number_format(2, ',', ' ') }} {{ currency }}</td>
-      <td class="num">{{ item.vat_rate|number_format(0) }}%</td>
+      <td class="num">{% if item.vat_rate > 0 or item.vat_rate_label is empty %}{{ item.vat_rate|number_format(0) }}%{% else %}{{ item.vat_rate_label }}{% endif %}</td>
       <td class="num">{{ item.line_total|number_format(2, ',', ' ') }} {{ currency }}</td>
     </tr>
     {% else %}

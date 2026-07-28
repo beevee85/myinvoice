@@ -300,6 +300,25 @@ jako `receivedAdvanceInvoice`, ta je vyhrazená nedaňové záloze. Rozpis DPH
 (`homeCurrency`) nese DDKPZ v plné výši, konečná faktura s nulovým rozdílem
 samé nuly. Zálohové faktury se exportují jako `receivedAdvanceInvoice`.
 
+**Co Pohoda potřebuje pro správné zařazení do KH (ověřeno 28. 7. 2026):**
+
+| Pole v XML | Význam pro KH | Stav |
+|---|---|---|
+| `typ:partnerIdentity/typ:dic` | bez DIČ dodavatele nelze doklad zařadit do **B.2** — spadl by do souhrnného **B.3** | doplňuje se z karty dodavatele, i když ho snapshot dokladu nemá |
+| `inv:originalDocument` | pole „Doklad" = zdroj **evidenčního čísla daňového dokladu** pro B.2 | posílá se číslo dokladu dodavatele (ZD915260089) |
+| `inv:symVar` | variabilní symbol platby (likvidace úhrad) | u přijatých se posílá **platební VS**, ne naše interní číslo |
+| `typ:priceHigh` / `priceHighVAT` | základ a daň v 21% pásmu | dle dokladu |
+
+Limit 10 000 Kč a rozdělení B.2/B.3 určuje **Pohoda sama** z hodnoty dokladu;
+naším úkolem je dodat DIČ a evidenční číslo. Bez nich Pohoda doklad zařadí do
+B.3 (souhrnně) a kontrolní hlášení se rozejde s dodavatelovým podáním.
+
+⚠ **Pozor při hromadném exportu:** exportujete-li do jednoho balíčku zálohovou
+fakturu i daňový doklad k záloze, vzniknou v Pohodě dva závazky (20 000 + 20 000).
+Do závazků patří jen jeden z nich — Stormware pro tuto situaci doporučuje vést
+DDKPZ jako interní doklad. Pro DPH a KH jsou obě varianty správně; jde o
+platební stranu ([Stormware FAQ 2895](https://www.stormware.cz/podpora/faq/pohoda/157/?id=2895)).
+
 ### Praktická past při ručním pořízení DDKPZ
 
 Kalkulátor počítá daň řádku ze sazby (16 528,93 × 21 % = **3 471,08**), doklad

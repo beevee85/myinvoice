@@ -94,6 +94,24 @@ final class PurchaseInvoiceExportService
         // Náš tenant je v této transakci CUSTOMER (kupující). Vendor je SUPPLIER.
         $ourSnapshot = $this->loadSupplierSnapshot($supplierId);
         $vendorSnapshot = $pi['vendor_snapshot'] ?? $this->loadVendorSnapshot((int) $pi['vendor_id']);
+        // Snapshot dodavatele se pořizuje při vzniku dokladu a IDENTIFIKAČNÍ údaje v něm
+        // mohou chybět (DIČ doplněné až později — typicky u členů DPH skupiny). Bez DIČ
+        // odejde doklad do Pohody/ISDOC bez identifikace protistrany a v kontrolním
+        // hlášení skončí v B.3 místo B.2. Chybějící identifikaci proto doplníme
+        // z živé karty klienta; ostatní pole snapshotu (název, adresa) zůstávají.
+        if (is_array($vendorSnapshot)) {
+            $needsDic = trim((string) ($vendorSnapshot['dic'] ?? '')) === '';
+            $needsIc  = trim((string) ($vendorSnapshot['ic'] ?? '')) === '';
+            if ($needsDic || $needsIc) {
+                $live = $this->loadVendorSnapshot((int) $pi['vendor_id']);
+                if ($needsDic && trim((string) ($live['dic'] ?? '')) !== '') {
+                    $vendorSnapshot['dic'] = $live['dic'];
+                }
+                if ($needsIc && trim((string) ($live['ic'] ?? '')) !== '') {
+                    $vendorSnapshot['ic'] = $live['ic'];
+                }
+            }
+        }
         $paymentVariableSymbol = $this->paymentVariableSymbol($pi);
 
         // Items mapping — preserve structure (description, quantity, unit_price, vat_rate)
@@ -110,6 +128,8 @@ final class PurchaseInvoiceExportService
                 'total_without_vat'      => (float) ($it['total_without_vat'] ?? 0),
                 'total_vat'              => (float) ($it['total_vat'] ?? 0),
                 'total_with_vat'         => (float) ($it['total_with_vat'] ?? 0),
+                // Kód sazby — ISDOC podle něj označí řádek mimo předmět daně.
+                'vat_code'                => $it['vat_code'] ?? null,
                 // Auto-odpočtový řádek § 37a — ISDOC ho nevypisuje mezi InvoiceLines,
                 // odpočet zdaněných záloh se komunikuje přes <TaxedDeposits>.
                 'is_settlement_deduction' => !empty($it['settlement_source_purchase_invoice_id']),

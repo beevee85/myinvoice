@@ -52,6 +52,10 @@ export interface PurchaseInvoiceItem {
 
 export interface PurchaseVatBreakdownRow {
   vat_rate: number
+  /** Kód a popisky sazby z číselníku — odlišují „Osvobozeno" od „Mimo DPH" (obě 0 %). */
+  vat_code?: string | null
+  vat_label_cs?: string | null
+  vat_label_en?: string | null
   without_vat: number
   vat: number
   with_vat: number

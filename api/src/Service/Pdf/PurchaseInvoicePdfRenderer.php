@@ -62,9 +62,10 @@ final class PurchaseInvoicePdfRenderer
         // z řádkového základu), ale řádkový SOUČET ukazujeme S DPH — řádek je tak standardní
         // (cena/j bez DPH + sazba + celkem s DPH) a odráží, že jde o doklad s cenami vč. DPH.
         $pricesIncludeVat = !empty($invoice['prices_include_vat']);
+        $locale = $invoice['language'] ?? 'cs';
 
         // Map items na shape co Twig očekává
-        $itemsNorm = array_map(function ($it) use ($pricesIncludeVat) {
+        $itemsNorm = array_map(function ($it) use ($pricesIncludeVat, $locale) {
             $qty   = (float) ($it['quantity'] ?? 1);
             $base  = (float) ($it['total_without_vat'] ?? 0);
             $gross = (float) ($it['total_with_vat'] ?? 0);
@@ -76,6 +77,10 @@ final class PurchaseInvoicePdfRenderer
                 'unit'                   => $it['unit'] ?? 'ks',
                 'unit_price_without_vat' => $unitNet, // vždy netto
                 'vat_rate'               => (float) ($it['vat_rate_snapshot'] ?? $it['vat_rate'] ?? 0),
+                // Popisek z číselníku — u 0% sazeb odliší „Osvobozeno" od „Mimo DPH".
+                'vat_rate_label'         => $locale === 'en'
+                    ? ($it['vat_label_en'] ?? null)
+                    : ($it['vat_label_cs'] ?? null),
                 'total_without_vat'      => $base,
                 'total_with_vat'         => $gross,
                 // Řádkový součet zobrazovaný na dokladu (s DPH → brutto, jinak netto).
@@ -83,7 +88,6 @@ final class PurchaseInvoicePdfRenderer
             ];
         }, $items);
 
-        $locale = $invoice['language'] ?? 'cs';
         $docTypeLabel = $this->docTypeLabel($invoice['document_kind'] ?? 'invoice', $locale);
         $currency = $invoice['currency'] ?? 'CZK';
 

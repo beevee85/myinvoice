@@ -1761,7 +1761,20 @@ final class InvoiceRepository
             $rate = (float) $item['vat_rate_snapshot'];
             $key = number_format($rate, 2, '.', '');
             if (!isset($bd[$key])) {
-                $bd[$key] = ['rate' => $rate, 'base' => 0.0, 'vat' => 0.0];
+                // Kód a popisky sazby — bez nich nejde v rozpisu odlišit „Osvobozeno"
+                // od „Mimo DPH" (obě 0 %, ale jiný daňový význam).
+                $bd[$key] = [
+                    'rate'         => $rate,
+                    'vat_code'     => $item['vat_code'] ?? null,
+                    'vat_label_cs' => $item['vat_label_cs'] ?? null,
+                    'vat_label_en' => $item['vat_label_en'] ?? null,
+                    'base'         => 0.0,
+                    'vat'          => 0.0,
+                ];
+            } elseif (($bd[$key]['vat_code'] ?? null) !== ($item['vat_code'] ?? null)) {
+                $bd[$key]['vat_code']     = null;
+                $bd[$key]['vat_label_cs'] = null;
+                $bd[$key]['vat_label_en'] = null;
             }
             $bd[$key]['base'] += (float) $item['total_without_vat'];
             $bd[$key]['vat']  += (float) $item['total_vat'];
@@ -1769,9 +1782,12 @@ final class InvoiceRepository
         $out = [];
         foreach ($bd as $b) {
             $out[] = [
-                'rate' => $b['rate'],
-                'base' => round($b['base'], 2),
-                'vat'  => round($b['vat'], 2),
+                'rate'         => $b['rate'],
+                'vat_code'     => $b['vat_code'] ?? null,
+                'vat_label_cs' => $b['vat_label_cs'] ?? null,
+                'vat_label_en' => $b['vat_label_en'] ?? null,
+                'base'         => round($b['base'], 2),
+                'vat'          => round($b['vat'], 2),
             ];
         }
         usort($out, fn ($a, $b) => $b['rate'] <=> $a['rate']);

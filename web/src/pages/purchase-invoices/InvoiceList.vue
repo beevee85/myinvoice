@@ -379,7 +379,9 @@ async function openTrashModal(mode: 'trash' | 'force' | 'empty', ids: number[]) 
         varsymbol: d.varsymbol ?? null,
         party: row?.vendor_company_name ?? null,
         totalFormatted: row ? formatMoney(row.total_with_vat, row.currency) : null,
-        taxDate: row ? formatDate(row.tax_date || row.issue_date) : null,
+        // DUZP se nedopočítává z data vystavení — doklad bez DUZP (zálohová faktura)
+        // ho prostě nemá (§ 20a: vzniká až přijetím úplaty).
+        taxDate: row?.tax_date ? formatDate(row.tax_date) : null,
         statusLabel: d.status ? t(`purchase_invoice.status.${d.status}`) : null,
         blockers: d.blockers ?? [],
       }
@@ -790,7 +792,7 @@ async function bulkSetKind() {
                   </td>
                   <td class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ t(`purchase_invoice.document_kind.${inv.document_kind}`) }}</td>
                   <td class="px-4 py-2.5 text-center text-xs">
-                    <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
+                    <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ inv.tax_date ? formatDate(inv.tax_date) : '—' }}</span>
                   </td>
                   <td v-if="!trashOnly" class="px-4 py-2.5 text-center text-xs">
                     <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : 'text-neutral-600'">
@@ -889,7 +891,7 @@ async function bulkSetKind() {
                   </span>
                 </div>
                 <div class="flex items-center justify-between gap-2 mt-1 text-xs text-neutral-500">
-                  <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
+                  <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ inv.tax_date ? formatDate(inv.tax_date) : '—' }}</span>
                   <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : ''">
                     {{ t('purchase_invoice.fields.due_date') }}: {{ formatDate(inv.due_date) }}
                   </span>

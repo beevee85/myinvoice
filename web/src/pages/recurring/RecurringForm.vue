@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { recurringApi, type RecurringTemplate, type RecurringTemplatePayload, type Frequency } from '@/api/recurring'
 import { apiErrorMessage } from '@/api/errors'
+import { vatRateLabel } from '@/utils/vatRate'
 import { clientsApi, type Client, type ViesLookupResult } from '@/api/clients'
 import { projectsApi, type Project } from '@/api/projects'
 import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
@@ -17,7 +18,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
 
-const { t, tm, rt } = useI18n()
+const { t, tm, rt, locale } = useI18n()
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
@@ -1089,7 +1090,7 @@ async function submit() {
               <td v-if="supplierIsVatPayer" class="py-1.5 pr-2">
                 <select v-model.number="it.vat_rate_id" :disabled="!!it.price_list_item_id" class="w-full h-8 px-2 border border-neutral-300 rounded bg-surface disabled:bg-neutral-100">
                   <option v-for="r in vatRates" :key="r.id" :value="r.id">
-                    {{ Number(r.rate_percent) > 0 ? r.rate_percent + ' %' : (r.is_reverse_charge ? 'RC' : '0 %') }}
+                    {{ vatRateLabel(r, locale, t) }}
                   </option>
                 </select>
               </td>

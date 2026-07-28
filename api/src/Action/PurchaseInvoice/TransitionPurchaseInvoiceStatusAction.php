@@ -85,6 +85,19 @@ final class TransitionPurchaseInvoiceStatusAction
             );
         }
 
+        // Blokující upozornění z AI extrakce (rozpor: doklad nese DPH, ale dodavatel
+        // je veden jako neplátce) musí uživatel vyřešit dřív, než doklad opustí
+        // koncept — jinak by se zaúčtoval s tiše ztraceným nárokem na odpočet.
+        if ($currentStatus === 'draft' && $target !== 'cancelled' && !empty($existing['extraction_blocking'])) {
+            return Json::error(
+                $response,
+                'extraction_conflict_unresolved',
+                'Doklad má nevyřešené upozornění z importu: ' . (string) ($existing['extraction_warning'] ?? '')
+                . ' — oprav údaje dodavatele nebo upozornění vědomě zavři („Zkontrolováno"), pak lze pokračovat.',
+                409,
+            );
+        }
+
         // Storno dokladu zapojeného do vyúčtování záloh (záloha ↔ DDKPZ ↔ konečná
         // faktura) by nechalo na protistraně viset odpočtové řádky § 37a / snížené
         // vat_overrides, zatímco stornovaný doklad z DPH/KH i nákladů vypadne →
@@ -128,7 +141,10 @@ final class TransitionPurchaseInvoiceStatusAction
         // Při přechodu z draftu (typicky po manuální kontrole AI-importované faktury)
         // automaticky vyčistit extraction_warning — uživatel data ověřil tím, že
         // posunul stav z konceptu dál. Pokud warning není set, je to no-op.
-        if ($currentStatus === 'draft' && $target !== 'cancelled' && !empty($existing['extraction_warning'])) {
+        // BLOKUJÍCÍ upozornění (rozpor plátcovství vs. DPH) se tímto způsobem
+        // nemaže — to musí uživatel vyřešit vědomě (viz guard výše).
+        if ($currentStatus === 'draft' && $target !== 'cancelled'
+            && !empty($existing['extraction_warning']) && empty($existing['extraction_blocking'])) {
             try {
                 $this->repo->setExtractionWarning($id, $supplierId, null);
             } catch (\Throwable) {

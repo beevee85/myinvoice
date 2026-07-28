@@ -19,6 +19,24 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## 2026-07-28 (3. dávka) — DDKPZ: popisky sazeb, zaokrouhlovací řádek, exporty pro KH
+
+**Charakter: FORK BUGFIX** — dokončení DDKPZ po nasazení v4.52.0. Právní i technické podklady: `docs/dph-zalohy.md`.
+
+**Co se změnilo:**
+1. **Popisek sazby DPH z číselníku** (nový sdílený helper `web/src/utils/vatRate.ts`): dvě 0% sazby („Osvobozeno" CZ-0 a „Mimo DPH" CZ-NA) se v selectu i na dokladu vykreslovaly shodně jako „0 % (osvob.)". Popisek teď bere `label_cs`/`label_en` — v obou editorech, na detailu přijaté i vydané faktury (položky i rozpis DPH), v opakovaných fakturách a v obou PDF šablonách. Rozpis DPH (`buildVatBreakdown` na obou stranách) nově nese `vat_code`/`vat_label_*`; při míchání kódů v jednom pásmu se popisek zahodí. Test `VatRateLabelsUniqueTest` hlídá, že žádné dvě aktivní sazby nemají shodný popisek.
+2. **„Mimo DPH" nikdy ve výkazech:** položky se sazbou CZ-NA dostávají explicitní klasifikaci **`NA`** (migrace **0909**, dphdp3_line i kh_section NULL) — dřív měly NULL a spadly na klasifikaci HLAVIČKY (COALESCE ve `VatLedgerService`) → hrozil ř. 40 / KH B.2. Navíc pojistka přímo v ledgeru (vyloučení sazby CZ-NA) a test `testOutOfScopeRateNeverEntersReports`.
+3. **DUZP se v seznamu nedopočítává** z data vystavení (zálohy mají „—"); editor u zálohy DUZP nepředvyplňuje (jinak by ho uložení vrátilo zpět).
+4. **Zaokrouhlovací řádek § 37a** (migrace **0910**): řádky dokladu se po párování vracejí PŘESNĚ na hodnoty dodavatele (dřív se do nich rozpouštěl haléř — 443 999,99 místo 444 000,00), odpočty zůstávají doslova dle DDKPZ a rozdíl nese jeden viditelný řádek „Zaokrouhlení § 37a". Součet položek = rekapitulace = hlavička. Řádek je v sazbě rozdílu (ne „mimo DPH") — jinak by v sazbě zůstal rozdíl 0,01/−0,01 a doklad by hlásil rozpor znamének.
+5. **Popis odpočtu** nese i zálohovou fakturu: „Odpočet zálohy — daňový doklad ZD915260089 (ZF815260087)".
+6. **Přepočet je dávkový, ne líný:** ověřeno, že GET detailu je read-only (nezapisuje); nový CLI **`api/bin/recompute-purchase-invoices.php`** (dry-run default, `--apply`, `--supplier=`, `--from=`) srovná hlavičkové součty s položkami napříč DB a vypíše doklady vyžadující přepárování. Idempotentní.
+7. **Exporty pro účetní (P1):** Pohoda u přijatých dostávala NAŠE interní číslo v `symVar` (rozbité párování plateb) a **neposílala DIČ ani evidenční číslo dokladu dodavatele** → doklad by v KH spadl do B.3 místo B.2. Nově: `symVar` = platební VS, `inv:originalDocument` = číslo dokladu dodavatele, a chybějící DIČ/IČO ve `vendor_snapshot` se doplní z karty klienta. ISDOC: řádky se sazbou CZ-NA jdou jako `VATApplicable=false`.
+8. **AI import:** rozpor „doklad nese DPH × dodavatel neplátce" je nově **skutečně blokující** (migrace **0911**, sloupec `extraction_blocking`) — přechod z konceptu vrací 409, dokud uživatel rozpor nevyřeší nebo upozornění vědomě nezavře; dřív se hláška při přechodu tiše mazala. Duplicitní a ISDOC větve importu vracejí `document_kind` (select v dávce už nepadá na „Faktura"); `integrations.ts` má správný typ.
+
+**Testy:** +3 (zaokrouhlovací řádek s řádky dle PDF, „mimo DPH" mimo výkazy, unikátnost popisků sazeb) + doplněné SQLite fixtury o `vat_rates`. Suita **2015 zelených**, type-check OK.
+
+**Jak ověřit po merge:** `vendor/bin/phpunit --filter 'VatRateLabels|OutOfScopeRate|SettlementKeepsVendorRows'`; v editoru mají 0% sazby rozdílné popisky; seznam přijatých ukazuje u záloh DUZP „—"; export Pohoda u DDKPZ obsahuje `typ:dic`, `inv:originalDocument` a platební `symVar`.
+
 ## 2026-07-28 (2. dávka) — DDKPZ: § 37a na úrovni součtů, invariant znamének, záloha mimo DPH
 
 **Charakter: FORK FEATURE/BUGFIX** — navazuje na DDKPZ z téhož dne (commit 6506ca72). Právní opora: `docs/dph-zalohy.md`.

@@ -81,6 +81,7 @@ final class PurchaseInvoiceRepository
         // Invariant rozpisu DPH: základ a daň se u nenulové sazby nesmí lišit znaménkem
         // (formální nesmysl z rozdílu dvou zaokrouhlení — doklad ke kontrole).
         $row['vat_sign_mismatch'] = \MyInvoice\Service\Validation\PurchaseInvoiceValidation::hasVatSignMismatch($row);
+        $row['extraction_blocking'] = !empty($row['extraction_blocking']);
 
         // Propojení se zálohou (advance):
         //  - linked_advance   = záloha, kterou tato finální faktura vyúčtovává
@@ -503,6 +504,146 @@ final class PurchaseInvoiceRepository
         )->execute([$json, $id, $supplierId]);
     }
 
+    /**
+     * Snapshot řádkových totálů dokladu (id → base/vat) — pořizuje se PŘED přepočtem
+     * při párování § 37a, aby se řádky daly vrátit přesně do podoby dle dokladu
+     * dodavatele (kalkulátor je jinak přepočte ze sazby a rozejdou se s PDF).
+     *
+     * @return array<int, array{base:float, vat:float}>
+     */
+    public function snapshotItemTotals(int $purchaseInvoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, total_without_vat, total_vat FROM purchase_invoice_items
+              WHERE purchase_invoice_id = ?'
+        );
+        $stmt->execute([$purchaseInvoiceId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $out[(int) $r['id']] = [
+                'base' => (float) $r['total_without_vat'],
+                'vat'  => (float) $r['total_vat'],
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Vrátí řádkům hodnoty ze snapshotu (řádky, které mezitím zanikly, se ignorují).
+     *
+     * @param array<int, array{base:float, vat:float}> $snapshot
+     */
+    public function restoreItemTotals(array $snapshot): void
+    {
+        if ($snapshot === []) return;
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE purchase_invoice_items
+                SET total_without_vat = ?, total_vat = ?, total_with_vat = ?
+              WHERE id = ?'
+        );
+        foreach ($snapshot as $id => $v) {
+            $base = round((float) $v['base'], 2);
+            $vat  = round((float) $v['vat'], 2);
+            $stmt->execute([$base, $vat, round($base + $vat, 2), (int) $id]);
+        }
+    }
+
+    /**
+     * Vloží / aktualizuje / smaže zaokrouhlovací řádek § 37a pro danou sazbu.
+     * Nulový zbytek řádek odstraní. Klasifikace je stejná jako u ostatních řádků
+     * sazby — řádek totiž rozdíl v rámci sazby VYNULUJE, takže do přiznání i KH
+     * vstupuje sazba správnou (nulovou) hodnotou.
+     */
+    public function syncSettlementRoundingRow(
+        int $purchaseInvoiceId,
+        int $vatRateId,
+        float $rate,
+        float $base,
+        float $vat,
+        ?string $classificationCode,
+        string $description,
+    ): void {
+        $pdo = $this->db->pdo();
+        $find = $pdo->prepare(
+            'SELECT id FROM purchase_invoice_items
+              WHERE purchase_invoice_id = ? AND is_settlement_rounding = 1
+                AND ABS(vat_rate_snapshot - ?) < 0.005 LIMIT 1'
+        );
+        $find->execute([$purchaseInvoiceId, $rate]);
+        $existingId = $find->fetchColumn();
+
+        $base = round($base, 2);
+        $vat  = round($vat, 2);
+        if ($base === 0.0 && $vat === 0.0) {
+            if ($existingId !== false) {
+                $pdo->prepare('DELETE FROM purchase_invoice_items WHERE id = ?')->execute([(int) $existingId]);
+            }
+            return;
+        }
+
+        if ($existingId !== false) {
+            // Zaokrouhlení patří na konec dokladu (pod odpočtové řádky).
+            $maxUpd = $pdo->prepare(
+                'SELECT COALESCE(MAX(order_index), -1) FROM purchase_invoice_items
+                  WHERE purchase_invoice_id = ? AND is_settlement_rounding = 0'
+            );
+            $maxUpd->execute([$purchaseInvoiceId]);
+            $pdo->prepare(
+                'UPDATE purchase_invoice_items
+                    SET description = ?, unit_price_without_vat = ?, vat_rate_id = ?, vat_rate_snapshot = ?,
+                        total_without_vat = ?, total_vat = ?, total_with_vat = ?, vat_classification_code = ?,
+                        order_index = ' . ((int) $maxUpd->fetchColumn() + 1) . '
+                  WHERE id = ?'
+            )->execute([
+                $description, $base, $vatRateId, $rate, $base, $vat, round($base + $vat, 2),
+                $classificationCode, (int) $existingId,
+            ]);
+            return;
+        }
+
+        $maxStmt = $pdo->prepare(
+            'SELECT COALESCE(MAX(order_index), -1) FROM purchase_invoice_items WHERE purchase_invoice_id = ?'
+        );
+        $maxStmt->execute([$purchaseInvoiceId]);
+        $pdo->prepare(
+            'INSERT INTO purchase_invoice_items
+                (purchase_invoice_id, description, quantity, unit, unit_price_without_vat,
+                 vat_rate_id, vat_rate_snapshot, total_without_vat, total_vat, total_with_vat,
+                 order_index, vat_classification_code, is_fixed_asset, is_settlement_rounding)
+             VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)'
+        )->execute([
+            $purchaseInvoiceId, $description, 'ks', $base, $vatRateId, $rate,
+            $base, $vat, round($base + $vat, 2), (int) $maxStmt->fetchColumn() + 1, $classificationCode,
+        ]);
+    }
+
+    /**
+     * Přepíše hlavičkové součty ze skutečně uložených řádků (bez přepočtu řádků).
+     * Používá párování § 37a, které řádky drží přesně dle dokladů dodavatele.
+     */
+    public function syncHeaderTotalsFromItems(int $purchaseInvoiceId, int $supplierId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE purchase_invoices pi
+                SET pi.total_without_vat = (SELECT COALESCE(ROUND(SUM(total_without_vat), 2), 0)
+                                              FROM purchase_invoice_items WHERE purchase_invoice_id = pi.id),
+                    pi.total_vat         = (SELECT COALESCE(ROUND(SUM(total_vat), 2), 0)
+                                              FROM purchase_invoice_items WHERE purchase_invoice_id = pi.id),
+                    pi.total_with_vat    = (SELECT COALESCE(ROUND(SUM(total_with_vat), 2), 0)
+                                              FROM purchase_invoice_items WHERE purchase_invoice_id = pi.id)
+              WHERE pi.id = ? AND pi.supplier_id = ?'
+        )->execute([$purchaseInvoiceId, $supplierId]);
+    }
+
+    /** Smaže zaokrouhlovací řádky § 37a (přepočítají se při dalším párování). */
+    public function deleteSettlementRoundingRows(int $finalId): void
+    {
+        $this->db->pdo()->prepare(
+            'DELETE FROM purchase_invoice_items
+              WHERE purchase_invoice_id = ? AND is_settlement_rounding = 1'
+        )->execute([$finalId]);
+    }
+
     /** Smaže auto-generované odpočtové řádky § 37a daného zdroje z konečné faktury. */
     public function deleteSettlementRows(int $finalId, int $sourceTaxDocId): void
     {
@@ -578,7 +719,7 @@ final class PurchaseInvoiceRepository
                     pii.unit_price_without_vat, pii.vat_rate_id, pii.vat_rate_snapshot,
                     pii.total_without_vat, pii.total_vat, pii.total_with_vat,
                     pii.order_index, pii.vat_classification_code, pii.is_fixed_asset,
-                    pii.settlement_source_purchase_invoice_id,
+                    pii.settlement_source_purchase_invoice_id, pii.is_settlement_rounding,
                     vr.code AS vat_code, vr.label_cs AS vat_label_cs, vr.label_en AS vat_label_en
                FROM purchase_invoice_items pii
                JOIN vat_rates vr ON vr.id = pii.vat_rate_id
@@ -1262,7 +1403,10 @@ final class PurchaseInvoiceRepository
                 $code = self::defaultClassificationCode($rate, $reverseCharge, $countryIso, $standardRate);
             }
             if (isset($mimoDphIds[$vatRateId])) {
-                $code = null; // „Mimo DPH" — nikdy do DP3/KH
+                // „Mimo DPH" = mimo předmět daně. NULL by spadl na klasifikaci
+                // HLAVIČKY (COALESCE ve VatLedgerService) a plnění by se objevilo
+                // na ř. 40 / v KH — proto explicitní kód bez řádku i oddílu.
+                $code = 'NA';
             }
             if ($code !== null && (string) $code !== '') {
                 $finalCodes[(string) $code] = true;
@@ -2078,11 +2222,15 @@ final class PurchaseInvoiceRepository
      * UI ho zobrazí jako žluté upozornění, aby si uživatel data ověřil
      * (typicky: AI sečetla subtotaly jako další položky).
      */
-    public function setExtractionWarning(int $id, int $supplierId, ?string $warning): void
+    public function setExtractionWarning(int $id, int $supplierId, ?string $warning, bool $blocking = false): void
     {
+        // `blocking` = upozornění, které NESMÍ zaniknout přechodem z konceptu (rozpor
+        // plátcovství vs. DPH na dokladu, migrace 0911). Vypíná se opravou dokladu
+        // nebo vědomým zavřením upozornění.
         $this->db->pdo()->prepare(
-            'UPDATE purchase_invoices SET extraction_warning = ? WHERE id = ? AND supplier_id = ?'
-        )->execute([$warning, $id, $supplierId]);
+            'UPDATE purchase_invoices SET extraction_warning = ?, extraction_blocking = ?
+              WHERE id = ? AND supplier_id = ?'
+        )->execute([$warning, $warning !== null && $blocking ? 1 : 0, $id, $supplierId]);
     }
 
     /**
@@ -2350,11 +2498,21 @@ final class PurchaseInvoiceRepository
             $key = number_format($rate, 2, '.', '');
             if (!isset($buckets[$key])) {
                 $buckets[$key] = [
-                    'vat_rate'    => $rate,
-                    'without_vat' => 0.0,
-                    'vat'         => 0.0,
-                    'with_vat'    => 0.0,
+                    'vat_rate'      => $rate,
+                    // Kód a popisky sazby — bez nich nejde v rozpisu odlišit
+                    // „Osvobozeno" od „Mimo DPH" (obě 0 %). Míchá-li se v jednom
+                    // bucketu víc kódů, popisek se zahodí (viz níže).
+                    'vat_code'      => $item['vat_code'] ?? null,
+                    'vat_label_cs'  => $item['vat_label_cs'] ?? null,
+                    'vat_label_en'  => $item['vat_label_en'] ?? null,
+                    'without_vat'   => 0.0,
+                    'vat'           => 0.0,
+                    'with_vat'      => 0.0,
                 ];
+            } elseif (($buckets[$key]['vat_code'] ?? null) !== ($item['vat_code'] ?? null)) {
+                $buckets[$key]['vat_code']     = null;
+                $buckets[$key]['vat_label_cs'] = null;
+                $buckets[$key]['vat_label_en'] = null;
             }
             $buckets[$key]['without_vat'] += (float) ($item['total_without_vat'] ?? 0);
             $buckets[$key]['vat']         += (float) ($item['total_vat'] ?? 0);
@@ -2428,6 +2586,7 @@ final class PurchaseInvoiceRepository
             if (isset($row[$f])) $row[$f] = (float) $row[$f];
         }
         $row['is_fixed_asset'] = isset($row['is_fixed_asset']) ? (bool) $row['is_fixed_asset'] : false;
+        $row['is_settlement_rounding'] = !empty($row['is_settlement_rounding']);
         if (array_key_exists('settlement_source_purchase_invoice_id', $row)) {
             $row['settlement_source_purchase_invoice_id'] = $row['settlement_source_purchase_invoice_id'] !== null
                 ? (int) $row['settlement_source_purchase_invoice_id']

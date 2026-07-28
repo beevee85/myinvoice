@@ -27,6 +27,7 @@ import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
 import { priceListApi, type PriceListItem } from '@/api/priceList'
 import { useAuthStore } from '@/stores/auth'
+import { vatRateLabel as sharedVatRateLabel } from '@/utils/vatRate'
 
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
@@ -319,10 +320,7 @@ function defaultVatRateId(): number {
 }
 
 function vatRateLabel(r: VatRate): string {
-  const prefix = r.country !== 'CZ' ? `${r.country} ` : ''
-  if (Number(r.rate_percent) > 0) return `${prefix}${r.rate_percent} %`
-  if (r.is_reverse_charge) return `${prefix}${t('invoice.vat_rate_label.reverse_charge')}`
-  return `${prefix}${t('invoice.vat_rate_label.exempt')}`
+  return sharedVatRateLabel(r, locale.value, t)
 }
 
 // Řádkový výběr už nenabízí „Reverse charge" (0% CZ-RC) — RC se řeší hlavičkovým checkboxem,

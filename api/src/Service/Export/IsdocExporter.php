@@ -320,7 +320,9 @@ final class IsdocExporter
             // ISDOC 4.1.5: je-li doklad nedaňový (VATApplicable=false na úrovni dokladu),
             // musejí být nedaňové i všechny řádky → VATApplicable=false uvnitř
             // ClassifiedTaxCategory (XSD sekvence: Percent, VATCalculationMethod, VATApplicable).
-            if (!$isTaxDocument) {
+            // Nedaňový doklad NEBO řádek v sazbě „mimo předmět DPH" (CZ-NA:
+            // zálohové výzvy, zaokrouhlení) → VATApplicable=false.
+            if (!$isTaxDocument || ($item['vat_code'] ?? null) === 'CZ-NA') {
                 $this->el($dom, $cat, 'VATApplicable', 'false');
             }
             $line->appendChild($cat);
