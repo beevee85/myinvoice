@@ -12,7 +12,7 @@ Uživatel chce tyto fork funkce navrhnout autorovi. Detailní checklist „před
 |---|---|---|---|
 | Opravy DPH výkazů + zámek dokladu + EPO identifikace + CZ-NACE | 2026-07-27/28 | **odesláno** — issue #244, PR #245 | čeká na autora |
 | Koš + tvrdé mazání dokladů (0905) | 2026-07-28 | čeká na ověření v provozu | breaking DELETE (nutná zpětná kompatibilita), fork-only DDKPZ vazby v policy, přečíslovat migraci |
-| Omezení uživatele na vybrané firmy (0900) | 2026-07-02 FÁZE 2 | **připraveno, nejsnazší kandidát** | jen přečíslovat migraci; jinak zpětně kompatibilní, otestované, zdokumentované |
+| Omezení uživatele na vybrané firmy (0900) | 2026-07-02 FÁZE 2 | **odesláno** — issue #246, PR #247 (větev `pr/user-supplier-access`, migrace přečíslovaná na 0148) | čeká na autora |
 | Daňový doklad k přijaté záloze (DDKPZ) + § 37a na přijaté straně (0904, 0906) | 2026-07-28 (obě dávky) | **kandidát — potvrdil uživatel 28. 7. 2026** | přečíslovat migrace 0904/0906 do upstream řady; oddělit od fork-only koše (DocumentTrashPolicy, TrashGuard v settlement akcích) a od sazby CZ-NA, pokud ji upstream nechce; doplnit kapitolu manuálu + openapi (endpointy settlement-doc-candidates / final-candidates / link-settlement-doc) |
 
 Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jednu z těchto funkcí upstream nemá.
@@ -329,7 +329,7 @@ Navíc: `fix(dashboard)` — gradient hlavičky widgetu „Akce pro tebe" použ�
 
 ## 2026-07-02 — FÁZE 2: omezení uživatele na vybrané dodavatele
 
-**Charakter: FEATURE — KANDIDÁT PRO UPSTREAM** (uživatel 2026-07-28 potvrdil, že funkci chce nabídnout autorovi). Ze všech fork funkcí je na PR nejlépe připravená: **žádná breaking změna** (žádný záznam = uživatel vidí vše, takže se stávajících instalací nedotkne), **žádné fork-only závislosti** (pracuje jen s upstream tabulkami `users` a `supplier`), integrační test i kapitola manuálu 36.2.3 existují, openapi se nemění.
+**Charakter: FEATURE — ODESLÁNO UPSTREAMU 2026-07-28: issue [#246](https://github.com/radekhulan/myinvoice/issues/246) + PR [#247](https://github.com/radekhulan/myinvoice/pull/247)** (větev `pr/user-supplier-access` na forku, postavená na v4.51.0, migrace přečíslovaná 0900 → 0148; podklady v `/root/usa-pr-snapshots/`). Issue navazuje na **#184**, kde tentýž požadavek padl jako bod 3 („pozvat externího uživatele jen do jedné firmy") a zůstal nenaplněný — autor issue zavřel s odpovědí na body 1–2 (přepínání firem). Po přijetí autorem blok z evidence odpadá. Ze všech fork funkcí je na PR nejlépe připravená: **žádná breaking změna** (žádný záznam = uživatel vidí vše, takže se stávajících instalací nedotkne), **žádné fork-only závislosti** (pracuje jen s upstream tabulkami `users` a `supplier`), integrační test i kapitola manuálu 36.2.3 existují, openapi se nemění.
 
 **Před odesláním upstreamu vyřešit:**
 1. **Přečíslovat migraci** `0900_user_supplier_access.sql` do upstream řady (upstream je k 2026-07-28 na 0147 → dát 0148+) a smazat komentář o fork rozsahu 0900.
