@@ -27,7 +27,7 @@ ALTER TABLE purchase_invoices
 
 CREATE TABLE IF NOT EXISTS deleted_document_snapshots (
   id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  supplier_id TINYINT UNSIGNED NOT NULL,
+  supplier_id INT UNSIGNED NOT NULL,
   entity_type ENUM('invoice','purchase_invoice') NOT NULL,
   entity_id   BIGINT UNSIGNED NOT NULL,           -- původní id (řádek už neexistuje, bez FK)
   payload     JSON NOT NULL,                      -- kompletní hlavička, položky, úhrady, vazby, cesty k PDF

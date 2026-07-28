@@ -180,11 +180,7 @@ final class GetClientAction
                 AND pi.supplier_id = ?
                 AND pi.deleted_at IS NULL
                 AND pi.status NOT IN ('draft', 'cancelled')
-                AND NOT (COALESCE(pi.document_kind, '') = 'advance'
-                         AND (pi.status = 'paid'
-                              OR EXISTS (SELECT 1 FROM purchase_invoices adv_s
-                                          WHERE adv_s.advance_purchase_invoice_id = pi.id
-                                            AND adv_s.deleted_at IS NULL)))
+                AND COALESCE(pi.document_kind, '') <> 'advance'
                 AND pi.issue_date >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
               GROUP BY month, cur.code
               ORDER BY month"
@@ -212,11 +208,7 @@ final class GetClientAction
                 AND pi.supplier_id = ?
                 AND pi.deleted_at IS NULL
                 AND pi.status NOT IN ('draft', 'cancelled')
-                AND NOT (COALESCE(pi.document_kind, '') = 'advance'
-                         AND (pi.status = 'paid'
-                              OR EXISTS (SELECT 1 FROM purchase_invoices adv_s
-                                          WHERE adv_s.advance_purchase_invoice_id = pi.id
-                                            AND adv_s.deleted_at IS NULL)))
+                AND COALESCE(pi.document_kind, '') <> 'advance'
               GROUP BY year, cur.code
               ORDER BY year DESC"
         );

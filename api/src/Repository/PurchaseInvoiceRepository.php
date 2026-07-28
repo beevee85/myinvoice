@@ -78,6 +78,10 @@ final class PurchaseInvoiceRepository
             'amount_to_pay'       => $row['amount_to_pay'],
         ];
 
+        // Invariant rozpisu DPH: základ a daň se u nenulové sazby nesmí lišit znaménkem
+        // (formální nesmysl z rozdílu dvou zaokrouhlení — doklad ke kontrole).
+        $row['vat_sign_mismatch'] = \MyInvoice\Service\Validation\PurchaseInvoiceValidation::hasVatSignMismatch($row);
+
         // Propojení se zálohou (advance):
         //  - linked_advance   = záloha, kterou tato finální faktura vyúčtovává
         //  - settled_by       = finální faktura vyúčtovávající tuto zálohu (reverzně)
@@ -210,6 +214,7 @@ final class PurchaseInvoiceRepository
                            WHERE pi.supplier_id = ? AND pi.vendor_id = ?
                              AND pi.document_kind = 'tax_document'
                              AND pi.status NOT IN ('draft', 'cancelled')
+                             AND pi.deleted_at IS NULL
                              AND pi.settled_by_purchase_invoice_id IS NULL AND pi.id <> ?
                         )"
             );
@@ -221,7 +226,9 @@ final class PurchaseInvoiceRepository
                           SELECT 1 FROM purchase_invoices pi
                            WHERE pi.supplier_id = ? AND pi.vendor_id = ?
                              AND pi.document_kind NOT IN ('advance', 'tax_document')
-                             AND pi.status != 'cancelled' AND pi.id <> ?
+                             AND pi.status != 'cancelled'
+                             AND pi.deleted_at IS NULL
+                             AND pi.id <> ?
                         )"
             );
             $q->execute([$supplierId, $vendorId, $id]);
@@ -318,6 +325,8 @@ final class PurchaseInvoiceRepository
                 AND pi.vendor_id = ?
                 AND pi.document_kind = 'tax_document'
                 AND pi.status NOT IN ('draft', 'cancelled')
+                -- Doklad v koši se nenabízí k párování.
+                AND pi.deleted_at IS NULL
                 AND pi.settled_by_purchase_invoice_id IS NULL
                 AND pi.id <> ?
               ORDER BY (pi.currency_id = ?) DESC,
@@ -385,6 +394,8 @@ final class PurchaseInvoiceRepository
                 AND pi.vendor_id = ?
                 AND pi.document_kind NOT IN ('advance', 'tax_document', 'credit_note')
                 AND pi.status != 'cancelled'
+                -- Doklad v koši se nenabízí k párování.
+                AND pi.deleted_at IS NULL
                 AND pi.id <> ?
               ORDER BY (pi.currency_id = ?) DESC,
                        ABS(pi.total_with_vat - ?) ASC,
@@ -757,6 +768,11 @@ final class PurchaseInvoiceRepository
         if (!in_array($documentKind, \MyInvoice\Service\Validation\PurchaseInvoiceValidation::ALLOWED_DOC_KINDS, true)) {
             $documentKind = 'invoice';
         }
+        if ($documentKind === 'advance') {
+            // Zálohová faktura není daňový doklad — DUZP neexistuje (vzniká až
+            // přijetím úplaty, které dokládá DDKPZ / konečná faktura).
+            $data['tax_date'] = null;
+        }
 
         $manualVarsymbol = trim((string) ($data['varsymbol'] ?? ''));
         if ($manualVarsymbol === '') {
@@ -973,6 +989,11 @@ final class PurchaseInvoiceRepository
         if (!in_array($documentKind, \MyInvoice\Service\Validation\PurchaseInvoiceValidation::ALLOWED_DOC_KINDS, true)) {
             $documentKind = 'invoice';
         }
+        if ($documentKind === 'advance') {
+            // Zálohová faktura není daňový doklad — DUZP neexistuje (vzniká až
+            // přijetím úplaty, které dokládá DDKPZ / konečná faktura).
+            $data['tax_date'] = null;
+        }
 
         // Zrcadlo guardu z updateDocumentKind(): vazbové typy (záloha, DDKPZ) lze přes
         // editor překlopit jen bez aktivních vazeb — jinak by po změně typu zůstaly
@@ -1145,6 +1166,13 @@ final class PurchaseInvoiceRepository
             $allowedSettlementSources[(int) $srcId] = true;
         }
 
+        // Sazba CZ-NA („Mimo DPH", migrace 0905): položka stojí úplně mimo režim DPH
+        // (zálohové výzvy apod.) → klasifikační kód VŽDY NULL, ať nespadne do výkazů
+        // přes default ani přes explicitní kód z klienta.
+        $naStmt = $pdo->prepare("SELECT id FROM vat_rates WHERE code = 'CZ-NA'");
+        $naStmt->execute();
+        $mimoDphIds = array_fill_keys(array_map('intval', $naStmt->fetchAll(PDO::FETCH_COLUMN)), true);
+
         $finalCodes = [];
         foreach (array_values($items) as $i => $item) {
             $vatRateId = (int) ($item['vat_rate_id'] ?? 0);
@@ -1155,6 +1183,9 @@ final class PurchaseInvoiceRepository
             $code = $item['vat_classification_code'] ?? null;
             if ($code === null) {
                 $code = self::defaultClassificationCode($rate, $reverseCharge, $countryIso, $standardRate);
+            }
+            if (isset($mimoDphIds[$vatRateId])) {
+                $code = null; // „Mimo DPH" — nikdy do DP3/KH
             }
             if ($code !== null && (string) $code !== '') {
                 $finalCodes[(string) $code] = true;
@@ -1333,6 +1364,12 @@ final class PurchaseInvoiceRepository
         $advance = $this->find($advanceId, $supplierId);
         if ($final === null || $advance === null) {
             throw new \RuntimeException('Doklad nenalezen.');
+        }
+        // Doklad v koši je read-only (0905). Kryje i cesty, kde protistrana přichází
+        // z těla požadavku nebo z AI návrhu (advance_link_suggested_id) — na ty
+        // TrashGuard v akci nedosáhne.
+        if (!empty($final['deleted_at']) || !empty($advance['deleted_at'])) {
+            throw new \RuntimeException('Doklad je v koši — nelze párovat. Nejdřív ho obnovte z koše.');
         }
         if (($advance['document_kind'] ?? '') !== 'advance') {
             throw new \RuntimeException('Propojit lze jen se zálohovou fakturou (advance).');
@@ -1881,14 +1918,17 @@ final class PurchaseInvoiceRepository
      *   plný nárok   → PF (uznatelný) / PN (neuznatelný)
      *   krácený §75  → KU / KN
      *   bez nároku   → NU / NN
-     * Výjimka per typ dokladu: daňový doklad k přijaté záloze → vždy DZ (rozlišení
-     * v číselné řadě má přednost před daňovým uplatněním; čítač je stejně sdílený
-     * napříč prefixy).
+     * Výjimky per typ dokladu: daňový doklad k přijaté záloze → vždy DZ, zálohová
+     * faktura → vždy ZA (rozlišení v číselné řadě má přednost před daňovým
+     * uplatněním; čítač je stejně sdílený napříč prefixy).
      */
     public static function varsymbolPrefix(string $vatDeduction, bool $taxDeductible, ?string $documentKind = null): string
     {
         if ($documentKind === 'tax_document') {
             return 'DZ';
+        }
+        if ($documentKind === 'advance') {
+            return 'ZA';
         }
         return match ($vatDeduction) {
             'none'         => $taxDeductible ? 'NU' : 'NN',
@@ -2061,8 +2101,11 @@ final class PurchaseInvoiceRepository
                 return 'Doklad má vazby na vyúčtování záloh — nejdřív zrušte propojení, pak změňte typ.';
             }
         }
+        // Přepnutí na zálohu čistí DUZP — záloha není daňový doklad, DUZP nemá.
         $pdo->prepare(
-            'UPDATE purchase_invoices SET document_kind = ? WHERE id = ? AND supplier_id = ?'
+            'UPDATE purchase_invoices SET document_kind = ?'
+            . ($kind === 'advance' ? ', tax_date = NULL' : '')
+            . ' WHERE id = ? AND supplier_id = ?'
         )->execute([$kind, $id, $supplierId]);
         return null;
     }

@@ -101,14 +101,13 @@ final class PurchaseSummaryAction
      */
     private function advanceCostExclude(string $alias = 'pi'): string
     {
-        $p     = $alias === '' ? '' : $alias . '.';
-        $idRef = $alias === '' ? 'purchase_invoices.id' : $alias . '.id';
-        return " AND NOT (COALESCE({$p}document_kind, '') = 'advance'"
-             . " AND ({$p}status <> 'paid'"
-             . " OR EXISTS (SELECT 1 FROM purchase_invoices adv_s"
-             // Vyúčtování v koši náklad nenese — zaplacená záloha se má počítat dál.
-             . " WHERE adv_s.advance_purchase_invoice_id = {$idRef}"
-             . " AND adv_s.deleted_at IS NULL)))";
+        // Záloha (advance) NENÍ daňový doklad ani nositel nákladu — náklad nese
+        // daňový doklad k přijaté záloze (tax_document) nebo konečná faktura.
+        // Vyřazuje se proto VŽDY (dřív jen zaplacená/spárovaná — po zavedení DDKPZ
+        // by se náklad dubloval). Cash pohled daňové evidence řeší samostatně
+        // TaxProfileRepository::monthExpenses (zaplacená záloha = výdaj § 24).
+        $p = $alias === '' ? '' : $alias . '.';
+        return " AND COALESCE({$p}document_kind, '') <> 'advance'";
     }
 
     /** Počet aktivních (nearchivovaných) dodavatelů. */

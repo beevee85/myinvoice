@@ -220,6 +220,8 @@ export interface PurchaseInvoice {
   tax_document_late?: boolean
   /** Zaplacená záloha, ke které po 15 dnech neexistuje DDKPZ ani konečná faktura. */
   advance_tax_document_missing?: boolean
+  /** Rozpis DPH má u nenulové sazby základ a daň s opačným znaménkem — ke kontrole. */
+  vat_sign_mismatch?: boolean
   /**
    * Diagnostický popis problému z AI extrakce (např. AI sečetla mezisoučty
    * jako další položky → suma řádků se výrazně liší od AI-vráceného totalu).

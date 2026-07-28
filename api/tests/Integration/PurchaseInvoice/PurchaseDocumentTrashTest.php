@@ -108,17 +108,17 @@ final class PurchaseDocumentTrashTest extends TestCase
         }
     }
 
-    private function insertPurchase(string $status, string $varsymbol, string $taxDate = '2098-07-10'): int
+    private function insertPurchase(string $status, string $varsymbol, string $taxDate = '2098-07-10', string $kind = 'invoice'): int
     {
         $pdo = $this->db->pdo();
         $snapshot = json_encode(['company_name' => 'Koš test dodavatel s.r.o.', 'ic' => '87654321'], JSON_UNESCAPED_UNICODE);
         $pdo->prepare(
             "INSERT INTO purchase_invoices
-                (supplier_id, vendor_id, varsymbol, vendor_invoice_number, issue_date, tax_date, due_date,
+                (supplier_id, vendor_id, varsymbol, vendor_invoice_number, document_kind, issue_date, tax_date, due_date,
                  currency_id, status, total_without_vat, total_vat, total_with_vat, amount_to_pay, vendor_snapshot, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 100, 21, 121, 121, ?, ?)"
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 100, 21, 121, 121, ?, ?)"
         )->execute([
-            $this->supplierId, $this->vendorId, $varsymbol, 'VD-' . $varsymbol,
+            $this->supplierId, $this->vendorId, $varsymbol, 'VD-' . $varsymbol, $kind,
             $taxDate, $taxDate, $taxDate, $this->currencyId, $status, $snapshot, $this->userId,
         ]);
         $id = (int) $pdo->lastInsertId();
@@ -262,6 +262,111 @@ final class PurchaseDocumentTrashTest extends TestCase
         // Blokovaný zůstal v koši.
         $row = $this->db->pdo()->query("SELECT deleted_at FROM purchase_invoices WHERE id = {$blockedId}")->fetch(PDO::FETCH_ASSOC);
         self::assertNotNull($row['deleted_at']);
+    }
+
+    /**
+     * Regrese po merge s DDKPZ (audit 2026-07-28): párovací cesta § 37a musí koš
+     * respektovat obousměrně — DDKPZ v koši nesmí jít napárovat na živou konečnou
+     * fakturu ani naopak, jinak by odpočet § 37a snížil DPH/náklady bez protistrany
+     * ve výkazech (doklad v koši je z nich vyloučený).
+     */
+    public function testSettlementLinkRejectsTrashedDocumentsBothDirections(): void
+    {
+        $c = Bootstrap::buildApp()->getContainer();
+        $settlement = $c->get(\MyInvoice\Service\Invoice\PurchaseSettlementService::class);
+
+        // (1) DDKPZ v koši → živá konečná faktura
+        $taxDoc = $this->insertPurchase('received', 'TRPF2098DD1', '2098-07-10', 'tax_document');
+        $final  = $this->insertPurchase('received', 'TRPF2098FN1', '2098-07-10');
+        $this->trash($taxDoc);
+
+        try {
+            $settlement->link($final, $taxDoc, $this->supplierId, false);
+            self::fail('Párování s DDKPZ v koši musí selhat.');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('koši', $e->getMessage());
+        }
+        self::assertNull(
+            $this->db->pdo()->query("SELECT settled_by_purchase_invoice_id FROM purchase_invoices WHERE id = {$taxDoc}")->fetchColumn() ?: null,
+            'Doklad v koši nesmí dostat vazbu (mutace read-only řádku).',
+        );
+
+        // (2) živý DDKPZ → konečná faktura v koši
+        $taxDoc2 = $this->insertPurchase('received', 'TRPF2098DD2', '2098-07-10', 'tax_document');
+        $final2  = $this->insertPurchase('received', 'TRPF2098FN2', '2098-07-10');
+        $this->trash($final2);
+
+        try {
+            $settlement->link($final2, $taxDoc2, $this->supplierId, false);
+            self::fail('Párování na konečnou fakturu v koši musí selhat.');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('koši', $e->getMessage());
+        }
+    }
+
+    /** Mutační akce nad dokladem v koši vrací 409 in_trash (TrashGuard). */
+    public function testSettlementActionsBlockedForTrashedInvoice(): void
+    {
+        $c = Bootstrap::buildApp()->getContainer();
+        $link = $c->get(\MyInvoice\Action\PurchaseInvoice\LinkSettlementDocPurchaseInvoiceAction::class);
+        $unlink = $c->get(\MyInvoice\Action\PurchaseInvoice\UnlinkSettlementDocPurchaseInvoiceAction::class);
+
+        $final  = $this->insertPurchase('received', 'TRPF2098GRD', '2098-07-10');
+        $taxDoc = $this->insertPurchase('received', 'TRPF2098GRT', '2098-07-10', 'tax_document');
+        $this->trash($final);
+
+        $resp = ($link)(
+            $this->request('POST', "/api/purchase-invoices/{$final}/link-settlement-doc", 'admin',
+                ['tax_document_id' => $taxDoc]),
+            new Psr7Response(), ['id' => (string) $final],
+        );
+        self::assertSame(409, $resp->getStatusCode());
+        self::assertSame('in_trash', self::json($resp)['error']['code']);
+
+        $resp2 = ($unlink)(
+            $this->request('DELETE', "/api/purchase-invoices/{$final}/link-settlement-doc", 'admin',
+                ['tax_document_id' => $taxDoc]),
+            new Psr7Response(), ['id' => (string) $final],
+        );
+        self::assertSame(409, $resp2->getStatusCode());
+        self::assertSame('in_trash', self::json($resp2)['error']['code']);
+    }
+
+    /** Kandidátské dotazy párování nesmí nabízet doklady z koše. */
+    public function testSettlementCandidatesExcludeTrashed(): void
+    {
+        $final  = $this->insertPurchase('received', 'TRPF2098CN1', '2098-07-10');
+        $taxDoc = $this->insertPurchase('received', 'TRPF2098CN2', '2098-07-10', 'tax_document');
+
+        $ids = fn (array $rows): array => array_map(static fn (array $r): int => (int) $r['id'], $rows);
+        self::assertContains($taxDoc, $ids($this->repo->settlementDocCandidates($final, $this->supplierId)));
+        self::assertContains($final, $ids($this->repo->finalCandidates($taxDoc, $this->supplierId)));
+
+        $this->trash($taxDoc);
+        self::assertNotContains($taxDoc, $ids($this->repo->settlementDocCandidates($final, $this->supplierId)),
+            'DDKPZ v koši se nesmí nabízet k párování.');
+
+        $this->trash($final);
+        self::assertNotContains($final, $ids($this->repo->finalCandidates($taxDoc, $this->supplierId)),
+            'Konečná faktura v koši se nesmí nabízet k párování.');
+    }
+
+    /** Propojení se zálohou (i z AI návrhu) musí koš respektovat. */
+    public function testLinkAdvanceRejectsTrashedAdvance(): void
+    {
+        $advance = $this->insertPurchase('received', 'TRPF2098ADV', '2098-07-10', 'advance');
+        $final   = $this->insertPurchase('received', 'TRPF2098FIN', '2098-07-10');
+        $this->trash($advance);
+
+        try {
+            $this->repo->linkAdvance($final, $advance, $this->supplierId);
+            self::fail('Propojení se zálohou v koši musí selhat.');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('koši', $e->getMessage());
+        }
+        self::assertNull(
+            $this->db->pdo()->query("SELECT advance_purchase_invoice_id FROM purchase_invoices WHERE id = {$final}")->fetchColumn() ?: null,
+        );
     }
 
     public function testTrashedPurchaseExcludedFromList(): void

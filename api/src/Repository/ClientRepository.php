@@ -173,14 +173,10 @@ final class ClientRepository
                        -- chce vidět celkový počet faktur od vendora včetně rozpracovaných.
                        -- Costs ale jen z non-draft non-cancelled (draft není ekonomicky reálný).
                        SELECT pi.vendor_id,
-                              -- Spárovaná/zaplacená záloha (advance) → náklad nese vyúčtovací
-                              -- faktura, jinak 2× započteno (shoda s GetClientAction / CRM).
+                              -- Záloha (advance) se vyřazuje vždy — náklad nese DDKPZ /
+                              -- konečná faktura (shoda s GetClientAction / CRM / dashboard).
                               SUM(IF(pi.status NOT IN ('draft', 'cancelled')
-                                     AND NOT (COALESCE(pi.document_kind, '') = 'advance'
-                                              AND (pi.status = 'paid'
-                                                   OR EXISTS (SELECT 1 FROM purchase_invoices adv_s
-                                                               WHERE adv_s.advance_purchase_invoice_id = pi.id
-                                                                 AND adv_s.deleted_at IS NULL))),
+                                     AND COALESCE(pi.document_kind, '') <> 'advance',
                                      pi.total_with_vat * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1),
                                      0)) AS costs,
                               SUM(IF(pi.status != 'cancelled', 1, 0)) AS purchase_count,

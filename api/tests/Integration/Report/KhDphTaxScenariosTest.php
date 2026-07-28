@@ -1793,6 +1793,245 @@ final class KhDphTaxScenariosTest extends TestCase
     }
 
     /**
+     * BOD 1 (2026-07-28) — § 37a na úrovni SOUČTŮ dokladu (reálný případ FV15260816):
+     * kladné řádky vč. slevy dealera v mínusu dají po řádkovém zaokrouhlení
+     * 393 381,83 + 82 610,17 (hrubě přesně 475 992,00); DDKPZ nesou doslova
+     * 393 381,82 + 82 610,18. Rozdíl dvou nezávisle zaokrouhlených řad by dal
+     * nesmysl +0,01 základ / −0,01 daň — hrubý výpočet musí dát 0,00/0,00/0,00
+     * a doklad s nulovým rozdílem nesmí do KH.
+     */
+    public function testSettlement37aFullAdvanceNetsToExactZero(): void
+    {
+        $container = Bootstrap::buildApp()->getContainer();
+        $svc = $container->get(\MyInvoice\Service\Invoice\PurchaseSettlementService::class);
+        $vendor = $this->client('CZ dodavatel — §37a nula', $this->czId, 'CZ699003841', vendor: true);
+        $d = sprintf('%04d-%02d-12', self::YEAR, self::MONTH);
+        $this->purchase('FV-37A-816', $vendor, '40', false, 'invoice', $d, $d, [
+            [366942.15, 77057.85, 21.0],
+            [11404.96, 2395.04, 21.0],
+            [5454.55, 1145.45, 21.0],
+            [2231.40, 468.60, 21.0],
+            [4380.17, 919.83, 21.0],
+            [6942.15, 1457.85, 21.0],
+            [-3973.55, -834.45, 21.0], // sleva dealera v mínusu (na PDF −4 808 s DPH)
+        ]);
+        $finalId = end($this->purchaseIds);
+        $this->purchase('ZD-37A-089', $vendor, '40', false, 'tax_document', $d, $d, [[16528.93, 3471.07, 21.0]]);
+        $zd1 = end($this->purchaseIds);
+        $this->purchase('ZD-37A-122', $vendor, '40', false, 'tax_document', $d, $d, [[376852.89, 79139.11, 21.0]]);
+        $zd2 = end($this->purchaseIds);
+
+        $svc->link($finalId, $zd1, $this->supplierId);
+        $svc->link($finalId, $zd2, $this->supplierId);
+
+        $final = $this->piRepo->find($finalId, $this->supplierId);
+        $this->assertEqualsWithDelta(0.00, (float) $final['total_without_vat'], 0.001, '§ 37a základ = 0');
+        $this->assertEqualsWithDelta(0.00, (float) $final['total_vat'], 0.001, '§ 37a daň = 0');
+        $this->assertEqualsWithDelta(0.00, (float) $final['total_with_vat'], 0.001, '§ 37a celkem = 0');
+        $this->assertFalse($final['vat_sign_mismatch'], 'znaménka základu a daně konzistentní');
+        $this->assertFalse($final['settlement_deduction_mismatch']);
+
+        // Odpočtové řádky doslova z DDKPZ (žádný přepočet z hrubé částky).
+        $bySource = [];
+        foreach ($final['items'] as $it) {
+            $src = (int) ($it['settlement_source_purchase_invoice_id'] ?? 0);
+            if ($src > 0) {
+                $bySource[$src] = [(float) $it['total_without_vat'], (float) $it['total_vat']];
+            }
+        }
+        $this->assertEqualsWithDelta(-16528.93, $bySource[$zd1][0], 0.02);
+        $this->assertEqualsWithDelta(-3471.07, $bySource[$zd1][1], 0.001, 'daň odpočtu doslova z DDKPZ');
+        $this->assertEqualsWithDelta(-376852.89, $bySource[$zd2][0], 0.02);
+        $this->assertEqualsWithDelta(-79139.11, $bySource[$zd2][1], 0.001, 'daň odpočtu doslova z DDKPZ');
+
+        // KH: nulový rozdíl → konečná faktura se nevykazuje; oba DDKPZ ano (B.2, nad limit).
+        $kh = new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']);
+        $evNumbers = [];
+        foreach ($kh->DPHKH1->VetaB2 as $b2) {
+            $evNumbers[] = (string) $b2['c_evid_dd'];
+        }
+        $this->assertNotContains('FV-37A-816', $evNumbers, 'konečná faktura s rozdílem 0 nesmí do KH');
+        $this->assertContains('ZD-37A-089', $evNumbers);
+        $this->assertContains('ZD-37A-122', $evNumbers);
+
+        // DP3 ř. 40: jen hodnoty DDKPZ (393 381,82 / 82 610,18 → zaokrouhlení EPO).
+        $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
+        $this->assertSame('393382', (string) $dp->Veta4['pln23'], 'ř. 40 základ = jen DDKPZ');
+    }
+
+    /** BOD 1 — doplatek (kladný rozdíl): sazba/koeficient § 37 z hrubého rozdílu, § 37a odst. 2 a). */
+    public function testSettlement37aPositiveRemainder(): void
+    {
+        $container = Bootstrap::buildApp()->getContainer();
+        $svc = $container->get(\MyInvoice\Service\Invoice\PurchaseSettlementService::class);
+        $vendor = $this->client('CZ dodavatel — §37a doplatek', $this->czId, 'CZ699003841', vendor: true);
+        $d = sprintf('%04d-%02d-13', self::YEAR, self::MONTH);
+        $this->purchase('FV-37A-DOP', $vendor, '40', false, 'invoice', $d, $d, [[100000.00, 21000.00, 21.0]]);
+        $finalId = end($this->purchaseIds);
+        $this->purchase('ZD-37A-DOP', $vendor, '40', false, 'tax_document', $d, $d, [[50000.00, 10500.00, 21.0]]);
+        $zd = end($this->purchaseIds);
+
+        $svc->link($finalId, $zd, $this->supplierId);
+        $final = $this->piRepo->find($finalId, $this->supplierId);
+        $this->assertEqualsWithDelta(50000.00, (float) $final['total_without_vat'], 0.001);
+        $this->assertEqualsWithDelta(10500.00, (float) $final['total_vat'], 0.001);
+        $this->assertEqualsWithDelta(60500.00, (float) $final['total_with_vat'], 0.001);
+        $this->assertFalse($final['vat_sign_mismatch']);
+    }
+
+    /**
+     * BOD 1 — přeplatek (záporný rozdíl, zálohy > konečná cena): základ i daň záporné
+     * se SHODNÝM znaménkem, skupina nese sazbu zálohy (§ 37a odst. 2 b) — skupinuje
+     * se per sazba, takže přeplatek zůstává ve 21% skupině zálohy).
+     */
+    public function testSettlement37aNegativeRemainderUsesAdvanceRate(): void
+    {
+        $container = Bootstrap::buildApp()->getContainer();
+        $svc = $container->get(\MyInvoice\Service\Invoice\PurchaseSettlementService::class);
+        $vendor = $this->client('CZ dodavatel — §37a přeplatek', $this->czId, 'CZ699003841', vendor: true);
+        $d = sprintf('%04d-%02d-14', self::YEAR, self::MONTH);
+        $this->purchase('FV-37A-PRE', $vendor, '40', false, 'invoice', $d, $d, [[80000.00, 16800.00, 21.0]]);
+        $finalId = end($this->purchaseIds);
+        $this->purchase('ZD-37A-PRE', $vendor, '40', false, 'tax_document', $d, $d, [[100000.00, 21000.00, 21.0]]);
+        $zd = end($this->purchaseIds);
+
+        $svc->link($finalId, $zd, $this->supplierId);
+        $final = $this->piRepo->find($finalId, $this->supplierId);
+        $this->assertEqualsWithDelta(-20000.00, (float) $final['total_without_vat'], 0.001, 'záporný základ');
+        $this->assertEqualsWithDelta(-4200.00, (float) $final['total_vat'], 0.001, 'záporná daň (stejné znaménko)');
+        $this->assertFalse($final['vat_sign_mismatch'], 'obě strany záporné = konzistentní');
+    }
+
+    /** BOD 1 — více sazeb na dokladu (21 % i 12 %), záloha jen k 21 % → 12% skupina nedotčená. */
+    public function testSettlement37aMultiRateTouchesOnlyAdvanceRate(): void
+    {
+        $container = Bootstrap::buildApp()->getContainer();
+        $svc = $container->get(\MyInvoice\Service\Invoice\PurchaseSettlementService::class);
+        $vendor = $this->client('CZ dodavatel — §37a 2 sazby', $this->czId, 'CZ699003841', vendor: true);
+        $d = sprintf('%04d-%02d-15', self::YEAR, self::MONTH);
+        $this->purchase('FV-37A-MIX', $vendor, '40', false, 'invoice', $d, $d, [
+            [10000.00, 2100.00, 21.0],
+            [5000.00, 600.00, 12.0, '41'],
+        ]);
+        $finalId = end($this->purchaseIds);
+        $this->purchase('ZD-37A-MIX', $vendor, '40', false, 'tax_document', $d, $d, [[8264.46, 1735.54, 21.0]]);
+        $zd = end($this->purchaseIds);
+
+        $svc->link($finalId, $zd, $this->supplierId);
+        $final = $this->piRepo->find($finalId, $this->supplierId);
+        $by = [];
+        foreach ($final['vat_breakdown'] as $b) {
+            $by[number_format((float) $b['vat_rate'], 0)] = $b;
+        }
+        // 21 %: hrubý rozdíl 12 100 − 10 000 = 2 100 → daň 364,46 / základ 1 735,54
+        $this->assertEqualsWithDelta(1735.54, (float) $by['21']['without_vat'], 0.001);
+        $this->assertEqualsWithDelta(364.46, (float) $by['21']['vat'], 0.001);
+        // 12 %: nedotčeno
+        $this->assertEqualsWithDelta(5000.00, (float) $by['12']['without_vat'], 0.001);
+        $this->assertEqualsWithDelta(600.00, (float) $by['12']['vat'], 0.001);
+        $this->assertFalse($final['vat_sign_mismatch']);
+    }
+
+    /** BOD 1 — regresní invariant: rozpis DPH se základem a daní s opačným znaménkem = ke kontrole. */
+    public function testVatSignMismatchFlagged(): void
+    {
+        $vendor = $this->client('CZ dodavatel — sign', $this->czId, 'CZ699003841', vendor: true);
+        $d = sprintf('%04d-%02d-16', self::YEAR, self::MONTH);
+        $this->purchase('SIGN-BAD', $vendor, '40', false, 'invoice', $d, $d, [[0.01, -0.01, 21.0]]);
+        $bad = $this->piRepo->find(end($this->purchaseIds), $this->supplierId);
+        $this->assertTrue($bad['vat_sign_mismatch'], 'základ +0,01 / daň −0,01 → ke kontrole');
+        $this->assertContains(
+            'vat_sign_mismatch',
+            \MyInvoice\Service\Validation\PurchaseInvoiceValidation::warnings($bad),
+        );
+
+        $this->purchase('SIGN-OK', $vendor, '40', false, 'invoice', $d, $d, [[100.00, 21.00, 21.0]]);
+        $ok = $this->piRepo->find(end($this->purchaseIds), $this->supplierId);
+        $this->assertFalse($ok['vat_sign_mismatch']);
+    }
+
+    /**
+     * BOD 3 (2026-07-28) — záloha (advance) NIKDY nevstupuje do přiznání, KH ani
+     * nákladů/DzP, ani ve stavu paid s vyplněnou klasifikací a sazbou (dosud kryto
+     * jen pro koncepty; reálné zálohy 55/56 byly draft).
+     */
+    public function testPaidAdvanceNeverEntersReportsNorIncomeTax(): void
+    {
+        $container = Bootstrap::buildApp()->getContainer();
+        $vendor = $this->client('CZ dodavatel — záloha paid', $this->czId, 'CZ699003841', vendor: true);
+        $d = sprintf('%04d-%02d-17', self::YEAR, self::MONTH);
+        $this->purchase('ZAL-PAID', $vendor, '40', false, 'advance', $d, $d, [[10000.00, 2100.00, 21.0]]);
+        $advId = end($this->purchaseIds);
+        $this->db->pdo()->prepare(
+            "UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?"
+        )->execute([$d, $advId]);
+
+        $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
+        $this->assertSame('', (string) $dp->Veta4['pln23'], 'zaplacená záloha nesmí na ř. 40');
+
+        $kh = new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']);
+        $this->assertCount(0, $kh->DPHKH1->VetaB2, 'zaplacená záloha nesmí do B.2');
+        $this->assertCount(0, $kh->DPHKH1->VetaB3, 'zaplacená záloha nesmí do B.3');
+
+        $incomeTax = $container->get(\MyInvoice\Service\Report\IncomeTaxBuilder::class);
+        $sum = $incomeTax->build($this->supplierId, self::YEAR, 'fo')['summary'];
+        $this->assertEqualsWithDelta(0.0, (float) $sum['costs_orientacni'], 0.001, 'záloha není náklad DzP');
+    }
+
+    /**
+     * BOD 6 (2026-07-28) — hlídání 15denní lhůty § 28 odst. 8 ZDPH (flagy v payloadu
+     * detailu): DDKPZ vystavený v den přijetí úplaty bez warningu; +19 dnů s warningem;
+     * zaplacená záloha bez DD/faktury po 15 dnech s warningem; zúčtovaná bez warningu.
+     */
+    public function testTaxDocumentDeadlineFlags(): void
+    {
+        $vendor = $this->client('CZ dodavatel — lhůty', $this->czId, 'CZ699003841', vendor: true);
+        $d = sprintf('%04d-%02d-06', self::YEAR, self::MONTH);
+
+        // a) DDKPZ: DUZP = datum vystavení (náš doklad 58) → bez warningu
+        $this->purchase('ZD-LHUTA-OK', $vendor, '40', false, 'tax_document', $d, $d, [[100.00, 21.00, 21.0]]);
+        $ok = $this->piRepo->find(end($this->purchaseIds), $this->supplierId);
+        $this->assertFalse($ok['tax_document_late']);
+
+        // b) DDKPZ: vystaven 19 dnů po přijetí úplaty → warning
+        $late = sprintf('%04d-%02d-25', self::YEAR, self::MONTH);
+        $this->purchase('ZD-LHUTA-POZDE', $vendor, '40', false, 'tax_document', $late, $d, [[100.00, 21.00, 21.0]]);
+        $bad = $this->piRepo->find(end($this->purchaseIds), $this->supplierId);
+        $this->assertTrue($bad['tax_document_late'], '19 dnů od úplaty > 15 (§ 28/8)');
+
+        // c) uhrazená záloha, 20 dnů bez DDKPZ i konečné faktury → warning
+        $paidOld = date('Y-m-d', strtotime('-20 days'));
+        $this->purchase('ZAL-LHUTA-BEZ', $vendor, null, false, 'advance', $paidOld, null, [[100.00, 0.00, 0.0]]);
+        $advNo = end($this->purchaseIds);
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status='paid', paid_at=? WHERE id=?")
+            ->execute([$paidOld, $advNo]);
+        $flag = $this->piRepo->find($advNo, $this->supplierId);
+        $this->assertTrue($flag['advance_tax_document_missing']);
+
+        // d) uhrazená záloha zúčtovaná konečnou fakturou (do 15 dnů) → bez warningu,
+        //    DDKPZ se nevyžaduje (plnění + vyúčtovací doklad ve lhůtě § 28/8)
+        $this->purchase('ZAL-LHUTA-VYUCT', $vendor, null, false, 'advance', $paidOld, null, [[100.00, 0.00, 0.0]]);
+        $advYes = end($this->purchaseIds);
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status='paid', paid_at=? WHERE id=?")
+            ->execute([$paidOld, $advYes]);
+        $this->purchase('FV-LHUTA-VYUCT', $vendor, '40', false, 'invoice', $paidOld, $paidOld, [[100.00, 21.00, 21.0]]);
+        $finalId = end($this->purchaseIds);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET advance_purchase_invoice_id=? WHERE id=?')
+            ->execute([$advYes, $finalId]);
+        $settled = $this->piRepo->find($advYes, $this->supplierId);
+        $this->assertFalse($settled['advance_tax_document_missing'], 'zúčtovaná záloha warning nemá');
+
+        // e) čerstvě zaplacená záloha (5 dnů) → zatím bez warningu
+        $paidNew = date('Y-m-d', strtotime('-5 days'));
+        $this->purchase('ZAL-LHUTA-NOVA', $vendor, null, false, 'advance', $paidNew, null, [[100.00, 0.00, 0.0]]);
+        $advNew = end($this->purchaseIds);
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status='paid', paid_at=? WHERE id=?")
+            ->execute([$paidNew, $advNew]);
+        $fresh = $this->piRepo->find($advNew, $this->supplierId);
+        $this->assertFalse($fresh['advance_tax_document_missing']);
+    }
+
+    /**
      * BUG 3 (2026-07) — následné KH (khdph_forma='N') s datem zjištění důvodů;
      * dodatečné přiznání (dapdph_forma='D') analogicky. Bez d_zjist musí build selhat.
      */

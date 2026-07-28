@@ -314,6 +314,10 @@ const trashModalMode = ref<'trash' | 'force'>('trash')
 const trashModalDocs = ref<TrashModalDoc[]>([])
 const trashBusy = ref(false)
 const inTrash = computed(() => !!invoice.value?.deleted_at)
+// FORK 0905 — doklad v koši je read-only: skrývá VŠECHNY mutační prvky v detailu
+// (párování § 37a i zálohy, úprava platebního účtu, upload/mazání PDF). Backend to
+// hlídá TrashGuardem + PurchaseSettlementService, tohle je zrcadlo v UI.
+const canMutate = computed(() => auth.canWrite && !inTrash.value)
 
 async function openTrashModal(mode: 'trash' | 'force') {
   const inv = invoice.value
@@ -708,7 +712,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
           {{ invoice.settled_by.varsymbol || invoice.settled_by.vendor_invoice_number || ('#' + invoice.settled_by.id) }}
         </RouterLink>
       </span>
-      <button v-if="auth.canWrite" type="button" @click="unlinkAdvance(invoice.settled_by.id)" :disabled="linkingAdvance"
+      <button v-if="canMutate" type="button" @click="unlinkAdvance(invoice.settled_by.id)" :disabled="linkingAdvance"
         class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
         {{ t('purchase_invoice.advance_link.unlink') }}
       </button>
@@ -723,7 +727,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
         </RouterLink>
         <span class="text-primary-700/70 font-mono">(−{{ formatMoney(invoice.linked_advance.total_with_vat, invoice.linked_advance.currency) }})</span>
       </span>
-      <button v-if="auth.canWrite" type="button" @click="unlinkAdvance()" :disabled="linkingAdvance"
+      <button v-if="canMutate" type="button" @click="unlinkAdvance()" :disabled="linkingAdvance"
         class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
         {{ t('purchase_invoice.advance_link.unlink') }}
       </button>
@@ -738,7 +742,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
           {{ invoice.settles_final.varsymbol || invoice.settles_final.vendor_invoice_number || ('#' + invoice.settles_final.id) }}
         </RouterLink>
       </span>
-      <button v-if="auth.canWrite" type="button" @click="unlinkSettlementDoc(invoice.settles_final.id, invoice.id)" :disabled="linkingSettlement"
+      <button v-if="canMutate" type="button" @click="unlinkSettlementDoc(invoice.settles_final.id, invoice.id)" :disabled="linkingSettlement"
         class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
         {{ t('purchase_invoice.settlement_doc.unlink') }}
       </button>
@@ -747,6 +751,9 @@ const purchaseActions = computed<ActionItem[]>(() => {
     <!-- Hlídání § 37a a 15denní lhůty (§ 28 odst. 8 ZDPH) -->
     <div v-if="invoice.settlement_deduction_mismatch" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md text-sm text-warning-700">
       {{ t('purchase_invoice.settlement_doc.mismatch_warning') }}
+    </div>
+    <div v-if="invoice.vat_sign_mismatch" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md text-sm text-warning-700">
+      {{ t('purchase_invoice.settlement_doc.vat_sign_warning') }}
     </div>
     <div v-if="invoice.tax_document_late" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md text-sm text-warning-700">
       {{ t('purchase_invoice.settlement_doc.late_warning') }}
@@ -921,7 +928,9 @@ const purchaseActions = computed<ActionItem[]>(() => {
     </div>
 
     <!-- ═══ Správa propojení se zálohou — jen nelinkované stavy (linkované jsou v banneru pod headerem) ═══ -->
-    <div v-if="!invoice.settled_by && !invoice.linked_advance"
+    <div v-if="!invoice.settled_by && !invoice.linked_advance
+              && !(invoice.settlement_documents && invoice.settlement_documents.length)
+              && invoice.document_kind !== 'tax_document'"
       class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
       <h3 class="text-sm font-medium text-neutral-700 mb-3">
         {{ invoice.document_kind === 'advance'
@@ -932,7 +941,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
       <!-- Záloha zatím nevyúčtovaná → nabídka spárovat s fakturou (opačný směr) -->
       <div v-if="invoice.document_kind === 'advance'" class="flex items-center justify-between gap-3">
         <p class="text-sm text-neutral-500">{{ t('purchase_invoice.advance_link.not_settled') }}</p>
-        <button v-if="auth.canWrite && invoice.has_settlement_candidates" type="button" @click="openPairModal('final')"
+        <button v-if="canMutate && invoice.has_settlement_candidates" type="button" @click="openPairModal('final')"
           class="cursor-pointer text-sm px-3 h-9 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md shrink-0">
           {{ t('purchase_invoice.advance_link.pair_settlement') }}
         </button>
@@ -949,7 +958,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
               <span class="text-neutral-500 font-mono">({{ formatMoney(invoice.advance_link_suggestion.total_with_vat, invoice.advance_link_suggestion.currency) }})</span>
             </div>
           </div>
-          <div v-if="auth.canWrite" class="flex gap-2 shrink-0">
+          <div v-if="canMutate" class="flex gap-2 shrink-0">
             <button type="button" @click="linkAdvance(invoice.advance_link_suggestion.id)" :disabled="linkingAdvance"
               class="cursor-pointer text-xs px-2 py-1 bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50">
               {{ t('purchase_invoice.advance_link.confirm') }}
@@ -963,7 +972,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
 
         <div v-else class="flex items-center justify-between gap-3">
           <p class="text-sm text-neutral-500">{{ t('purchase_invoice.advance_link.none') }}</p>
-          <button v-if="auth.canWrite && invoice.has_advance_candidates" type="button" @click="openPairModal('advance')"
+          <button v-if="canMutate && invoice.has_advance_candidates" type="button" @click="openPairModal('advance')"
             class="cursor-pointer text-sm px-3 h-9 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md shrink-0">
             {{ t('purchase_invoice.advance_link.pair') }}
           </button>
@@ -978,7 +987,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
       <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.settlement_doc.title') }}</h3>
       <div class="flex items-center justify-between gap-3">
         <p class="text-sm text-neutral-500">{{ t('purchase_invoice.settlement_doc.none_final') }}</p>
-        <button v-if="auth.canWrite && invoice.has_final_candidates" type="button" @click="openSettlementModal('final')"
+        <button v-if="canMutate && invoice.has_final_candidates" type="button" @click="openSettlementModal('final')"
           class="cursor-pointer text-sm px-3 h-9 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md shrink-0">
           {{ t('purchase_invoice.settlement_doc.pair_final') }}
         </button>
@@ -998,7 +1007,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
             </RouterLink>
             <span class="text-neutral-500 font-mono ml-2">(−{{ formatMoney(doc.total_with_vat, doc.currency) }})</span>
           </span>
-          <button v-if="auth.canWrite" type="button" @click="unlinkSettlementDoc(invoice.id, doc.id)" :disabled="linkingSettlement"
+          <button v-if="canMutate" type="button" @click="unlinkSettlementDoc(invoice.id, doc.id)" :disabled="linkingSettlement"
             class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
             {{ t('purchase_invoice.settlement_doc.unlink') }}
           </button>
@@ -1009,7 +1018,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
           {{ t('purchase_invoice.settlement_doc.none') }}
         </p>
         <span v-else></span>
-        <button v-if="auth.canWrite && invoice.has_settlement_doc_candidates" type="button" @click="openSettlementModal('doc')"
+        <button v-if="canMutate && invoice.has_settlement_doc_candidates" type="button" @click="openSettlementModal('doc')"
           class="cursor-pointer text-sm px-3 h-9 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md shrink-0">
           {{ t('purchase_invoice.settlement_doc.pair') }}
         </button>
@@ -1144,14 +1153,14 @@ const purchaseActions = computed<ActionItem[]>(() => {
               </div>
             </dl>
             <p v-if="qrData.source === 'qr_image'" class="text-xs text-warning-600">{{ t('purchase_invoice.qr.image_fallback_note') }}</p>
-            <button v-if="auth.canWrite" type="button" @click="qrEditing = true"
+            <button v-if="canMutate" type="button" @click="qrEditing = true"
               class="cursor-pointer w-full px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md">{{ t('purchase_invoice.qr.edit') }}</button>
           </template>
 
           <!-- Účet chybí -->
           <template v-else>
             <p class="text-sm text-neutral-600">{{ t('purchase_invoice.qr.no_account') }}</p>
-            <div v-if="auth.canWrite" class="flex flex-col gap-2">
+            <div v-if="canMutate" class="flex flex-col gap-2">
               <button v-if="qrData && qrData.can_extract" type="button" @click="runExtract"
                 class="cursor-pointer px-3 h-9 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md inline-flex items-center justify-center gap-1.5">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
@@ -1193,7 +1202,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
             <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
             {{ t('purchase_invoice.pdf.download') }}
           </a>
-          <button v-if="auth.canWrite" type="button" @click="deletePdf"
+          <button v-if="canMutate" type="button" @click="deletePdf"
             class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
             {{ t('purchase_invoice.pdf.delete') }}
@@ -1212,7 +1221,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
     </div>
     <div v-else class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
       <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.pdf.title') }}</h3>
-      <PdfDropzone v-if="auth.canWrite" :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
+      <PdfDropzone v-if="canMutate" :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
       <p v-else class="text-sm text-neutral-500">{{ t('purchase_invoice.pdf.no_pdf') }}</p>
     </div>
 

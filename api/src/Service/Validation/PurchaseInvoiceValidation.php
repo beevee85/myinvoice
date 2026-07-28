@@ -183,7 +183,37 @@ final class PurchaseInvoiceValidation
             }
         }
 
+        // Invariant rozpisu DPH: u každé nenulové sazby musí mít základ a daň shodné
+        // znaménko. Kombinace typu „základ +0,01 / daň −0,01" je formální nesmysl
+        // (vzniká rozdílem dvou nezávislých zaokrouhlení, např. u § 37a) a v EPO
+        // kontrolách přiznání/KH může doklad spadnout → označit ke kontrole.
+        if (self::hasVatSignMismatch($invoice)) {
+            $warn[] = 'vat_sign_mismatch';
+        }
+
         return $warn;
+    }
+
+    /**
+     * Má rozpis DPH (vat_breakdown per sazba) u některé nenulové sazby základ a daň
+     * s opačným znaménkem? Toleruje nulu na jedné straně (0% položky, RC apod.).
+     *
+     * @param array<string,mixed> $invoice Záznam z PurchaseInvoiceRepository::find().
+     */
+    public static function hasVatSignMismatch(array $invoice): bool
+    {
+        foreach ((array) ($invoice['vat_breakdown'] ?? []) as $b) {
+            $rate = (float) ($b['vat_rate'] ?? $b['rate'] ?? 0);
+            if ($rate <= 0.005) {
+                continue;
+            }
+            $base = (float) ($b['without_vat'] ?? $b['base'] ?? 0);
+            $vat  = (float) ($b['vat'] ?? 0);
+            if (abs($base) > 0.005 && abs($vat) > 0.005 && ($base > 0) !== ($vat > 0)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static function isValidDate(string $date): bool

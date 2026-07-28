@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 // RouterLink se používá i v Add Currency modalu — import už pokrývá
 import { useI18n } from 'vue-i18n'
@@ -63,6 +63,18 @@ const error = ref('')
 const fieldErrors = ref<Record<string, string[]>>({})
 
 const vatRates = ref<VatRate[]>([])
+
+// Záloha (advance) není daňový doklad: DUZP nemá (vzniká až přijetím úplaty)
+// a položky stojí „Mimo DPH" (CZ-NA, migrace 0905) — ne „0 % osvobozeno",
+// osvobozené plnění se vykazuje v přiznání, mimo DPH nikoli.
+watch(() => form.value.document_kind, (kind, prev) => {
+  if (kind !== 'advance' || prev === undefined || kind === prev) return
+  form.value.tax_date = ''
+  const mimoDph = vatRates.value.find(r => r.code === 'CZ-NA')
+  if (mimoDph) {
+    for (const it of form.value.items) it.vat_rate_id = mimoDph.id
+  }
+})
 const currencies = ref<Currency[]>([])
 const units = ref<Unit[]>([])
 const expenseCategories = ref<ExpenseCategory[]>([])
@@ -1038,7 +1050,7 @@ function fieldErr(key: string): string | null {
             <label class="block text-sm text-neutral-700 mb-1">{{ t('purchase_invoice.fields.issue_date') }} <span class="text-danger-500">*</span></label>
             <input v-model="form.issue_date" type="date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
-          <div>
+          <div v-if="form.document_kind !== 'advance'">
             <label class="block text-sm text-neutral-700 mb-1">{{ t('purchase_invoice.fields.tax_date') }}</label>
             <input v-model="form.tax_date" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>

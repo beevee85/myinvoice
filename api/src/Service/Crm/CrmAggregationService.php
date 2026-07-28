@@ -51,12 +51,9 @@ final class CrmAggregationService
      */
     private function advanceCostExclude(): string
     {
-        return " AND NOT (COALESCE(pi.document_kind, '') = 'advance'"
-             . " AND (pi.status <> 'paid'"
-             . " OR EXISTS (SELECT 1 FROM purchase_invoices adv_s"
-             // Vyúčtování v koši náklad nenese — zaplacená záloha se má počítat dál.
-             . " WHERE adv_s.advance_purchase_invoice_id = pi.id"
-             . " AND adv_s.deleted_at IS NULL)))";
+        // Záloha se z nákladů vyřazuje VŽDY — náklad nese DDKPZ / konečná faktura
+        // (shoda s PurchaseSummaryAction::advanceCostExclude, viz komentář tam).
+        return " AND COALESCE(pi.document_kind, '') <> 'advance'";
     }
 
     /** @return array<string,float|int> nulový akumulátor pro merge tržeb a nákladů per měna */
@@ -563,12 +560,8 @@ final class CrmAggregationService
                AND pi.deleted_at IS NULL
                AND pi.issue_date >= ?
                AND pi.status NOT IN ('draft', 'cancelled')
-               -- Spárovaná/zaplacená záloha (advance) nese náklad finální faktura → vyřadit
-               AND NOT (COALESCE(pi.document_kind, '') = 'advance'
-                        AND (pi.status = 'paid'
-                             OR EXISTS (SELECT 1 FROM purchase_invoices adv_s
-                                         WHERE adv_s.advance_purchase_invoice_id = pi.id
-                                           AND adv_s.deleted_at IS NULL)))
+               -- Záloha (advance) se vyřazuje vždy — náklad nese DDKPZ / konečná faktura
+               AND COALESCE(pi.document_kind, '') <> 'advance'
           GROUP BY pi.vendor_id, c.company_name
           ORDER BY costs_czk DESC
              LIMIT " . (int) $limit;
@@ -883,12 +876,8 @@ final class CrmAggregationService
                AND pi.deleted_at IS NULL
                AND pi.issue_date >= ?
                AND pi.status NOT IN ('draft', 'cancelled')
-               -- Spárovaná/zaplacená záloha (advance) nese náklad finální faktura → vyřadit (jako topVendors)
-               AND NOT (COALESCE(pi.document_kind, '') = 'advance'
-                        AND (pi.status = 'paid'
-                             OR EXISTS (SELECT 1 FROM purchase_invoices adv_s
-                                         WHERE adv_s.advance_purchase_invoice_id = pi.id
-                                           AND adv_s.deleted_at IS NULL)))
+               -- Záloha (advance) se vyřazuje vždy — náklad nese DDKPZ / konečná faktura
+               AND COALESCE(pi.document_kind, '') <> 'advance'
           GROUP BY pi.expense_category_id, ec.code, ec.label
           ORDER BY total DESC
         ";

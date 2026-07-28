@@ -506,12 +506,9 @@ final class SummaryAction
      */
     private function advanceCostExclude(): string
     {
-        return " AND NOT (COALESCE(pi.document_kind, '') = 'advance'"
-             . " AND (pi.status <> 'paid'"
-             . " OR EXISTS (SELECT 1 FROM purchase_invoices adv_s"
-             // Vyúčtování v koši zálohu „neuvolňuje" z nákladů dvojmo — koš ignorujeme.
-             . " WHERE adv_s.advance_purchase_invoice_id = pi.id"
-             . " AND adv_s.deleted_at IS NULL)))";
+        // Záloha se z nákladů vyřazuje VŽDY — náklad nese DDKPZ / konečná faktura
+        // (shoda s PurchaseSummaryAction::advanceCostExclude, viz komentář tam).
+        return " AND COALESCE(pi.document_kind, '') <> 'advance'";
     }
 
     /**
