@@ -19,6 +19,64 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## 2026-07-29 — Dávkový import, Commit 1: izolace testovací DB a zelený baseline
+
+**Charakter: FORK TEST-INFRA** — první commit featury „AI import přes předplatné"
+(větev `feat/batch-import-subscription`). Žádná produkční logika, jen testovací prostředí.
+Kontext a plán: `docs/batch-import/PLAN.md`, návod `docs/batch-import/TESTING.md`.
+
+**Proč:** integrační testy zakládají a **mažou** reálné řádky. Na nativní instalaci je
+`cfg.php` v kořeni repa zároveň produkční konfigurací, takže `vendor/bin/phpunit` tam
+dosud zapisoval rovnou do ostré databáze a nic tomu nebránilo. Druhý problém: sdílenou
+`myinvoice_ci` rozbíjejí dvě souběžné session.
+
+**Co se změnilo:**
+1. **`api/tests/Support/TestDatabaseGuard.php`** (nový) — pojistka V83. Tři vrstvy:
+   značka ostrého provozu (`prod`/`production`/`ostra`/`live`, **nepřebitelná**), vzor
+   povolených jmen (`test`/`tests`/`testing`/`ci`/`qa`/`sandbox` + volitelné číslo),
+   denylist generických jmen (`ci`, `test`, `myinvoice_ci`…, mimo CI). Guard čte jen
+   konfiguraci, spojení neotevírá; při zablokování končí kódem **78** (`EX_CONFIG`).
+   CI se pozná podle `GITHUB_ACTIONS`/`GITLAB_CI`/`BUILDKITE`/`CIRCLECI` — **holé `CI`
+   záměrně ne**, jinak by jediná zděděná proměnná ochranu vypnula.
+2. **`api/tests/bootstrap.php`** (upstream soubor, +7 řádků) — volání guardu.
+   **MUSÍ zůstat ZA `DG\BypassFinals::enable()`**: guard sahá na `Config` a co se načte
+   dřív než BypassFinals, si ponechá `final` → 123 unit testů spadne na
+   `ClassIsFinalException`. Ověřeno experimentálně.
+3. **`api/bin/test-db-prepare.php`** (nový) — jeden chráněný příkaz místo tří ručních:
+   guard → `migrate.php --no-backfills` → `ci-seed.php` → `test-seed-clients.php`.
+   Existuje proto, že skripty v `api/bin/` guard nevolají (`reset.php` umí `TRUNCATE`).
+4. **`api/bin/test-seed-clients.php`** (nový) — fork fixture: 3 syntetičtí klienti per
+   tenant + IČO tenantů (mod 11). `ci-seed.php` (upstream) klienty nezakládá, kvůli čemuž
+   se **103 testů nikdy nespustilo**. Needitujeme upstream skript, doplňujeme vedle něj.
+5. **`api/tests/Integration/Codebook/VatRateLabelsUniqueTest.php`** — doplněn chybějící
+   guard na `cfg.php` + try/catch. Bez cfg.php končil ERRORem místo skipu (jediný takový
+   soubor v suitě; je fork-only, přidán v `db8dc163`).
+6. **Testy guardu** — `tests/Unit/Support/TestDatabaseGuardTest.php` (tabulkové nad čistou
+   `decide()`), `tests/Unit/Support/TestDatabaseGuardProcessTest.php` (11 scénářů
+   v samostatném procesu — dokazují, že guard běh reálně zastaví, včetně návratového kódu),
+   `tests/Architecture/TestDatabaseGuardWiringTest.php` (detektor tiché ztráty hooku při
+   merge + kontrola pořadí vůči BypassFinals).
+
+**Vědomé rozhodnutí:** guard blokuje **celý** běh, ne jen Integration suitu. Důvod:
+6 „Unit" testů (`tests/Unit/Service/Auth/*`) sahá na ostrou DB a `AtomicAuthTransitionTest`
+si tam zakládá uživatele — scopování na Integration by nechalo `--testsuite Unit` projít
+proti produkci.
+
+**Známé omezení:** guard hlídá jen jméno schématu, ne `db.host` — testovací jméno na
+produkčním hostu projde. Hláška proto vždy vypisuje `host:port/dbname`.
+
+**Testy:** 2 015 → **2 099 zelených**, asercí 6 661 → **7 173**, skipped **134 → 31**
+(zbytek: 26× nedostupný `dev.myinvoice.cz`, 4× chybějící fixture faktur, 1× obranná logika).
+Baseline běžel proti `myinvoice_test_batchimport`.
+
+**Jak ověřit po merge:**
+`MYINVOICE_DB_NAME=myinvoice_test_<ucel> vendor/bin/phpunit --filter TestDatabaseGuard`
+(musí projít 84 testů) a ověřit, že `tests/bootstrap.php` pořád volá `assertOrExit`
+**až za** `BypassFinals::enable()` — hlídá to `TestDatabaseGuardWiringTest`, takže při
+tiché ztrátě hooku spadne Architecture suita.
+
+---
+
 ## 2026-07-28 (3. dávka) — DDKPZ: popisky sazeb, zaokrouhlovací řádek, exporty pro KH
 
 **Charakter: FORK BUGFIX** — dokončení DDKPZ po nasazení v4.52.0. Právní i technické podklady: `docs/dph-zalohy.md`.
