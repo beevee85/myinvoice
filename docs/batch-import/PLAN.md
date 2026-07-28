@@ -1,0 +1,546 @@
+# Dávkový import přijatých dokladů přes předplatné (Claude Code) — Commit 0: recon
+
+Verze repa při průzkumu: **v4.52.1**, větev `custom` (commit `ed2c08e9`), nová větev
+`feat/batch-import-subscription`. **Žádný kód se v tomto commitu nepíše.**
+
+Tento dokument je závazný podklad pro Commity 1–9. Kde se zadání rozchází s realitou repa,
+je to výslovně označeno jako **ODCHYLKA** a doplněno návrhem řešení (sekce 9).
+
+---
+
+## 1. Stack a runtime
+
+| vrstva | co to je |
+|---|---|
+| Backend | PHP **8.5**, Slim 4 (`slim/slim`), PHP-DI 7 (autowiring), Monolog, Guzzle |
+| DB | MariaDB 11 (min. 10.6), PDO, žádné ORM — ruční repozitáře |
+| PDF | `mpdf/mpdf` (výstup), `smalot/pdfparser` (čtení textové vrstvy) |
+| QR | `chillerlan/php-qrcode` + `rikudou/czqrpayment` — **jen generátor, ne dekodér** |
+| IBAN | `rikudou/iban` + vlastní mod-97 v `BankAccountParser` |
+| XML | ext-dom + XSD validace (`api/xsd/isdoc-invoice-6.0.2.xsd`) |
+| Frontend | Vue 3.5 + TS, Vite, Tailwind 4 (CSS-first), Pinia, vue-i18n |
+| Nasazení | Docker (`Dockerfile.alpine`), nginx + php-fpm, cron uvnitř kontejneru |
+
+**Kritické zjištění k prostředí:** produkční image `myinvoice:latest` **neobsahuje**
+`pdftotext`, `pdftoppm`, `pdfinfo`, `zbarimg`, `gs` ani `convert`. Veškerá práce s PDF
+na serveru je čistě v PHP (`smalot/pdfparser` pro text, vlastní `PdfImageExtractor`
+pro obrázkové XObjecty). Hostitelský server (kde běží Claude Code) poppler **má**
+(`/usr/bin/pdftotext`, `pdftoppm`, `pdfinfo`), ale `zbarimg` ani `pyzbar`/`cv2` ne.
+
+Důsledky jsou rozepsané u pravidel V3, V8, V33–V35 v sekci 7 a v odchylkách O-5, O-6.
+
+---
+
+## 2. Router, autentizace, middleware
+
+### 2.1 Router
+Všechny cesty se registrují v jednom souboru `api/src/Routes.php` (817 řádků, statická
+metoda `Routes::register(App $app)`). Akce jsou invokovatelné třídy v `api/src/Action/**`,
+autowirované PHP-DI. Žádné atributy/anotace, žádný route cache.
+
+Veřejné API je **totéž** co interní — `ApiVersionRewriteMiddleware` přepíše `/api/v1/...`
+na `/api/...` ještě před routerem a přidá hlavičku `X-API-Version: 1`.
+
+### 2.2 Middleware stack (`api/src/Bootstrap.php:186-199`)
+Slim 4 je LIFO, takže reálné pořadí zvenku dovnitř je:
+
+1. `ApiVersionRewriteMiddleware` — `/api/v1/*` → `/api/*`
+2. `IpAllowlistMiddleware`
+3. `FirstRunLockMiddleware` — 423 dokud není žádný uživatel
+4. `AuthMiddleware` — **session NEBO Bearer PAT**; atributy `auth.user`, `auth.method`
+5. `SessionLockMiddleware`
+6. `RequireMfaMiddleware` (bearer skip)
+7. `RoleMiddleware` — RBAC podle `METHOD + path` regexů
+8. `SupplierScopeMiddleware` — `X-Supplier-Id` → atribut `supplier.current_id`
+9. `ApiScopeMiddleware` — **jen pro bearer**: path allowlist + `read`/`read_write` scope
+10. `RateLimitMiddleware`
+11. `CsrfMiddleware` (bearer skip)
+12. `WebAuthnBodyLimitMiddleware`
+13. routing + body parsing
+
+**Pro dávkový import to znamená:** jednorázový „batch token“ ze zadání (V63) musí projít
+**čtyřmi** vrstvami, které o něm nic nevědí (Auth, Role, SupplierScope, ApiScope). Návrh
+řešení viz O-2.
+
+### 2.3 Autentizace
+* Session (browser SPA) — cookie + CSRF token, plná práva role.
+* Bearer PAT — `api_tokens`, volitelně přišpendlený na `supplier_id`; `ApiScopeMiddleware`
+  drží allowlist cest (`api/src/Middleware/ApiScopeMiddleware.php:46`) a scope. **Cesta
+  `/api/purchase-invoices(/|$)` v allowlistu JE**, `/api/import-batches` by v něm nebyla.
+
+---
+
+## 3. Migrace a jejich verzování
+
+* Adresář `db/migrations/`, prostý runner `api/bin/migrate.php`.
+* Řadí se **abecedně podle názvu souboru**, evidence v tabulce `migrations (filename, applied_at, duration_ms)`.
+* **Down migrace neexistují.** Runner umí jen `--status` a `--no-backfills`. Rollback = obnova z dumpu.
+* Každá migrace **musí být idempotentní** nativními `IF [NOT] EXISTS` (pravidlo z `AGENTS.md`).
+* Upstream je na `0148_user_suppliers.sql`; **fork-only migrace se číslují od `0900`**
+  (aktuálně 0900–0911, poslední `0911_extraction_blocking.sql`).
+* Migrace se pouští automaticky při startu kontejneru; ručně
+  `docker compose exec app php api/bin/migrate.php`.
+
+→ **Nové tabulky dostanou čísla `0912+`.** Požadavek „migrace up/down idempotentně“
+z Commitu 2 je splnitelný jen v části „up idempotentně“ (viz O-4).
+
+---
+
+## 4. Background / dlouhé úlohy
+
+Mechanismus **existuje a je jediný**:
+
+* Tabulka `import_jobs` (status, progress, log, cancel_requested) + repozitář `ImportJobRepository`.
+* Worker `api/bin/import-worker.php --job-id=N`, dispatch podle `source`:
+  `idoklad | fakturoid | monthly_export | document_zip_import | document_zip_export | document_folder_import`.
+* Spouštění: `MyInvoice\Service\BackgroundProcess::spawnPhp()` — POSIX `nohup … &`,
+  Windows `start /B` přes `popen`. Fire-and-forget, PHP CLI se hledá přes `PhpCliLocator`.
+* Frontend polluje `GET /api/admin/imports/{id}`.
+* Velké uploady dokumentů jdou přes chunkovaný upload
+  (`/api/documents/upload/start|chunk-bytes|chunk-files|finish`) + job.
+
+**Naopak AI extrakce PDF je dnes synchronní** — `POST /api/admin/imports/ai-extract-pdf`
+zpracuje jedno PDF v requestu (10–30 s), dávku řeší **frontend** sériovým voláním
+v cyklu (`web/src/pages/admin/Integrations.vue:391 runAiBatch`).
+
+→ Pro dávkový import: rozbalení ZIPu, hashování, detekce stran a QR patří do jobu
+(`source = 'purchase_batch_import'`), samotný `apply` je krátký a může být synchronní.
+
+---
+
+## 5. Testy
+
+### 5.1 Runner
+`api/phpunit.xml`, PHPUnit 13, tři suity: **Unit**, **Integration**, **Architecture**.
+Bootstrap `api/tests/bootstrap.php` zapíná `DG\BypassFinals` (celý kód je `final`).
+
+Spuštění v tomto prostředí (host PHP 8.4 nestačí, image má 8.5):
+
+```bash
+docker run --rm --network host -v /opt/myinvoice:/work -w /work/api myinvoice:latest vendor/bin/phpunit
+```
+
+Vyžaduje `cfg.php` v kořeni repa mířící na CI databázi `myinvoice_ci` (port 3307) a v něm
+i sekci `varsymbol.templates`, jinak padá 6 testů `RecurringGeneratorTest`. Testy zapisují
+log `api-YYYY-MM-DD` do kořene repa — po běhu smazat. Stav k dnešku: **253 testovacích
+souborů**, suita zelená (~1 950 testů, ~34 skipped bez Redis/AI klíčů).
+
+### 5.2 Konvence fixtures / factories
+**Žádný factory framework ani fixture adresář neexistuje.**
+* Unit testy: čistě statická data v testu (`PurchaseInvoiceValidationTest::validBase()`).
+* Integration testy: bootují **reálný DI kontejner proti reálné DB**, na začátku
+  `markTestSkipped`, pokud `cfg.php` chybí, data si vytvoří ručně v `setUp()` a uklidí
+  v `tearDown()` (vzor `tests/Integration/PurchaseInvoice/PurchaseImportBatchAndKindTest.php`).
+* HTTP úroveň se testuje jen u middlewarů a několika akcí přes ručně sestavené
+  `ServerRequest` (`tests/Unit/Middleware/RoleMiddlewareTest.php`) — **plnohodnotný
+  e2e přes `$app->handle()` v repu není**.
+
+### 5.3 Frontend testy
+`web/tests/*.test.mjs`, `node --test` (`pnpm test:pwa`). Jsou to **regex testy nad zdrojáky**,
+ne komponentové testy — žádný Vitest, žádné Playwright/Cypress. Gate pro build je
+`vue-tsc --noEmit` (`pnpm build` = type-check + vite build).
+
+→ Požadované „E2E“ testy z Commitu 8 budou v praxi **Integration testy proti DB + testy
+služeb**, ne prohlížečové e2e (viz O-7).
+
+---
+
+## 6. Role, tenant scoping, i18n, navigace
+
+### 6.1 Role
+Hierarchie `admin > accountant > readonly`, vynucuje `RoleMiddleware` regexy nad
+`METHOD + path`; fallback bez shody je **admin-only**.
+
+* `'* #^/api/purchase-invoices(/|$)#'` → **accountant stačí** na celý purchase modul.
+* `scan-inbox` navíc kontroluje roli **v akci**: `ScanInboxAction:34` — `admin|accountant`.
+* `ai-extract-pdf` totéž: `AiExtractPdfAction:38` — `admin|accountant`, ale cesta
+  `/api/admin/*` sama padá do admin-only fallbacku RoleMiddleware → **reálně admin-only**.
+
+### 6.2 Tenant scoping
+`SupplierScopeMiddleware` → `$request->getAttribute('supplier.current_id')`, v akcích přes
+`SupplierGuard::currentId($request)` a `SupplierGuard::owns($request, $row)`. Repozitáře
+berou `supplier_id` jako povinný parametr **každé** metody (`find($id, $supplierId)` atd.).
+Od 4.52.0 navíc `user_suppliers` + `SupplierAccessResolver` (403 `forbidden_supplier`).
+
+### 6.3 i18n
+* Backend: `MyInvoice\I18n\ErrorCatalog` — mapa **literální CZ text → EN**, aplikuje se
+  v `Json::error()`. Nová hláška bez záznamu se vrátí česky i v EN režimu.
+* Frontend: vue-i18n, `web/src/i18n/cs.json` + `en.json` — **vždy obě**.
+
+### 6.4 Registrace routy a položky navigace
+* Backend route: řádek v `api/src/Routes.php` + (u veřejného API) záznam v `api/openapi.yaml`
+  (8 044 řádků; purchase modul tam je).
+* Frontend routa: `web/src/router/index.ts`.
+* Menu: `web/src/components/layout/AppLayout.vue:176-183` — sekce „Nákup“. Dnes obsahuje
+  Přijaté faktury, Platební příkazy, Export a **jen pro admina** `/admin/import?tab=purchase`
+  a `/admin/integrations?tab=ai`.
+* Manuál: `manual/NN_Nazev.md` + `php tools/generateManualHtml.php` (generated/ není v gitu).
+
+---
+
+## 7. Kde přesně je co (mapa dotčeného kódu)
+
+| co | kde |
+|---|---|
+| **BYOK AI extract endpoint** | `POST /api/admin/imports/ai-extract-pdf` → `Action/Admin/Import/AiExtractPdfAction.php` (`Routes.php:527`). **Ne** `/api/integrations/anthropic/extract` (O-1) |
+| AI pipeline | `Service/Import/AiPdfExtractor.php:61 extractAndCreate()`, `:368 validateAiData()`, `:396 createDraft()` (423 řádků) |
+| Anthropic klient + prompt + JSON schema | `Service/Import/AnthropicClient.php:132 extractInvoice()` (system prompt + schema inline, ř. 155–430) |
+| Anthropic credentials | `Action/Admin/Import/AnthropicCredentialsAction.php`, `Routes.php:524-526` |
+| **ISDOC parser** | `Service/Import/IsdocParser.php` |
+| ISDOC → přijatá faktura | `Service/Import/IsdocToPurchaseInvoiceMapper.php:42 map()` |
+| ISDOC v PDF/A-3 | `Service/Import/PdfIsdocExtractor.php` |
+| ISDOCX (ZIP balíček) | `Service/Import/IsdocxExtractor.php` |
+| **Pohoda dataPack** | `Service/Import/PohodaXmlParser.php` |
+| Bundle importér (ZIP/XML admin) | `Service/Import/InvoiceImportService.php:68 importBundle()`, akce `Action/Admin/ImportAction.php` |
+| **scan-inbox** | `POST /api/purchase-invoices/scan-inbox` → `Action/PurchaseInvoice/ScanInboxAction.php`, služba `Service/Import/PurchaseInvoiceInboxScanner.php` |
+| Ruční založení | `POST /api/purchase-invoices` → `Action/PurchaseInvoice/CreatePurchaseInvoiceAction.php` |
+| **Sdílená validace** | `Service/Validation/PurchaseInvoiceValidation.php:47 invoice()`, `:170 warnings()`; per-položka `Service/Validation/InvoiceAmountPolicy.php:157 validateItem()` |
+| Zápis + přepočet | `Repository/PurchaseInvoiceRepository.php:938 createDraft()`, `:1334 replaceItems()`, `Service/Invoice/PurchaseInvoiceCalculator.php:31 recompute()`, `Service/Invoice/InvoiceMath.php` |
+| **Dedup přes pdf_hash** | `PurchaseInvoiceRepository.php:2390 findIdByPdfHash()`; druhý dedup `:2406 findIdByVendorInvoice()`; DB `uq_pi_vendor_invoice (supplier_id, vendor_id, vendor_invoice_number, issue_date)` |
+| Archivace PDF | `Service/Import/PurchaseInvoicePdfArchiver.php`, `PurchaseInvoiceRepository:2422 setPdfMetadata()` |
+| **Dodavatel z ARES** | `Service/Import/ClientResolver.php:50 resolveVendor()` (match **podle IČO**, pak DIČ), `Service/Ares/AresClient.php:32`, plátcovství `Service/Ares/VendorVatPayerResolver.php:39`, `Service/Ares/CrpDphClient.php:43`, `Service/Ares/ViesClient.php:41` |
+| **link-advance / advance-candidates** | `Routes.php:412-416`, `PurchaseInvoiceRepository:1566 linkAdvance()`, `:1616 suggestAdvanceLink()`, `:1642 advanceCandidates()` |
+| **link-settlement-doc (§ 37a)** | `Routes.php:418-421`, `Service/Invoice/PurchaseSettlementService.php` |
+| **payment-qr / extract-account** | `Routes.php:433-435` → `Action/PurchaseInvoice/PaymentQrAction.php:80 extractAccount()`; generátor `Service/Qr/QrPaymentGenerator.php`; heuristika obrázku QR `Service/Pdf/PdfImageExtractor.php:44 findQrLikeImage()` |
+| **payment-orders/verify-account (§ 109)** | `Routes.php:440` → `Service/Payment/PaymentOrderService.php:406 verifyInvoiceAccount()` |
+| **codebooks/cnb-rate** | `Routes.php:265` → `Action/Codebook/CnbRateAction.php`, klient `Service/Currency/CnbExchangeRateClient.php` |
+| ISDOC exporter | `Service/Export/IsdocExporter.php` (`buildXml()` — použitelný i k sestavení vstupu pro importér) |
+| Uploader Dokumentů | `Action/Document/UploadDocumentAction.php`, `DocumentJobsAction.php` (chunked), `Service/Document/DocumentStorage.php`, `DocumentIngestService.php`, `ZipImporter.php` |
+| DPH evidence a výkazy | `Service/Report/VatLedgerService.php`; náhledy `GET /api/reports/dphdp3/preview`, `/api/reports/dphkh1/preview`; podání `GET /api/reports/submissions` |
+| Audit log | `Service/ActivityLogger.php` |
+| Koš (fork) | `Http/TrashGuard.php`, `Service/Invoice/DocumentTrashPolicy.php`, migrace 0905 |
+
+### 7.1 Existující „import batch“ — **kolize názvů**
+
+Upstream **už má** koncept dávky: migrace `0141_purchase_invoice_import_batch.sql` přidává
+`purchase_invoices.import_batch_id VARCHAR(32)` — náhodný identifikátor generovaný
+**frontendem**, endpoint `GET /api/purchase-invoices/import-batches`
+(`PurchaseInvoiceImportBatchesAction`), filtr v seznamu a `PurchaseInvoiceRepository:2355
+recentImportBatches()`. Slouží k dohledání „co se naimportovalo“ po hromadném AI importu (#232).
+
+→ Navrhované tabulky `import_batches` / `import_batch_files` / `import_batch_results`
+by kolidovaly pojmenováním s tímto konceptem i s tabulkou `import_jobs`. Viz O-3.
+
+---
+
+## 8. Soupis stávajících validací (požadavek zadání § 2.1) a mapování na katalog V1–V74
+
+Legenda sloupce „znovupoužitelné“: **ANO** = lze zavolat přímo, **ČÁST** = existuje, ale je
+zadrátované uvnitř importéru/akce, **NE** = neexistuje, musíme napsat.
+
+### 8.1 Ruční cesta — `POST /api/purchase-invoices` (+ `PUT /{id}`)
+
+| # | pravidlo | implementace | chybový kód | znovupoužitelné | → katalog |
+|---|---|---|---|---|---|
+| R1 | `vendor_id` povinné, > 0 | `PurchaseInvoiceValidation:51` | `validation_failed` / `fields.vendor_id` | ANO | — |
+| R2 | `vendor_invoice_number` neprázdné, ≤ 50 znaků, bez řídících znaků | `PurchaseInvoiceValidation:56-65` | `fields.vendor_invoice_number` | ANO | **V26** |
+| R3 | `document_kind` ∈ `invoice, receipt, credit_note, advance, tax_document` | `PurchaseInvoiceValidation:67-72` | `fields.document_kind` | ANO | **V55** (částečně — shodu s titulkem dokladu neřeší) |
+| R4 | `currency_id` > 0 | `:74` | `fields.currency_id` | ANO | — |
+| R5 | `issue_date` povinné + formát | `:78-82` | `fields.issue_date` | ANO | část **V38** |
+| R6 | `due_date` povinné + formát | `:84-88` | `fields.due_date` | ANO | část **V36** |
+| R7 | `tax_date`, `received_at` formát (nepovinné) | `:90-96` | — | ANO | část **V37/V40** |
+| R8 | `varsymbol` ≤ 20 znaků, bez řídících znaků | `:99-107` | `fields.varsymbol` | ANO | část **V28** (numeričnost NE) |
+| R9 | `exchange_rate`, `payment_exchange_rate` v (0; 100 000> | `:110-124` | — | ANO | část **V52** |
+| R10 | položka: popis povinný | `InvoiceAmountPolicy:161` | `items.N.description` | ANO | — |
+| R11 | položka: `quantity != 0` | `InvoiceAmountPolicy:165` | `items.N.quantity` | ANO | část **V43** |
+| R12 | položka: `vat_rate_id` povinné a číselné | `InvoiceAmountPolicy:170` | `items.N.vat_rate_id` | ANO | — |
+| R13 | položka: `unit_price_without_vat` číselné | `InvoiceAmountPolicy:174` | — | ANO | část **V43** |
+| R14 | položka: zákaz záporné qty **i** ceny zároveň | `InvoiceAmountPolicy:178` | — | ANO | část **V57** |
+| R15 | `vat_rate_id` musí existovat v číselníku | `PurchaseInvoiceValidation:139-144` (mapa z `vatRateMap()`) | `items.N.vat_rate_id` | ANO | část **V41** (platnost k DUZP NE) |
+| R16 | `advance_paid_amount` ≥ 0 | `:147-150` | — | ANO | část **V59** |
+| R17 | poznámky ≤ 64 KB | `:153-158` | — | ANO | — |
+| R18 | vendor existuje **a patří tenantovi** | `CreatePurchaseInvoiceAction:56-59` (`SupplierGuard::owns`) | `vendor_not_found` | ČÁST | **V64** |
+| R19 | neplátce DPH → `vat_deduction='none'` (pokud volající neurčil) | `CreatePurchaseInvoiceAction:70-78` | — | ČÁST | část **V23** |
+| R20 | RC klasifikace na řádku/hlavičce vynutí `reverse_charge=1` | `CreatePurchaseInvoiceAction:88-104` | warning `reverse_charge_forced_by_classification` | ČÁST | část **V53** |
+| R21 | auto-default `vat_classification_code` (21 % → 40, 12 % → 41) | `CreatePurchaseInvoiceAction:158 applyVatClassificationDefaults()` + `Service/Report/VatClassificationDefaulter` | — | ANO | **V54** |
+| R22 | kolize interního čísla (`uq_pi_supplier_varsymbol`) → 409 | `CreatePurchaseInvoiceAction:110-117` | `varsymbol_duplicate` | ČÁST | — |
+| R23 | dobropis s kladným součtem / smíšenými znaménky | `PurchaseInvoiceValidation:170 warnings()` | warning `credit_note_positive_total`, `credit_note_mixed_sign_items` | ANO | **V57** |
+| R24 | rozpor znaménka základ × daň v rekapitulaci | `PurchaseInvoiceValidation::hasVatSignMismatch()` | warning `vat_sign_mismatch` | ANO | část **V45** |
+| R25 | neplátce + přesto odpočet | `CreatePurchaseInvoiceAction:135-137` | warning `vendor_non_payer_deduction` | ČÁST | část **V23** |
+| R26 | `vat_overrides` (§ 73) se ukládají PŘED `recompute()` | `CreatePurchaseInvoiceAction:123-127` + `InvoiceMath::compute()` | — | ANO | **V48** |
+
+### 8.2 ISDOC / ISDOCX / Pohoda importér
+
+| # | pravidlo | implementace | chybový kód | znovupoužitelné | → katalog |
+|---|---|---|---|---|---|
+| I1 | XSD validace ISDOC | `Service/Validation/XmlSchemaValidator.php` + `api/xsd/` | — | ANO | část **V9** |
+| I2 | zákaz DOCTYPE (XXE) | `PohodaXmlParser:51` | `RuntimeException` | ČÁST | část **V62** |
+| I3 | root musí být `dataPack`/`responsePack` | `PohodaXmlParser:68` | — | ČÁST | část **V9** |
+| I4 | chybí `invoiceHeader` / `symVar` | `PohodaXmlParser:102,115` | — | ČÁST | — |
+| I5 | **cross-tenant guard**: buyer IČO == tenant IČO | `IsdocToPurchaseInvoiceMapper:46-53`, `InvoiceImportService:238 detectRoute()` | `InvalidArgumentException` | ČÁST | **V15** |
+| I6 | vendor musí mít IČO | `IsdocToPurchaseInvoiceMapper:55-59` | — | ČÁST | část **V17** (jen existence, ne mod-11) |
+| I7 | vendor match podle IČO → reuse, jinak založit + ARES | `ClientResolver:50/77` | — | ANO | **V19, V24** |
+| I8 | tenant musí mít vyplněné IČO | `InvoiceImportService:76` | — | ČÁST | část **V15** |
+| I9 | měna musí být nakonfigurovaná pro suppliera | `InvoiceImportService:652` | — | ČÁST | — |
+| I10 | ZIP: max 500 položek, 50 MiB rozbaleno, 10 MiB/položka (zip-bomb) | `InvoiceImportService:34-36, 725-761` | `RuntimeException` | ČÁST | část **V2** |
+| I11 | upload: max 50 souborů, 20 MiB/soubor, 50 MiB celkem | `Action/Admin/ImportAction.php:35-37` | — | ČÁST | **V2** |
+| I12 | rekapitulace z `<TaxTotal>` do `vat_overrides` | `Service/Import/PurchaseVatRecapSeeder.php` | — | ANO | **V48** |
+| I13 | ČNB kurz u cizí měny | `Service/Import/PurchaseInvoiceCnbApplier.php` | — | ANO | **V52** |
+
+### 8.3 `scan-inbox`
+
+| # | pravidlo | implementace | znovupoužitelné | → katalog |
+|---|---|---|---|---|
+| S1 | role `admin|accountant` | `ScanInboxAction:34` | ANO (vzor) | **V65** |
+| S2 | realpath guard — soubor musí být uvnitř `inbox_dir` (symlink/traversal) | `PurchaseInvoiceInboxScanner` (`$inboxReal` porovnání) | ČÁST | **V7** |
+| S3 | whitelist přípon z cfg (`pdf, isdoc, isdocx, xml`) | tamtéž, `allowed_exts` | ČÁST | část **V1** (přípona, **ne** magic bytes) |
+| S4 | max 20 MiB/soubor | `PurchaseInvoiceInboxScanner:41` | ČÁST | **V2** |
+| S5 | max 500 souborů/běh | `:42` | ČÁST | — |
+| S6 | dedup přes SHA-256 proti `pdf_hash` | `findIdByPdfHash()` | ANO | **V69** (v rámci dávky NE) |
+| S7 | dry-run režim (nezapisuje) | `scan($supplierId, $userId, dryRun: true)` | ANO (vzor pro `/validate`) | — |
+
+### 8.4 BYOK AI cesta (`AiPdfExtractor`) — **nejde přes společnou validaci**
+
+| # | pravidlo | implementace | → katalog |
+|---|---|---|---|
+| A1 | vendor objekt existuje, má `company_name` nebo `ic` | `validateAiData:371-376` | část **V17** |
+| A2 | `issue_date` ve formátu `YYYY-MM-DD` | `:379` | část **V36** |
+| A3 | `currency` ISO 4217 | `:382` | — |
+| A4 | ≥ 1 položka, každá má popis/qty/cenu | `:386-393` | část **V43** |
+| A5 | dedup `pdf_hash` → vrátí existující ID | `extractAndCreate:97-110` | **V69** |
+| A6 | ISDOC embed má přednost před AI | `:113-137` | tok v 3.1 |
+| A7 | vendor↔customer swap detekce + odmítnutí „fakturuji sám sobě“ | `:176-215` | **V16** |
+| A8 | customer IČO ≠ tenant → `wrong_tenant` | `:217-226` | **V15** |
+| A9 | prohozené `issue_date`/`due_date` → oprava | `fixSwappedIssueDueDates()` | **V36** |
+| A10 | dobropis podle záporných řádků (override AI) | `createDraft:424-444` | **V57** |
+| A11 | neplátce → nulování sazeb + `vat_deduction='none'`, při rozporu **blokující** varování | `:502-520`, `setExtractionWarning(blocking: true)` | **V23** |
+| A12 | jednosazbová konzistentní rekapitulace → verbatim (§ 73) | `authoritativeRecapBaseLine()`, `collapseToSummaryBaseLine()`, `singleRateConsistentRecap()` | **V44, V48** |
+| A13 | reverse charge auto-detect + klasifikace 23/24/24e/25 + DUZP § 25 | `inferReverseCharge()`, `createDraft:574-655`, `euAcquisitionTaxDate()` | **V53** |
+| A14 | rozdíl součtu řádků vs. „K úhradě“ z PDF ≥ 1 Kč → varování | `maybeFlagTotalsMismatch()`, `applyRoundingFromPdfTotal()` | **V44, V46, V49** |
+| A15 | ČNB kurz k DUZP | `applyCnbRate()` | **V52** |
+| A16 | návrh provázání zálohy z `advance_reference` (neaplikuje) | `maybeSuggestAdvanceLink()` | **V58** |
+| A17 | sanitizace čísla dokladu | `sanitizeVendorNumber()` | část **V26** |
+
+> **Zásadní zjištění k § 2 zadání:** `AiPdfExtractor::createDraft()` **NEVOLÁ**
+> `PurchaseInvoiceValidation::invoice()`. Píše do DB přes `PurchaseInvoiceRepository`
+> napřímo, s vlastní (slabší) `validateAiData()`. Parita mezi „ruční“ a „AI“ cestou tedy
+> dnes **neexistuje** — jsou to dvě různé zapisovací cesty. Totéž platí pro
+> `IsdocToPurchaseInvoiceMapper` a `PurchaseInvoiceInboxScanner`.
+> Důsledek pro plán: viz sekce 10 (verdikt ke Commitu 1).
+
+### 8.5 Mapování katalogu V1–V74 na realitu
+
+| ID | stav | poznámka / kde vzít |
+|---|---|---|
+| V1 MIME + magic bytes | **NE** | dnes jen přípona (scan-inbox) nebo `finfo` bez porovnání s příponou (`DocumentStorage:265`). Nutno napsat. |
+| V2 velikost | **ANO** | limity existují, ale **tři různé** (20/32/50 MiB) — sjednotit a zdůvodnit |
+| V3 PDF otevřít, strany > 0, nešifrované | **ČÁST** | `smalot/pdfparser` umí; počet stran nutno dopočítat, detekce šifrování chybí. **Bez popplera v image.** |
+| V4 sha256 shoda results ↔ manifest | **NE** | nové |
+| V5 `batch_file_id` téže dávky | **NE** | nové |
+| V6 chybějící/přebývající soubor | **NE** | nové |
+| V7 path traversal | **ČÁST** | vzor `scan-inbox` realpath guard; pro ZIP `ZipImporter` |
+| V8 vision vs. text | **ČÁST** | `DocumentTextExtractor` pozná „PDF bez textové vrstvy“ (vrací `unsupported`) |
+| V9 JSON schema | **NE** | v repu není JSON Schema validátor (jen XSD). Nutná vlastní implementace nebo nová závislost — viz O-8 |
+| V10 allowlist polí | **NE** | nové (kritické) |
+| V11 strict mode | **NE** | nové |
+| V12–V14 source/confidence/conflict | **NE** | nové, dnešní AI cesta confidence vůbec nevrací |
+| V15 odběratel == tenant | **ANO** | `IsdocToPurchaseInvoiceMapper:46`, `AiPdfExtractor:217` |
+| V16 dodavatel != tenant | **ANO** | `AiPdfExtractor:176-215` |
+| V17 IČO mod-11 | **NE** | **v celém repu neexistuje kontrolní součet IČO** (ověřeno grepem) |
+| V18 DIČ vs. IČO | **ČÁST** | `VendorVatPayerResolver::isCzGroupDic()` řeší jen skupinové DIČ CZ699 |
+| V19 ARES existence | **ANO** | `AresClient:32` (+ cache) |
+| V20 fuzzy název | **NE** | nové |
+| V21 adresa | **NE** | nové |
+| V22 likvidace / zrušený | **ČÁST** | `AresClient::normalize()` — nutno ověřit, která pole ARES vrací |
+| V23 plátcovství k DUZP | **ČÁST** | `CrpDphClient` + `VendorVatPayerResolver` **k dnešku**, ne k datu DUZP → nové |
+| V24 match podle IČO, ne názvu | **ANO** | `ClientResolver:77` |
+| V25 VIES | **ANO** | `ViesClient:41`, výjimka pro CZ699 |
+| V26 číslo dokladu | **ANO** | `PurchaseInvoiceValidation:56` |
+| V27 duplicita (vendor, číslo) | **ČÁST** | DB unikát je **(supplier, vendor, číslo, issue_date)** — přísnější pravidlo V27 nesedí na DB (viz O-9) |
+| V28 varsymbol | **ČÁST** | délka/znaky ANO, numeričnost NE |
+| V29 účet mod-11 | **NE** | `BankAccountParser` mod-11 nedělá (jen IBAN mod-97) |
+| V30 IBAN mod-97 | **ANO** | `BankAccountParser:80` |
+| V31 BIC | **NE** | nové (triviální) |
+| V32 § 109 účet | **ANO** | `PaymentOrderService:406 verifyInvoiceAccount()` |
+| V33–V35 QR SPAYD | **NE — blokující gap** | v repu je jen **generátor** QR; dekodér není a v image není `zbarimg`. Viz O-6 |
+| V36 issue ≤ due | **ČÁST** | `fixSwappedIssueDueDates()` to opravuje, netvrdí FAIL |
+| V37 DUZP okno | **NE** | nové |
+| V38 datum v budoucnu | **NE** | nové |
+| V39 uzavřené období DPH | **ČÁST** | `TaxSubmissionRepository` + `DocumentTrashPolicy` už podobnou kontrolu dělá pro koš — znovupoužít |
+| V40 received_at ≥ issue | **NE** | nové |
+| V41 sazba platná k DUZP | **ČÁST** | `vat_rates.valid_from/valid_to` v DB **jsou**, `vatRateMap()` je ignoruje |
+| V42 otevřené účetní období | **ČÁST** | `GET /api/codebooks/years` |
+| V43 qty × cena == základ | **ČÁST** | `InvoiceMath::compute()` + `reconcileLineAmount()` |
+| V44–V46 rekapitulace, tolerance | **ČÁST** | `maybeFlagTotalsMismatch()` (práh 2 %), `applyRoundingFromPdfTotal()` (práh 1 Kč) — jiné prahy než v zadání |
+| V47 rounding ±0,50 | **NE** | nové |
+| V48 vat_overrides § 73 | **ANO** | `setVatOverrides()` + `PurchaseVatRecapSeeder` + `InvoiceMath` |
+| V49 self_check | **NE** | nové (model dnes `self_check` nevrací) |
+| V50 částka slovy | **NE** | nové |
+| V51 více sazeb | **ANO** | `InvoiceMath` per sazba |
+| V52 cizí měna + ČNB | **ANO** | `PurchaseInvoiceCnbApplier`, `CnbExchangeRateClient` |
+| V53 reverse charge | **ANO** | `AiPdfExtractor:574-655`, `PurchaseInvoiceValidation::REVERSE_CHARGE_CODES` |
+| V54 klasifikace | **ANO** | `VatClassificationDefaulter` |
+| V55 typ dokladu | **ČÁST** | seznam ANO, shoda s titulkem dokladu NE |
+| V56 záloha mimo Knihu DPH | **ANO** | `VatLedgerService` — tvrdá podmínka `document_kind <> 'advance'` + sazba CZ-NA |
+| V57 dobropis znaménka | **ANO** | `warnings()` + `InvoiceAmountPolicy` |
+| V58 křížová kontrola záloh | **ČÁST** | `findAdvanceByReference()`, `advanceCandidates()`, `settlementDocCandidates()` |
+| V59 advance_paid_amount | **POZOR** | aplikace to dělá **jinak** — viz O-10 |
+| V60 is_fixed_asset | **ANO** | dnes se nikdy automaticky nenastavuje (default 0) |
+| V61 expense_category | **ANO** | `expense_categories` prázdné pro supplier 1, `createDraft` bere default z karty dodavatele |
+| V62 suspicious_content | **NE** | nové (kritické) |
+| V63 batch token | **NE** | nové + kolize s middleware stackem (O-2) |
+| V64 tenant scoping | **ANO** | `SupplierGuard`, `SupplierScopeMiddleware` |
+| V65 role | **ANO** | vzor `ScanInboxAction:34` |
+| V66 leak test | **NE** | nové |
+| V67 transakčnost | **ČÁST — POZOR** | `createDraft()` + `replaceItems()` + `recompute()` **nejsou dnes v jedné transakci** |
+| V68 idempotence | **ČÁST** | dedup přes `pdf_hash` a `findIdByVendorInvoice` |
+| V69 dedup v dávce | **ČÁST** | mezi dávkami ANO, uvnitř jedné dávky NE |
+| V70 žádný odchozí HTTPS s obsahem | **NE** | nové (test), ARES/CRPDPH/ČNB/VIES posílají jen IČO/DIČ/měnu — OK |
+| V71 KH B.2 ≥ 10 000 Kč | **ČÁST** | `Service/Report/KontrolniHlaseniBuilder` sekce rozděluje, ale povinnost DIČ+ev. číslo nevaliduje při zápisu |
+| V72 KH B.3 | **ČÁST** | tamtéž |
+| V73 náhledy DP3/KH | **ANO** | `GET /api/reports/dphdp3/preview`, `/api/reports/dphkh1/preview` |
+| V74 RC řádky 5/10/12 | **ANO** | pokryto testy `PurchaseReverseChargeConsistencyTest` |
+
+**Souhrn:** z 74 pravidel je **20 plně znovupoužitelných**, **26 částečně** (existuje jiná
+varianta nebo jiný práh) a **28 zcela nových**. Dvě pravidla (V33–V35, V59) narážejí na
+prostředí/architekturu — viz odchylky.
+
+---
+
+## 9. Odchylky proti zadání (co jsem odhadl zvenčí špatně)
+
+**O-1 — BYOK endpoint má jinou cestu.**
+Zadání: `POST /api/integrations/anthropic/extract`. Realita: `POST /api/admin/imports/ai-extract-pdf`
+(+ credentials na `/api/admin/imports/anthropic/credentials`). UI není „Externí integrace → AI“
+ale **Admin → Integrace, tab `ai`** (`/admin/integrations?tab=ai`). Bez dopadu na návrh, jen
+opravuji názvosloví.
+
+**O-2 — jednorázový batch token nemá kam se v middleware stacku vejít.**
+`POST .../results` s vlastním tokenem projde `AuthMiddleware` (403 bez session/PAT),
+`RoleMiddleware` (admin fallback), `SupplierScopeMiddleware` (bez `X-Supplier-Id` fallback na
+MIN(supplier)) a `ApiScopeMiddleware` (403 mimo allowlist). Zavést pátou cestu autentizace
+znamená sáhnout do 4 upstream souborů — přesně to, čemu se má plán vyhnout.
+**Doporučení:** batch token **nepoužívat jako náhradu autentizace**, ale jako *druhý faktor*
+uvnitř už autentizovaného requestu (session nebo PAT s `read_write`), a endpointy zavěsit pod
+už povolený prefix `/api/purchase-invoices/import-batches/...`. Tím se nemění ani jeden
+middleware, role zůstává `accountant` (shodná s klasickým importem, V65) a tenant scoping
+funguje sám (V64). Token dál splní svoji roli: jednorázový, expirující, scope na jednu dávku,
+hash v DB, 403 na cizí dávku.
+
+**O-3 — kolize pojmenování s existující dávkou (#232) a s `import_jobs`.**
+`purchase_invoices.import_batch_id` už znamená něco jiného. **Doporučení:** tabulky pojmenovat
+`purchase_import_batches`, `purchase_import_batch_files`, `purchase_import_batch_results`
+a nový sloupec na fakturu nepřidávat — místo toho **naplnit stávající `import_batch_id`**
+hodnotou nové dávky, čímž zdarma získáme filtr v seznamu přijatých faktur a dropdown
+„dohledat import“, který už existuje.
+
+**O-4 — down migrace neexistují.** Runner umí jen dopředu. Test „migrace up/down idempotentně“
+z Commitu 2 zúžím na „up je idempotentní (dvojí běh = no-op)“ + ověření schématu; rollback
+zůstane procesní (dump).
+
+**O-5 — server neumí rasterizovat PDF.** V image není poppler ani ghostscript. Instrukce v promptu
+(`pdftotext -layout`, `pdftoppm -r 300 -png`) se týkají **hostitele, kde běží Claude Code** — tam
+poppler je, takže prompt může zůstat dle zadání. Server ale nesmí na tyto binárky spoléhat
+u V3/V8 — počet stran a přítomnost textové vrstvy budu zjišťovat přes `smalot/pdfparser`.
+
+**O-6 — QR (V33–V35) nemá čím dekódovat.** V repu je jen generátor QR; `zbarimg` není ani v image,
+ani na hostiteli, a `PdfImageExtractor` umí obrázek QR jen *najít* a vrátit jako PNG data URI,
+nikoli přečíst. Tři možnosti, seřazené podle mé preference:
+1. **Přidat čistě PHP dekodér** (`khanamiryan/qrcode-detector-decoder`, MIT) — nová composer
+   závislost, žádný zásah do Dockerfile, funguje na Windows i v Alpine. Splní i V34 (offline).
+2. Nechat QR přečíst **Claude Code na hostiteli** a poslat SPAYD řetězec v `results.json` —
+   ale pak QR **není nezávislý zdroj pravdy** a celý smysl V33 padá. Nedoporučuji.
+3. Degradovat V33 na INFO, dokud dekodér není. Nejhorší varianta — ztrácíme nejsilnější
+   obranu proti podvržení účtu (V62).
+**Čekám na tvoje rozhodnutí; sám závislost nepřidávám.**
+
+**O-7 — „E2E“ testy v tomto repu neexistují.** Není Playwright/Cypress ani komponentové testy.
+Commit 8 tedy dodá Integration testy proti DB + service-level testy; „e2e validate → apply →
+apply“ pojedu přes DI kontejner, ne přes HTTP.
+
+**O-8 — JSON Schema validátor v repu není.** Pro V9/V11 (strict, `additionalProperties: false`)
+je potřeba buď `justinrainbow/json-schema` / `opis/json-schema` (nová závislost), nebo vlastní
+validátor omezený na náš tvar. Preferuji **vlastní validátor** (~200 řádků, plně testovatelný,
+nula nových závislostí, upstream-friendly), protože náš tvar schématu je uzavřený a známý.
+
+**O-9 — V27 je přísnější než databáze.** DB unikát je `(supplier_id, vendor_id,
+vendor_invoice_number, issue_date)`, tedy stejné číslo s jiným datem projde. Navrhuji V27
+implementovat jako **WARN při shodě (vendor, číslo) s jiným datem** a **FAIL při shodě všech
+čtyř** (což by stejně shodilo DB). Jinak bychom blokovali legitimní případy, které dnes projdou.
+
+**O-10 — V59 popisuje chování, které aplikace záměrně nemá.** Podle precedentu v datech
+(doklady #55–59) i podle kódu sedí `advance_paid_amount` na **daňovém dokladu k záloze**
+(doplní `linkAdvance()`), kdežto konečná faktura má **0** a zálohy se z ní odečítají
+odpočtovými řádky § 37a (`PurchaseSettlementService`). Kdybych V59 implementoval dle zadání,
+odečetla by se záloha dvakrát. Navrhuji V59 přeformulovat na: *„Σ navázaných záloh ≤ celková
+částka finální faktury; `advance_paid_amount` na DDKPZ == částka navázané zálohy“*.
+
+**O-11 — „Nákup → Import přijatých“ jako stránka neexistuje.** V sekci Nákup jsou dnes jen
+Přijaté faktury / Platební příkazy / Export + dva **admin-only** odkazy do Adminu. Záložku
+z Commitu 7 tedy buď zakládám jako novou stránku `/purchase-invoices/import`
+(doporučuji — dostupná i pro účetní, konzistentní s V65), nebo jako další tab v
+`/admin/integrations`. **Preferuji novou stránku.**
+
+**O-12 — `expense_categories` jsou pro supplier 1 prázdné** (potvrzeno i v dřívějším reportu
+k TUkas). V61 tedy zůstává jen návrhem v reportu, jak zadání chce.
+
+**O-13 — testovací doklady k Commitu 3 nejsou v repu.** Zadání odkazuje na „5 TUkas dokladů
+(26/28/29 bez textové vrstvy, 27/30 s textem)“ — ty leží mimo git v `/root/tmp/tukas/`
+(ID 26–30 jsou `documents.id` v produkční DB). Do repa je jako fixture **dávat nebudu**
+(reálné doklady třetí strany, VIN, bankovní účty). Navrhuji vygenerovat syntetické PDF
+fixtures se stejnou charakteristikou (2 s textovou vrstvou, 3 bez) a TUkas doklady používat
+jen jako lokální ověření mimo git.
+
+---
+
+## 10. Verdikt ke Commitu 1 (extrakce validace do sdílené služby)
+
+**Commit 1 JE potřeba, ale v menším rozsahu, než zadání předpokládá.**
+
+Validace **už sdílená je** — `PurchaseInvoiceValidation::invoice()` je statická, bez závislostí
+a volají ji obě ruční akce. Přesouvat není co.
+
+Chybí ale to podstatné: **žádná z importních cest ji nevolá.** `AiPdfExtractor::createDraft()`,
+`IsdocToPurchaseInvoiceMapper::map()` i `PurchaseInvoiceInboxScanner` zapisují přes repozitář
+mimo ni. Aby dávkový import mohl téct „stejným potrubím“ (§ 2.2 zadání), potřebuje **zapisovací
+službu**, která dnes neexistuje: dnes je zápis rozsypaný do trojice
+`createDraft()` + `replaceItems()` + `setVatOverrides()` + `recompute()`, kterou si každý volající
+skládá sám (a `AiPdfExtractor` k tomu přidává dalších ~15 kroků).
+
+Navrhuji **Commit 1 = `PurchaseInvoiceWriteService`**: čisté přesunutí sekvence
+„validace → createDraft → replaceItems → vat_overrides → recompute → warnings“ z
+`CreatePurchaseInvoiceAction` do služby + delegace, bez změny chování, **v jedné transakci**
+(to je jediná drobná změna chování a řeší V67 — zdůvodním v commit message). Akce se zkrátí
+na parsing requestu a serializaci odpovědi. Ostatní importní cesty v tomto commitu
+**nepřepojuji** — to by byl zásah do upstream chování s rizikem regresí; dávkový import
+na novou službu napojím rovnou.
+
+Odhad zásahu do existujících souborů: `CreatePurchaseInvoiceAction.php` (delegace),
+`UpdatePurchaseInvoiceAction.php` (jen pokud vyjde bez rizika, jinak beze změny).
+
+---
+
+## 11. Touchpointy do existujícího kódu a upstream-friendliness
+
+Cíl: co nejméně editovaných upstream souborů, protože fork se pravidelně mergne
+(43 konfliktních bloků při posledním merge v4.52.0 je čerstvá zkušenost).
+
+| soubor | zásah | proč nutný | jak minimalizovat |
+|---|---|---|---|
+| `api/src/Routes.php` | +7 řádků rout | jiná možnost není | jeden souvislý blok s komentářem `// FORK: dávkový import` |
+| `api/src/Action/PurchaseInvoice/CreatePurchaseInvoiceAction.php` | delegace na novou službu | Commit 1 | pure move, žádná změna sémantiky |
+| `web/src/router/index.ts` | +1 routa | UI | jeden řádek |
+| `web/src/components/layout/AppLayout.vue` | +1 položka menu za flagem | UI | jeden řádek v sekci Nákup |
+| `web/src/i18n/{cs,en}.json` | nový namespace `batch_import.*` | i18n | vlastní top-level klíč = minimum konfliktů |
+| `api/openapi.yaml` | nové cesty | pravidlo repa | na konec `paths`, vlastní `components/schemas` prefix |
+| `cfg.sample.php` | blok `purchase_invoice.batch_import` | feature flag | přidat **dovnitř** existujícího `purchase_invoice` bloku |
+| `CUSTOMIZATIONS.md`, `CHANGELOG.md`, `manual/` | dokumentace | pravidlo repa | — |
+
+**Vše ostatní jsou nové soubory** v `api/src/Service/PurchaseBatchImport/**`,
+`api/src/Action/PurchaseInvoice/ImportBatch/**`, `api/prompt_templates/`,
+`web/src/pages/purchase-invoices/BatchImport*.vue`, `db/migrations/0912+`.
+
+**Feature flag:** `purchase_invoice.batch_import.enabled`, default `false`, čtený přes
+`Config::get()`. Vypnutý flag: routy se **neregistrují vůbec** (podmínka v `Routes.php`),
+UI položka menu se nevykreslí, nová tabulka existuje, ale nikdo do ní nesahá → aplikace se
+chová bit-pro-bit jako dnes.
+
+---
+
+## 12. Čím pokračovat
+
+Čeká se na tvoje rozhodnutí ke: **O-2** (kam zavěsit endpointy), **O-6** (QR dekodér),
+**O-8** (JSON schema), **O-9/O-10** (přeformulování V27 a V59), **O-11** (kde bude UI),
+**O-13** (fixtures) a k rozsahu **Commitu 1**.
+
+Do té doby nepokračuji na Commit 1 a nepřipravuji ani kostru.
