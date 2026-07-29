@@ -81,14 +81,18 @@ final class PurchaseInvoiceWriteService
      */
     public function createWithItems(array $data, int $userId, int $supplierId, string $source = 'unknown'): int
     {
-        $this->recordShadowValidation($data, $supplierId, $source);
+        $id = $this->inTransaction(function () use ($data, $userId, $supplierId): int {
+            $newId = $this->repo->createDraft($data, $userId, $supplierId);
+            $this->applyItemsAndTotals($newId, $data, $supplierId);
 
-        return $this->inTransaction(function () use ($data, $userId, $supplierId): int {
-            $id = $this->repo->createDraft($data, $userId, $supplierId);
-            $this->applyItemsAndTotals($id, $data, $supplierId);
-
-            return $id;
+            return $newId;
         });
+
+        // AŽ PO commitu: záznam odkazuje na id dokladu, takže musí existovat. Kdyby
+        // se logovalo uvnitř transakce, ukazovaly by nálezy po rollbacku do prázdna.
+        $this->recordShadowValidation($data, $supplierId, $id, $source);
+
+        return $id;
     }
 
     /**
@@ -101,14 +105,19 @@ final class PurchaseInvoiceWriteService
      * naslepo by mohlo zablokovat běžný provoz.
      *
      * Zapisuje se jen do logu (žádná tabulka, žádná migrace) a jen když nálezy JSOU.
-     * Jmenovatel pro procenta se dá vzít z `SELECT COUNT(*) FROM purchase_invoices`
-     * za totéž období.
+     * Jmenovatel pro procenta viz `docs/batch-import/SHADOW-VALIDATION.md`.
+     *
+     * ⚠️ DO LOGU NESMÍ TÉCT OBSAH DOKLADU. Logy se rotují, kopírují a někdy posílají
+     * do agregátorů — je to jiná bezpečnostní zóna než databáze. Záznam proto nese jen
+     * METADATA: identifikátor pravidla (normalizovaná cesta k poli), severity, typ
+     * dokladu, zdroj zápisu, tenanta a id dokladu pro dohledání. Žádné částky, IČO,
+     * názvy firem, jména ani čísla dokladů. Hlídá to `ShadowValidationTest`.
      *
      * Selhání záznamu nesmí shodit zápis dokladu — telemetrie není důležitější než data.
      *
      * @param array<string,mixed> $data
      */
-    private function recordShadowValidation(array $data, int $supplierId, string $source): void
+    private function recordShadowValidation(array $data, int $supplierId, int $purchaseInvoiceId, string $source): void
     {
         try {
             $errors = PurchaseInvoiceValidation::invoice($data, $this->repo->vatRateMap());
@@ -119,20 +128,45 @@ final class PurchaseInvoiceWriteService
             $this->logger->warning(
                 self::SHADOW_LOG_PREFIX . ' doklad by neprošel sdílenou validací (zápis proběhl)',
                 [
-                    'source'                => $source,
-                    'supplier_id'           => $supplierId,
-                    'vendor_invoice_number' => (string) ($data['vendor_invoice_number'] ?? ''),
-                    'issue_date'            => (string) ($data['issue_date'] ?? ''),
-                    'fields'                => array_keys($errors),
-                    'errors'                => $errors,
+                    'source'              => $source,
+                    'supplier_id'         => $supplierId,
+                    'purchase_invoice_id' => $purchaseInvoiceId,
+                    'document_kind'       => (string) ($data['document_kind'] ?? 'invoice'),
+                    'severity'            => 'error',
+                    'rules'               => self::ruleIds($errors),
+                    'rule_count'          => count($errors),
                 ],
             );
         } catch (\Throwable $e) {
             $this->logger->error(self::SHADOW_LOG_PREFIX . ' stínovou validaci se nepodařilo provést', [
-                'source' => $source,
-                'error'  => $e->getMessage(),
+                'source'              => $source,
+                'supplier_id'         => $supplierId,
+                'purchase_invoice_id' => $purchaseInvoiceId,
+                'error_class'         => $e::class,
             ]);
         }
+    }
+
+    /**
+     * Identifikátor pravidla = cesta k poli s vynulovaným indexem řádku.
+     * `items.3.quantity` → `items.*.quantity`, aby šly nálezy agregovat napříč doklady.
+     *
+     * Texty hlášek se do logu ZÁMĚRNĚ nedávají — na agregaci nejsou potřeba a jen by
+     * zvětšovaly plochu, kudy by mohla uniknout hodnota z dokladu.
+     *
+     * @param array<string,string[]> $errors
+     * @return list<string>
+     */
+    public static function ruleIds(array $errors): array
+    {
+        $rules = array_map(
+            static fn (string $field): string => (string) preg_replace('/\.\d+\./', '.*.', $field),
+            array_keys($errors),
+        );
+        $rules = array_values(array_unique($rules));
+        sort($rules);
+
+        return $rules;
     }
 
     /**

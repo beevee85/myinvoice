@@ -23,12 +23,23 @@ Zbylé tři legacy cesty (banka, iDoklad, Fakturoid) přes ni ještě nejdou, vi
 
 ---
 
-## 2. Jak číst výsledky
+## 2. Co v logu JE a co tam nikdy nebude
 
 Log je uvnitř kontejneru v `/data/log/app-YYYY-MM-DD.log` (rotace po dnech).
 Každý nález je jeden řádek úrovně `WARNING` s prefixem `shadow-validation:`.
 
-**Kolik nálezů celkem** (za posledních 30 dnů rotace):
+Záznam nese **výhradně metadata**: identifikátor pravidla (cesta k poli s vynulovaným
+indexem řádku, např. `items.*.quantity`), severity, typ dokladu, zdroj zápisu, tenanta
+a **id dokladu pro dohledání**. Nikdy tam nejsou částky, IČO, názvy firem, jména,
+čísla dokladů ani volné texty — logy se rotují, kopírují a někdy posílají do agregátorů,
+takže je to jiná bezpečnostní zóna než databáze. Hlídá to test
+`ShadowValidationTest::testLogNeverContainsDocumentContent`.
+
+Konkrétní hodnoty se dohledávají přes `purchase_invoice_id` v databázi, kam patří.
+
+## 3. Jak číst výsledky
+
+**Kolik nálezů celkem** (za dobu, co sahá rotace logu):
 
 ```bash
 docker compose -f /opt/myinvoice/docker-compose.yml exec -T app \
@@ -44,28 +55,59 @@ docker compose -f /opt/myinvoice/docker-compose.yml exec -T app \
          | grep -o '\"source\":\"[a-z_]*\"' | sort | uniq -c | sort -rn"
 ```
 
-**Rozpad podle toho, CO neprošlo** (které pole validaci nesplnilo):
+**Rozpad podle toho, KTERÉ pravidlo neprošlo:**
 
 ```bash
 docker compose -f /opt/myinvoice/docker-compose.yml exec -T app \
   sh -c "grep -h 'shadow-validation:' /data/log/app-*.log \
-         | grep -o '\"fields\":\[[^]]*\]' | sort | uniq -c | sort -rn"
+         | grep -o '\"rules\":\[[^]]*\]' | sort | uniq -c | sort -rn"
 ```
 
-**Jmenovatel** (kolik dokladů za totéž období vůbec vzniklo) — z databáze, ne z logu:
+## 4. Jmenovatel — kolik dokladů za totéž období vůbec vzniklo
+
+Bez něj je čitatel k ničemu. Zdroj zápisu se na dokladu neukládá, takže se odvozuje
+heuristikou ze stop, které jednotlivé cesty zanechávají:
 
 ```sql
-SELECT COUNT(*) FROM purchase_invoices
- WHERE created_at >= CURDATE() - INTERVAL 30 DAY;
+SELECT
+  CASE
+    WHEN idoklad_id                IS NOT NULL         THEN 'idoklad'
+    WHEN fakturoid_id              IS NOT NULL         THEN 'fakturoid'
+    WHEN source_format             IS NOT NULL         THEN 'isdoc'
+    WHEN import_batch_id           IS NOT NULL         THEN 'ai_pdf'
+    WHEN vendor_invoice_number LIKE 'BANK-%'           THEN 'banka'
+    WHEN pdf_path                  IS NOT NULL         THEN 'ai_pdf (jednotlivě)'
+    ELSE 'ruční'
+  END                                    AS zdroj,
+  COUNT(*)                               AS dokladu,
+  MIN(created_at)                        AS od,
+  MAX(created_at)                        AS do
+FROM purchase_invoices
+WHERE created_at >= CURDATE() - INTERVAL 30 DAY
+  AND deleted_at IS NULL
+GROUP BY zdroj
+ORDER BY dokladu DESC;
 ```
 
-Podíl nálezů k tomuhle číslu je hledané „kolik procent dnešních dokladů by validací
-neprošlo". Není to přesné na doklad (log drží 30 rotací, DB všechno), ale na rozhodnutí
-to stačí.
+Spuštění proti běžící instanci:
+
+```bash
+docker compose -f /opt/myinvoice/docker-compose.yml exec -T db \
+  sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" myinvoice -t' < dotaz.sql
+```
+
+**Limity heuristiky** (ať se čísla nečtou přísněji, než unesou): `source_format` se plní
+jen u ISDOC vytaženého z PDF/A-3 a u `.isdocx`, samotný `.isdoc` ho nemá; `import_batch_id`
+označuje jen dávkový AI import, ne jednotlivý; ruční doklad s nahraným PDF je od AI importu
+k nerozeznání. Na poměr „kolik procent by neprošlo" to stačí, na audit ne.
+
+> **Rychlejší cesta k číslům:** čekat na nové importy není nutné — `api/bin/shadow-validate-existing.php`
+> pustí tutéž validaci nad **historií** v databázi (read-only) a dá distribuci nálezů
+> hned. Viz `docs/batch-import/SHADOW-BASELINE.md`.
 
 ---
 
-## 3. Jak se podle toho rozhodnout
+## 5. Jak se podle toho rozhodnout
 
 | výsledek | co to znamená | doporučení |
 |---|---|---|
@@ -79,7 +121,7 @@ Vždy si k číslu vezmi i jmenovatel.
 
 ---
 
-## 4. Až se bude vynucovat
+## 6. Až se bude vynucovat
 
 Stínový režim je záměrně **jen zápis do logu** — žádná tabulka, žádná migrace, nic,
 co by se muselo odinstalovávat. Vynucení bude samostatné rozhodnutí a samostatná změna:

@@ -69,6 +69,52 @@ final class PurchaseInvoiceWritePathTest extends TestCase
         );
     }
 
+    /**
+     * Každý volající musí zdroj zápisu předat VÝSLOVNĚ.
+     *
+     * `createWithItems()` má čtvrtý argument s defaultem `unknown` kvůli zpětné
+     * kompatibilitě, ale spoléhat se na něj nesmí nikdo — jinak by za pár měsíců
+     * skončila půlka stínové telemetrie jako neoznačená a nešlo by podle ní rozhodnout
+     * per cestu. Default má zůstat teoretickou možností, ne provozní realitou.
+     */
+    public function testEveryCallerPassesExplicitSource(): void
+    {
+        $apiDir = dirname(__DIR__, 2);
+        $offenders = [];
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($apiDir . '/src', \FilesystemIterator::SKIP_DOTS)
+        );
+
+        /** @var \SplFileInfo $file */
+        foreach ($iterator as $file) {
+            if ($file->getExtension() !== 'php') {
+                continue;
+            }
+            $source = (string) file_get_contents($file->getPathname());
+            // Filtr na write service: `createWithItems` se jmenuje i nesouvisející metoda
+            // na vydané straně (RecurringTemplateAction), která se sem plést nesmí.
+            if (!str_contains($source, 'PurchaseInvoiceWriteService') || !str_contains($source, '->createWithItems(')) {
+                continue;
+            }
+
+            preg_match_all('/->createWithItems\(([^;]*?)\);/s', $source, $matches);
+            foreach ($matches[1] as $args) {
+                // Čtyři argumenty = tři čárky na nejvyšší úrovni. Volání jsou plochá.
+                if (substr_count($args, ',') < 3) {
+                    $offenders[] = str_replace($apiDir . '/', '', $file->getPathname())
+                        . ': createWithItems(' . trim($args) . ')';
+                }
+            }
+        }
+
+        self::assertSame([], $offenders, implode("\n", array_merge(
+            ['Tenhle volající nechává zdroj zápisu na defaultu `unknown`:'],
+            array_map(static fn (string $o): string => '  ' . $o, $offenders),
+            ['Doplň čtvrtý argument (manual / ai_pdf / isdoc / …), jinak nález nepůjde zařadit.'],
+        )));
+    }
+
     /** Služba naopak musí mít všechny čtyři kroky. */
     public function testServiceContainsWholeSequence(): void
     {

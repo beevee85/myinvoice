@@ -115,9 +115,54 @@ final class ShadowValidationTest extends PurchaseInvoiceCharacterizationCase
         $context = $findings[0];
         self::assertSame('isdoc', $context['source']);
         self::assertSame($this->supplierId, $context['supplier_id']);
-        self::assertSame('SHADOW-001', $context['vendor_invoice_number']);
-        self::assertContains('items.0.description', $context['fields']);
-        self::assertContains('items.0.quantity', $context['fields']);
+        self::assertSame($id, $context['purchase_invoice_id'], 'Nález neodkazuje na doklad — nedá se dohledat.');
+        self::assertSame('invoice', $context['document_kind']);
+        self::assertSame('error', $context['severity']);
+        // Identifikátor pravidla má vynulovaný index řádku, ať jdou nálezy agregovat.
+        self::assertContains('items.*.description', $context['rules']);
+        self::assertContains('items.*.quantity', $context['rules']);
+    }
+
+    /**
+     * ⚠️ DO LOGU NESMÍ TÉCT OBSAH DOKLADU.
+     *
+     * Logy se rotují, kopírují a někdy posílají do agregátorů — je to jiná bezpečnostní
+     * zóna než databáze. Test proto zapíše doklad s nezaměnitelnými hodnotami a ověří,
+     * že se ANI JEDNA neobjeví kdekoli v serializovaném kontextu nálezu.
+     */
+    public function testLogNeverContainsDocumentContent(): void
+    {
+        $payload = $this->invalidPayload('TAJNE-CISLO-DOKLADU-9911');
+        $payload['items'][0]['unit_price_without_vat'] = 123456.78;
+        $payload['note_above_items'] = 'Poznámka s citlivým textem';
+
+        $this->trackInvoice(
+            $this->writer()->createWithItems($payload, $this->userId, $this->supplierId, 'isdoc')
+        );
+
+        $serialized = json_encode($this->logger->records(), JSON_UNESCAPED_UNICODE);
+        self::assertIsString($serialized);
+
+        $mustNotLeak = [
+            'TAJNE-CISLO-DOKLADU-9911',          // číslo dokladu
+            '123456.78',                          // částka
+            'Poznámka s citlivým textem',         // volný text
+            '88888886',                           // IČO dodavatele
+            'Charakterizace dodavatel s.r.o.',    // název firmy
+            (string) self::YEAR . '-10-10',       // datum vystavení
+        ];
+
+        foreach ($mustNotLeak as $secret) {
+            self::assertStringNotContainsString(
+                $secret,
+                $serialized,
+                "Do logu telemetrie unikl obsah dokladu: „{$secret}\". Záznam smí nést jen metadata.",
+            );
+        }
+
+        // A zároveň musí zůstat použitelný — pravidlo a odkaz na doklad tam být MUSÍ.
+        self::assertStringContainsString('items.*.quantity', $serialized);
+        self::assertStringContainsString('purchase_invoice_id', $serialized);
     }
 
     /** Čistá data nesmí do logu zapsat nic — jinak by se v šumu nálezy ztratily. */
@@ -195,7 +240,7 @@ final class ShadowValidationTest extends PurchaseInvoiceCharacterizationCase
         $findings = $this->findings();
         self::assertNotSame([], $findings, 'ISDOC import stínovou validaci nespustil.');
         self::assertSame('isdoc', $findings[0]['source']);
-        self::assertContains('items.0.quantity', $findings[0]['fields']);
+        self::assertContains('items.*.quantity', $findings[0]['rules']);
     }
 
     private function isdocWithZeroQuantity(): string
