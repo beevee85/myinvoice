@@ -19,6 +19,57 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## 2026-07-29 — Dávkový import, Commit 2: charakterizační testy zapisovacích cest
+
+**Charakter: FORK TESTY** — druhý commit featury „AI import přes předplatné".
+**Žádná produkční změna**, přibyly výhradně testy. Účel: zafixovat DNEŠNÍ chování všech
+čtyř cest, které zakládají přijatou fakturu, aby šlo dokázat, že plánovaný refaktoring
+(sdílená write service → transakce → převedení importních cest) nic nezměnil.
+
+**Nové soubory:** `api/tests/Support/PurchaseInvoiceSnapshot.php` (normalizovaný obraz
+dokladu se zástupkami za volatilní hodnoty), `api/tests/Support/PurchaseInvoiceCharacterizationCase.php`
+(společná základna) a čtyři testy v `api/tests/Integration/PurchaseInvoice/Characterization/`.
+**27 testů, 131 asercí.** Žádná síť: `AnthropicClient` i `ClientResolver` jsou testové
+dvojníky, měna vždy CZK (žádný dotaz na ČNB), archiv PDF v dočasném adresáři.
+
+**Co se zafixovalo — rozdíly mezi cestami, které dosud nikde nebyly popsané:**
+
+| vlastnost | ruční `POST` | AI import | ISDOC / scan-inbox |
+|---|---|---|---|
+| `received_at` | datum **vystavení** | **dnešek** | **dnešek** |
+| `exchange_rate_source` | `cnb` | `manual` | `manual` |
+| `own_snapshot` | **neplní se** | neplní se | neplní se |
+| `activity_log` | zapisuje se, ale **`supplier_id` = NULL** | nezapisuje (loguje až akce) | nezapisuje |
+| validace | `PurchaseInvoiceValidation` | vlastní `validateAiData` | jen cross-tenant guard |
+
+**Další zafixovaná zjištění:**
+* **Nic není v transakci.** Pád na druhé položce (FK `fk_pii_vat`) nechá v DB hlavičku
+  s nulovými součty i osiřelou první položku, `recompute()` neproběhne a audit se nezapíše.
+  Překlopení `clients.is_vendor = 1` se navíc děje PŘED insertem hlavičky, takže po
+  neúspěšném založení zůstane. Testy s tímhle chováním jsou ve skupině **`pre-transaction`**
+  a commit se zavedením transakcí je vědomě změní — na rozdíl od ostatních, které musí
+  zůstat zelené beze změny.
+* **`scan-inbox` hlásí `created` i pro duplicitu.** Dedup scanneru stojí na `pdf_hash`,
+  který u samotného `.isdoc` nevzniká; duplicitu zachytí až mapper přes
+  `findIdByVendorInvoice` a vrátí id existujícího dokladu. Řádek nepřibude, ale hlášení
+  říká `created: 1`. Data jsou v pořádku, čísla v hlášení zavádějící.
+* **Samotný `.isdoc` se nearchivuje** — `source_*` ani `pdf_*` sloupce se neplní
+  (archivuje se jen ISDOC vytažený z PDF/A-3 a obsah `.isdocx`).
+* **`PurchaseSettlementService` už transakce používá** s re-entrant vzorem
+  `$started = !$pdo->inTransaction()` a volá uvnitř nich `setVatOverrides` + `recompute`.
+  Až se tyhle metody obalí vlastní transakcí, **musí zůstat vnořitelné**, jinak se
+  vyúčtování záloh (§ 37a) rozbije.
+
+**Testy:** 2 099 → **2 126 zelených**, asercí 7 173 → **7 304**, skipped beze změny (31).
+Dva po sobě jdoucí běhy dají bit-shodný výsledek.
+
+**Jak ověřit po merge:**
+`MYINVOICE_DB_NAME=myinvoice_test_<ucel> vendor/bin/phpunit --filter Characterization`
+(27 testů). Když spadne cokoli mimo skupinu `pre-transaction`, je to regrese chování,
+ne chyba testu.
+
+---
+
 ## 2026-07-29 — Dávkový import, Commit 1: izolace testovací DB a zelený baseline
 
 **Charakter: FORK TEST-INFRA** — první commit featury „AI import přes předplatné"
