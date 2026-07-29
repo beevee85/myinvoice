@@ -11,20 +11,27 @@ use PHPUnit\Framework\Attributes\Group;
 use Slim\Psr7\Response as Psr7Response;
 
 /**
- * FORK (beevee85) — CHARAKTERIZACE chování při CHYBĚ UPROSTŘED zápisu.
+ * FORK (beevee85) — CHARAKTERIZACE chování při CHYBĚ UPROSTŘED zápisu,
+ * na úrovni HOLÉHO REPOZITÁŘE.
  *
- * Dnes není zakládání přijaté faktury v žádné transakci: `createDraft`, `replaceItems`,
- * `setVatOverrides` i `recompute` jedou v autocommitu, každý `execute()` commituje sám.
- * Pád uprostřed proto nechá v databázi trvale rozpracovaný doklad.
+ * `PurchaseInvoiceRepository` a `PurchaseInvoiceCalculator` transakci nemají a mít
+ * nebudou: `createDraft`, `replaceItems`, `setVatOverrides` i `recompute` jedou
+ * v autocommitu, každý `execute()` commituje sám. Pád uprostřed proto nechá v databázi
+ * trvale rozpracovaný doklad.
  *
- * ⚠️ TENHLE SOUBOR VĚDOMĚ FIXUJE VADU, NE ŽÁDOUCÍ STAV. Commit „transakce" (pravidlo V75)
- * ho ZÁMĚRNĚ změní: po obalení transakcí nesmí zůstat nic. Až tyhle testy spadnou při
- * zavádění transakcí, je to očekávané a jejich úprava je součástí toho commitu — na rozdíl
- * od ostatních charakterizačních testů, které musí zůstat zelené beze změny.
+ * ⚠️ TENHLE SOUBOR VĚDOMĚ FIXUJE VADU, NE ŽÁDOUCÍ STAV — a je pořád aktuální, protože
+ * takhle přímo do repozitáře zapisuje **šest ze sedmi** cest (Update, BankStatement,
+ * AiPdfExtractor, ISDOC mapper, iDoklad ×2, Fakturoid). Dokud se nepřevedou, je tohle
+ * jejich reálné chování.
+ *
+ * Atomicitu ZAJIŠŤUJE AŽ `PurchaseInvoiceWriteService` (pravidlo V75) a ověřuje ji
+ * `PurchaseInvoiceWriteServiceTransactionTest`. Proto tyhle testy zavedením transakce
+ * NEZMĚNILY výsledek — míří o vrstvu níž. Až se převede poslední cesta, přestane mít
+ * tenhle soubor smysl a půjde smazat.
  */
 #[Group('integration')]
 #[Group('characterization')]
-#[Group('pre-transaction')]
+#[Group('unconverged-write-path')]
 final class PartialWriteCharacterizationTest extends PurchaseInvoiceCharacterizationCase
 {
     private PurchaseInvoiceRepository $repo;
@@ -131,8 +138,13 @@ final class PartialWriteCharacterizationTest extends PurchaseInvoiceCharacteriza
     }
 
     /**
-     * Překlopení `clients.is_vendor` na 1 se děje PŘED insertem hlavičky, takže
-     * po neúspěšném založení zůstane — dnešní „leak" mimo jakoukoli transakci.
+     * Překlopení `clients.is_vendor` na 1 dělá AKCE, ještě PŘED voláním write service —
+     * tedy mimo její transakci. Po neúspěšném založení proto zůstane.
+     *
+     * Je to jediná část zakládání, kterou transakce nekryje, a je to vědomé: `is_vendor`
+     * je vlastnost karty dodavatele, ne dokladu, a její překlopení není škodlivé
+     * (dodavatel jím jen získá roli navíc). Zafixováno, aby se na to nezapomnělo —
+     * kdyby se `markAsVendor` někdy vtáhlo dovnitř transakce, tenhle test to ohlásí.
      */
     public function testVendorFlagFlipSurvivesFailedHeaderInsert(): void
     {

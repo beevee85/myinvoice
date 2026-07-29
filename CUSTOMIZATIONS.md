@@ -19,6 +19,45 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## 2026-07-29 — Dávkový import, Commit 4: transakce nad zapisovací sekvencí (V75)
+
+**Charakter: FORK — JEDINÁ ZMĚNA CHOVÁNÍ celého refaktoringu**, proto samostatný commit
+(aby šla případná regrese najít bisectem).
+
+**Co se změnilo:** `PurchaseInvoiceWriteService::createWithItems()` běží celý v jedné
+transakci. Dřív jel každý krok v autocommitu a pád uprostřed nechal v databázi hlavičku
+s nulovými součty a osiřelé položky bez přepočtu. Účetní doklad je buď celý, nebo žádný.
+
+**Transakce je RE-ENTRANTNÍ** (`$started = !$pdo->inTransaction()`) — stejný vzor, jaký
+už v repu má `PurchaseSettlementService` a `FinalFromProformaCreator`. Je to nutné:
+`PurchaseSettlementService` (párování záloh, § 37a) volá `setVatOverrides` i `recompute`
+uvnitř své transakce a vlastní `beginTransaction()` by ji rozbil. Vnořené volání proto
+necommituje ani nerollbackuje — rozhodnutí nechává vlastníkovi transakce.
+
+**Co transakce NEKRYJE:** překlopení `clients.is_vendor` na 1 dělá akce ještě před voláním
+služby. Vědomé — `is_vendor` je vlastnost karty dodavatele, ne dokladu, a jeho překlopení
+není škodlivé. Hlídá to test, kdyby se to někdy vtáhlo dovnitř.
+
+**Nový test** `api/tests/Integration/PurchaseInvoice/PurchaseInvoiceWriteServiceTransactionTest.php`
+(8 testů): chyba injektovaná do **každého** ze čtyř kroků zvlášť (dvojník deleguje na
+skutečnou implementaci a shodí jen zvolený krok) + re-entrance (vnořený zápis se řídí
+commitem/rollbackem volajícího) + kontrola, že po pádu nezůstane otevřená transakce.
+Ověřeno, že bez transakce testy skutečně padají — u tří kroků, které stihnou zapsat.
+
+**Charakterizační testy částečného zápisu zůstaly zelené beze změny** a je to správně:
+míří o vrstvu níž, na holý repozitář, který transakci nemá a mít nebude. Takhle přímo do
+něj zapisuje **šest ze sedmi** cest, takže dokud se nepřevedou, je to jejich reálné
+chování. Skupina přejmenována `pre-transaction` → **`unconverged-write-path`**, ať název
+neslibuje něco jiného.
+
+**Testy:** 2 130 → **2 138 zelených**, asercí 7 323 → **7 350**, skipped beze změny (31).
+
+**Jak ověřit po merge:** `vendor/bin/phpunit --filter PurchaseInvoiceWriteServiceTransaction`
+(8 testů). Kdyby někdo `PurchaseSettlementService` přepsal tak, že přestane transakci
+držet sám, spadnou re-entrance testy.
+
+---
+
 ## 2026-07-29 — Dávkový import, Commit 3: PurchaseInvoiceWriteService (čistý přesun)
 
 **Charakter: FORK REFAKTORING — bez změny chování.** Třetí commit featury „AI import přes

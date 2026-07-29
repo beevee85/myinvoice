@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Invoice;
 
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 
 /**
@@ -36,13 +37,20 @@ use MyInvoice\Repository\PurchaseInvoiceRepository;
  *      doklad rozešel s papírem dodavatele o haléře,
  *   4. `recompute` — dopočet řádkových i hlavičkových součtů.
  *
- * Tahle třída je ZATÍM čistý přesun beze změny chování — konkrétně **není v transakci**,
- * stejně jako dosud. Obalení transakcí je samostatný krok, aby šlo případnou regresi
- * najít bisectem.
+ * CELÁ SEKVENCE BĚŽÍ V JEDNÉ TRANSAKCI. Dřív jel každý krok v autocommitu, takže pád
+ * uprostřed nechal v databázi trvale rozpracovaný doklad — hlavičku s nulovými součty
+ * a osiřelé položky bez přepočtu. Účetní doklad je buď celý, nebo žádný.
+ *
+ * Transakce je RE-ENTRANTNÍ (`$started = !$pdo->inTransaction()`): když už volající
+ * transakci drží, služba si vlastní nezakládá a nechá commit na něm. Je to nutné —
+ * `PurchaseSettlementService` (vyúčtování záloh, § 37a) volá `setVatOverrides`
+ * i `recompute` uvnitř své transakce a vlastní `beginTransaction()` by ji rozbil.
+ * Stejný vzor používá i `FinalFromProformaCreator`.
  */
 final class PurchaseInvoiceWriteService
 {
     public function __construct(
+        private readonly Connection $db,
         private readonly PurchaseInvoiceRepository $repo,
         private readonly PurchaseInvoiceCalculator $calc,
     ) {}
@@ -50,16 +58,12 @@ final class PurchaseInvoiceWriteService
     /**
      * Založí koncept přijaté faktury i s položkami a přepočtem.
      *
-     * Výjimky se ZÁMĚRNĚ nechytají — překládá je volající.
+     * Buď projde celá sekvence, nebo se nezapíše nic — viz transakce níže.
      *
-     * POZOR na rozsah překladu u volajícího: dřív obaloval `try/catch` jen krok 1
-     * (INSERT hlavičky), takže platilo „HTTP 400 ⇒ v DB nevzniklo nic". Delegací se
-     * catch roztáhl přes všechny čtyři kroky. Dnes je to prokazatelně bez dopadu —
-     * kroky 2–4 žádnou `InvalidArgumentException` nevyhazují (repozitář ji má jen
-     * v `createDraft`/`updateDraft`, kalkulátor hází `RuntimeException`) a jejich
-     * `PDOException` neprojde heuristikou na varsymbol, protože `purchase_invoice_items`
-     * žádný unikát se slovem „varsymbol" nemá. Až přibude transakce, invariant
-     * „chyba ⇒ v DB nevzniklo nic" bude platit pro celou sekvenci sám od sebe.
+     * Výjimky se ZÁMĚRNĚ nechytají, jen se po nich vrátí transakce zpět; překládá je
+     * volající (`InvalidArgumentException` → 400, kolize varsymbolu → 409). Díky
+     * transakci teď platí i pro kroky 2–4 invariant „chybová odpověď ⇒ v DB nevzniklo nic",
+     * který dřív garantoval jen INSERT hlavičky.
      *
      * Jméno je ZÁMĚRNĚ jiné než `PurchaseInvoiceRepository::createDraft()` — ta zapisuje
      * jen hlavičku. Kdyby se obě jmenovaly stejně, v diffu ani při merge nepoznáš,
@@ -70,10 +74,50 @@ final class PurchaseInvoiceWriteService
      */
     public function createWithItems(array $data, int $userId, int $supplierId): int
     {
-        $id = $this->repo->createDraft($data, $userId, $supplierId);
-        $this->applyItemsAndTotals($id, $data, $supplierId);
+        return $this->inTransaction(function () use ($data, $userId, $supplierId): int {
+            $id = $this->repo->createDraft($data, $userId, $supplierId);
+            $this->applyItemsAndTotals($id, $data, $supplierId);
 
-        return $id;
+            return $id;
+        });
+    }
+
+    /**
+     * Spustí callback v transakci — a to jen tehdy, když ji ještě nikdo nedrží.
+     *
+     * Vnořené volání (typicky z `PurchaseSettlementService`, který si transakci otevírá
+     * sám) commit ani rollback NEDĚLÁ; nechá rozhodnutí na vlastníkovi transakce.
+     * Bez toho by vnitřní `commit()` předčasně potvrdil cizí rozdělanou práci.
+     *
+     * @template T
+     * @param callable():T $work
+     * @return T
+     */
+    private function inTransaction(callable $work): mixed
+    {
+        $pdo     = $this->db->pdo();
+        $started = !$pdo->inTransaction();
+
+        if ($started) {
+            $pdo->beginTransaction();
+        }
+
+        try {
+            $result = $work();
+
+            if ($started) {
+                $pdo->commit();
+            }
+
+            return $result;
+        } catch (\Throwable $e) {
+            // `inTransaction()` znovu: některé chyby (deadlock, ztráta spojení) transakci
+            // ukončí samy a `rollBack()` by pak hodil vlastní výjimku přes tu původní.
+            if ($started && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /**
