@@ -28,11 +28,13 @@ final class CreatePurchaseInvoiceAction
 {
     use HandlesVarsymbolDuplicate;
 
+    // FORK: v konstruktoru je místo PurchaseInvoiceCalculator (byl tam jen kvůli
+    // recompute) sdílená PurchaseInvoiceWriteService — celá zapisovací sekvence.
+    // Komentář je nad konstruktorem záměrně: uvnitř seznamu parametrů by zvětšoval
+    // konfliktní plochu při merge upstreamu.
     public function __construct(
         private readonly PurchaseInvoiceRepository $repo,
         private readonly ClientRepository $clients,
-        // FORK: místo PurchaseInvoiceCalculator (dřív jen kvůli recompute) — celá
-        // zapisovací sekvence je nově ve sdílené službě.
         private readonly PurchaseInvoiceWriteService $writer,
         private readonly VatClassificationDefaulter $vatDefaulter,
         private readonly ActivityLogger $logger,
@@ -108,7 +110,7 @@ final class CreatePurchaseInvoiceAction
         // FORK: zapisovací sekvence (hlavička → položky → rekapitulace § 73 → přepočet)
         // se přesunula do PurchaseInvoiceWriteService, ať ji nemá každá cesta vlastní.
         try {
-            $id = $this->writer->createDraft($body, $userId, $supplierId);
+            $id = $this->writer->createWithItems($body, $userId, $supplierId);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
         } catch (\PDOException $e) {

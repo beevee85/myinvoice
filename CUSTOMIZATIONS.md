@@ -46,9 +46,39 @@ se obnoví pro celou sekvenci sám.** Do té doby to hlídá komentář v obou s
 
 **Co se ZÁMĚRNĚ nezměnilo:** `UpdatePurchaseInvoiceAction` má tutéž čtyřkrokovou sekvenci,
 ale nemá charakterizační test — přesouvat ji bez důkazu by porušilo vlastní postup.
-Importní cesty (AI, ISDOC, scan-inbox) taky zůstávají. Ověřeno, že jejich payload klíč
-`vat_overrides` **neobsahuje**, takže až se převedou, bude krok 3 no-op a nepřinese změnu
-chování (rekapitulaci § 73 jim dodává `PurchaseVatRecapSeeder` až po zápisu).
+Importní cesty taky zůstávají. Ověřeno, že jejich payload klíč `vat_overrides`
+**neobsahuje**, takže až se převedou, bude krok 3 no-op a nepřinese změnu chování
+(rekapitulaci § 73 jim dodává `PurchaseVatRecapSeeder` až po zápisu).
+
+**KOPIÍ SEKVENCE JE SEDM, ne čtyři** (zjištěno až kontrolou po commitu — mění rozsah
+budoucí konvergence a pravidla V77):
+
+| místo | stav |
+|---|---|
+| `Action/PurchaseInvoice/CreatePurchaseInvoiceAction` | **převedeno** |
+| `Action/PurchaseInvoice/UpdatePurchaseInvoiceAction` | kroky 2–4 + `setRounding`, `reprefixVarsymbol` |
+| `Action/Bank/BankStatementAction:1296` | doklad z bankovního výpisu — v zadání nefiguroval |
+| `Service/Import/AiPdfExtractor:713` | |
+| `Service/Import/IsdocToPurchaseInvoiceMapper:129` | používá ji i scan-inbox a bundle import |
+| `Service/Import/IdokladImportService:666` a `:864` | v zadání nefigurovalo |
+| `Service/Import/FakturoidImportService:464` | v zadání nefigurovalo |
+
+`PurchaseInvoiceInboxScanner` vlastní kopii **nemá** — deleguje na mapper.
+
+**Past pro převádění:** iDoklad i Fakturoid volají `replaceItems` podmíněně
+(`if (!empty($items))`), sdílená služba bezpodmínečně. Na zakládání je to jedno, ale na
+úpravě dokladu by prázdné `items` tiše smazalo všechny položky. Zapsáno v docblocku služby.
+
+**Follow-up po adversariální kontrole (bez změny logiky):** metoda přejmenována na
+`createWithItems()`, aby nekolidovala jménem s `PurchaseInvoiceRepository::createDraft()`
+(ta zapisuje jen hlavičku); FORK komentář přesunut nad konstruktor, ať nezvětšuje
+konfliktní plochu; docblock opraven podle skutečného soupisu výše. Přibyl
+**`api/tests/Architecture/PurchaseInvoiceWritePathTest.php`** — upstream sáhl do
+přesouvaného bloku v 6 z 11 commitů, které ten soubor kdy měnily, a nebezpečný je tichý
+merge: pátý krok přilepený ZA delegaci by běžel až za přepočtem a rekapitulace § 73 by
+se nezapekla do řádků. Test hlídá, že akce nevolá žádný krok přímo, že je služba má
+všechny, že `setVatOverrides` předchází `recompute` a že se sekvence nezdvojila.
+Ověřeno, že test na simulovaném špatném merge skutečně spadne.
 
 **Testy:** beze změny — 2 126 zelených, 7 304 asercí, 31 skipped. Charakterizační suita
 (27 testů) prošla bez jediné úpravy, což je vlastní důkaz čistoty přesunu.

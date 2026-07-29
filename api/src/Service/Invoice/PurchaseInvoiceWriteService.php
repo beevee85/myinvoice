@@ -10,13 +10,23 @@ use MyInvoice\Repository\PurchaseInvoiceRepository;
  * FORK (beevee85) — sdílená zapisovací sekvence přijaté faktury.
  *
  * Sekvenci `createDraft → replaceItems → vat_overrides → recompute` si dosud skládal
- * každý volající sám: ruční akce, AI import, ISDOC mapper i scan-inbox. Čtyři kopie
- * téhož znamenaly, že oprava v jedné z nich se do ostatních nedostala (viz rozdíly
- * zafixované charakterizačními testy).
+ * každý volající sám a kopií je v repu **sedm**, ne pár — oprava v jedné se do
+ * ostatních nedostala (viz rozdíly zafixované charakterizačními testy):
  *
- * STAV MIGRACE: zatím sem deleguje jen ruční cesta (`CreatePurchaseInvoiceAction`).
- * Importní cesty a úprava dokladu si sekvenci pořád skládají samy — jejich převedení
- * je samostatný krok, aby šla případná regrese najít bisectem.
+ *   1. `Action/PurchaseInvoice/CreatePurchaseInvoiceAction`  — PŘEVEDENO sem
+ *   2. `Action/PurchaseInvoice/UpdatePurchaseInvoiceAction`  — kroky 2–4 (+ setRounding, reprefixVarsymbol)
+ *   3. `Action/Bank/BankStatementAction:1296`                — doklad z bankovního výpisu
+ *   4. `Service/Import/AiPdfExtractor:713`
+ *   5. `Service/Import/IsdocToPurchaseInvoiceMapper:129`     — používá ji i scan-inbox a bundle import
+ *   6. `Service/Import/IdokladImportService:666` a `:864`
+ *   7. `Service/Import/FakturoidImportService:464`
+ *
+ * (`PurchaseInvoiceInboxScanner` vlastní kopii NEMÁ — deleguje na mapper.)
+ *
+ * PŘI PŘEVÁDĚNÍ DALŠÍCH CEST POZOR: iDoklad i Fakturoid volají `replaceItems`
+ * podmíněně (`if (!empty($items))`), tahle služba bezpodmínečně. Na zakládání je to
+ * jedno (mazat není co), ale kdyby se stejná cesta použila na ÚPRAVU dokladu,
+ * prázdné `items` by tiše smazala všechny položky.
  *
  * POŘADÍ KROKŮ JE VÝZNAMOVÉ, ne náhodné:
  *   1. `createDraft` — hlavička; vrací id, na kterém stojí zbytek,
@@ -51,10 +61,14 @@ final class PurchaseInvoiceWriteService
      * žádný unikát se slovem „varsymbol" nemá. Až přibude transakce, invariant
      * „chyba ⇒ v DB nevzniklo nic" bude platit pro celou sekvenci sám od sebe.
      *
+     * Jméno je ZÁMĚRNĚ jiné než `PurchaseInvoiceRepository::createDraft()` — ta zapisuje
+     * jen hlavičku. Kdyby se obě jmenovaly stejně, v diffu ani při merge nepoznáš,
+     * která vrstva se volá.
+     *
      * @param array<string,mixed> $data payload dokladu včetně klíčů `items` a `vat_overrides`
      * @return int id založeného konceptu
      */
-    public function createDraft(array $data, int $userId, int $supplierId): int
+    public function createWithItems(array $data, int $userId, int $supplierId): int
     {
         $id = $this->repo->createDraft($data, $userId, $supplierId);
         $this->applyItemsAndTotals($id, $data, $supplierId);
