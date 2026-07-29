@@ -19,6 +19,46 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## 2026-07-29 — Dávkový import, Commit 3: PurchaseInvoiceWriteService (čistý přesun)
+
+**Charakter: FORK REFAKTORING — bez změny chování.** Třetí commit featury „AI import přes
+předplatné". Testy z Commitu 2 prošly **beze změny**, celá suita dala shodná čísla
+(2 126 / 7 304 / 31 skipped) jako před zásahem.
+
+**Co se změnilo:**
+1. **`api/src/Service/Invoice/PurchaseInvoiceWriteService.php`** (nový) — sekvence
+   `createDraft → replaceItems → setVatOverrides → recompute` na jednom místě, včetně
+   komentáře, proč je pořadí významové (§ 73 ZDPH musí být PŘED přepočtem, aby ho
+   kalkulátor zapekl do řádkových totálů). **Není v transakci** — to je vědomé, přijde
+   samostatným commitem, aby šla regrese najít bisectem.
+2. **`api/src/Action/PurchaseInvoice/CreatePurchaseInvoiceAction.php`** (−11/+7 řádků) —
+   deleguje na službu; v konstruktoru nahrazen `PurchaseInvoiceCalculator`
+   (byl tam už jen kvůli `recompute`) za `PurchaseInvoiceWriteService`.
+
+**Vědomě přijatý rozdíl (odhalen adversariální kontrolou):** delegací se **rozšířil rozsah
+`try/catch`** z prvního kroku na celou sekvenci. Dosud platilo „HTTP 400 `integrity_violation`
+⇒ v DB nevzniklo nic", protože všechny `InvalidArgumentException` v `createDraft` letí PŘED
+INSERTem. Dnes je rozšíření prokazatelně bez dopadu — `replaceItems` ani `setVatOverrides`
+žádnou `InvalidArgumentException` nevyhazují, `recompute` hází `RuntimeException` (kterou
+nechytá ani jedna větev) a jejich `PDOException` neprojde heuristikou na varsymbol, protože
+`purchase_invoice_items` nemá unikát se slovem „varsymbol". **Až přibude transakce, invariant
+se obnoví pro celou sekvenci sám.** Do té doby to hlídá komentář v obou souborech.
+
+**Co se ZÁMĚRNĚ nezměnilo:** `UpdatePurchaseInvoiceAction` má tutéž čtyřkrokovou sekvenci,
+ale nemá charakterizační test — přesouvat ji bez důkazu by porušilo vlastní postup.
+Importní cesty (AI, ISDOC, scan-inbox) taky zůstávají. Ověřeno, že jejich payload klíč
+`vat_overrides` **neobsahuje**, takže až se převedou, bude krok 3 no-op a nepřinese změnu
+chování (rekapitulaci § 73 jim dodává `PurchaseVatRecapSeeder` až po zápisu).
+
+**Testy:** beze změny — 2 126 zelených, 7 304 asercí, 31 skipped. Charakterizační suita
+(27 testů) prošla bez jediné úpravy, což je vlastní důkaz čistoty přesunu.
+
+**Jak ověřit po merge:** `vendor/bin/phpunit --filter Characterization` musí projít beze
+změny testů. Konstruktor akce má nově `PurchaseInvoiceWriteService` — pokud upstream
+konstruktor přepíše, zkontroluj, že delegace zůstala.
+
+---
+
 ## 2026-07-29 — Dávkový import, Commit 2: charakterizační testy zapisovacích cest
 
 **Charakter: FORK TESTY** — druhý commit featury „AI import přes předplatné".
