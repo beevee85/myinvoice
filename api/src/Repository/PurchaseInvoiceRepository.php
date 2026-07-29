@@ -834,9 +834,14 @@ final class PurchaseInvoiceRepository
         if (!empty($filters['q'])) {
             // Escape % a _ wildcards aby uživatelský input nedělal slow-query / unexpected match
             $q = addcslashes((string) $filters['q'], '%_\\');
-            $where[] = '(pi.varsymbol LIKE ? OR pi.vendor_invoice_number LIKE ? OR c.company_name LIKE ?)';
+            // Poznámky se hledají i uprostřed textu — slouží jako volný klíč k dokladu
+            // (např. VIN vozu na všech dokladech k jednomu nákupu).
+            $where[] = '(pi.varsymbol LIKE ? OR pi.vendor_invoice_number LIKE ? OR c.company_name LIKE ?'
+                     . ' OR pi.note_above_items LIKE ? OR pi.note_below_items LIKE ?)';
             $params[] = $q . '%';
             $params[] = $q . '%';
+            $params[] = '%' . $q . '%';
+            $params[] = '%' . $q . '%';
             $params[] = '%' . $q . '%';
         }
 
@@ -1768,11 +1773,13 @@ final class PurchaseInvoiceRepository
           LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
                 AND pi.deleted_at IS NULL
-                AND (pi.varsymbol LIKE ? OR pi.vendor_invoice_number LIKE ?)
+                AND (pi.varsymbol LIKE ? OR pi.vendor_invoice_number LIKE ?
+                     OR pi.note_above_items LIKE ? OR pi.note_below_items LIKE ?)
               ORDER BY pi.issue_date DESC, pi.id DESC
               LIMIT " . (int) $limit
         );
-        $stmt->execute([$supplierId, '%' . $esc . '%', '%' . $esc . '%']);
+        $like = '%' . $esc . '%';
+        $stmt->execute([$supplierId, $like, $like, $like, $like]);
         return array_map(static fn (array $r) => [
             'id'                    => (int) $r['id'],
             'varsymbol'             => $r['varsymbol'] !== null ? (string) $r['varsymbol'] : null,

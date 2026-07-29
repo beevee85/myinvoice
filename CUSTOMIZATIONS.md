@@ -19,6 +19,33 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## 2026-07-29 — hledání pokrývá i poznámky (obě strany)
+
+**Charakter: FORK FEATURE.**
+
+**Proč:** poznámka je jediné volné pole, kam jde na doklad dát klíč společný pro celý
+případ (např. VIN vozu na všech dokladech k jednomu nákupu — zálohy, daňové doklady
+k záloze, konečná faktura — a týž klíč na vydané faktuře při prodeji). Hledání ale
+poznámky vůbec nepokrývalo, takže klíč byl fakticky nedohledatelný a marži z něj nešlo
+spočítat bez SQL.
+
+**Co se změnilo** (obě strany, rychlé hledání i filtr v seznamu):
+- přijaté (`PurchaseInvoiceRepository`): `searchQuick()` a filtr `q`
+  nově matchují i `note_above_items` a `note_below_items`,
+- vydané (`InvoiceRepository`): totéž + `internal_note`.
+
+Poznámky se hledají substringem (`%q%`), protože klíč bývá uprostřed textu; čísla dokladů
+zůstávají prefixová jako dřív.
+
+**Testy:** nový `tests/Integration/PurchaseInvoice/SearchInNotesTest.php` (3 testy) —
+doklad s klíčem v poznámce se najde, doklad bez klíče se nevrací, a najde se i vydaná
+faktura (jinak by nešel spárovat nákup s prodejem). Suita **2022 zelených**.
+
+**Jak ověřit po merge:** `vendor/bin/phpunit --filter 'SearchInNotes'`; v UI hledání
+i ve filtru seznamu vrátí doklad podle textu z poznámky.
+
+---
+
 ## 2026-07-29 — auto-backfill varsymbolů nesmí číslovat koncepty
 
 **Charakter: FORK BUGFIX** — nalezeno při nasazování opravy § 37a téhož dne.
