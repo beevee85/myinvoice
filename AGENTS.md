@@ -44,6 +44,23 @@ php tools/exportManualToPdf.php
 
 ## Tvrdá pravidla
 
+### Subagenti a nevratné operace
+- **Subagenta nevypravuj bez kanonických omezení.** [`docs/AGENT-CONSTRAINTS.md`](docs/AGENT-CONSTRAINTS.md)
+  se vkládá do promptu **celý a doslovně**, nikdy parafrází; subagent vrací jeho SHA-256 v hlavičce
+  reportu. Přidáno po incidentu 30. 7. 2026, kdy dva subagenti testovali pověření proti cizí
+  databázové službě — zákaz existoval, ale jen v próze v dokumentu, který subagenti nečtou.
+  Jakákoli změna toho souboru je samostatný commit se schválením.
+- **Nevratné operace nad soubory dělá výhradně uživatel.** Agent nikdy sám `rm`, `shred`,
+  `truncate` ani `mv` přes existující cíl — připraví příkaz, vypíše jeho úplný text i počet cílů,
+  a předá ke schválení. Schvaluje se jen to, co je vidět jako text. Co agent nevytvořil, nemaže
+  nikdy, ani po schválení. Přidáno po incidentu 29. 7. 2026 (smazáno 39 cizích záloh).
+- **`app.pepper` se NEROTUJE NIKDY** — vstupuje jako suffix do `password_hash()`
+  (`api/src/Service/Auth/PasswordHasher.php:26,66`), takže jeho změna nevratně odřízne všechny
+  uživatele; bcrypt hash se bez plaintextu nepřepočítá. `app.secret_encryption_key` je jiná
+  hodnota a rotovatelná je, ale jen po ověření, že v DB není žádná nenulová šifrovaná hodnota
+  (`users.totp_secret` a `supplier.*_enc`). Pozor: `LoginAction.php:274` volá `decrypt()`
+  **bez try/catch**, takže nedešifrovatelný TOTP secret = 500 a uzamčení účtu.
+
 ### Migrace
 - Nová migrace = nový číslovaný soubor v `db/migrations/`, spouští se **výhradně** přes `php api/bin/migrate.php`.
 - Každá migrace musí být **idempotentní** (opakovatelně spustitelná): používej nativní MariaDB `IF [NOT] EXISTS` (`ADD COLUMN IF NOT EXISTS`, `CREATE TABLE IF NOT EXISTS`, …), ne PREPARE/EXECUTE triky.
