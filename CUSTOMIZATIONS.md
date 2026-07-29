@@ -19,6 +19,40 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## 2026-07-29 — auto-backfill varsymbolů nesmí číslovat koncepty
+
+**Charakter: FORK BUGFIX** — nalezeno při nasazování opravy § 37a téhož dne.
+
+**Chyba:** `bin/backfill-purchase-varsymbols.php` i jeho auto-trigger v `bin/migrate.php`
+vybíraly `varsymbol IS NULL AND status != 'cancelled'`. Entrypoint kontejneru pouští
+`migrate.php`, takže **při každém startu / updatu dostaly interní číslo i rozpracované
+doklady** a spálily si číslo z řady. Interní číslo se přitom má přidělovat až při přechodu
+draft → received (`TransitionPurchaseInvoiceStatusAction::ensureVarsymbol`) — backfill
+existuje jen pro doklady, které draft opustily, ale číslo nedostaly (AI auto-paid, viz
+docblock skriptu).
+
+Projev: nasazení 29. 7. očíslovalo tři koncepty TUkas (#62 → PF2606004, #63 → ZA2604004,
+#64 → ZA2606003). Vrátit je na NULL nemá smysl bez téhle opravy — příští restart je
+přidělí znovu.
+
+Pozn.: check `exchange-rates` v témže souboru drafty u VYDANÝCH faktur už správně vynechává
+(`NOT IN ('cancelled','draft')`); u přijatých je nechává schválně (kurz koncept potřebuje
+k zobrazení a nespotřebovává číselnou řadu) — to jsem neměnil.
+
+**Co se změnilo:** obě místa nově `status NOT IN ('cancelled', 'draft')` —
+`bin/migrate.php` (count u checku `purchase-varsymbols`) a `bin/backfill-purchase-varsymbols.php`
+(hlavní SELECT + docblock).
+
+**Testy:** nový `tests/Integration/PurchaseInvoice/PurchaseVarsymbolBackfillTest.php`
+(2 testy, 8 asercí) — spouští **skutečný skript**, takže hlídá obě místa: koncept zůstane
+bez čísla, doklad ve stavu `received` číslo dostane, stornovaný se vynechá, opakovaný běh
+nepřečísluje. Proti neopravenému kódu **padá** (`Failed asserting that 'PF9605003' is null`).
+
+**Jak ověřit po merge:** `vendor/bin/phpunit --filter 'PurchaseVarsymbolBackfill'`;
+restart kontejneru už nesmí očíslovat žádný koncept (log startu: `[purchase-varsymbols] OK`).
+
+---
+
 ## 2026-07-29 — DDKPZ hotfix: § 37a nesmí přelévat haléř do zdanitelných řádků faktury
 
 **Charakter: FORK BUGFIX** — oprava kolize mezi 2. a 3. dávkou DDKPZ (obě z 2026-07-28).

@@ -10,6 +10,10 @@ declare(strict_types=1);
  * obcházel TransitionPurchaseInvoiceStatusAction (kde se varsymbol generuje
  * při draft→received).
  *
+ * Koncepty (`status = 'draft'`) se ZÁMĚRNĚ přeskakují — interní číslo se přiděluje
+ * až při přechodu draft → received a rozpracovaný doklad ho mít nemá. Backfill je tu
+ * jen pro doklady, které draft opustily, ale číslo nedostaly.
+ *
  * Skript je idempotentní — ensureVarsymbol() v repo vrátí stávající hodnotu
  * pokud varsymbol už nastavený je. Bezpečné pouštět opakovaně.
  *
@@ -31,7 +35,7 @@ $stmt = $pdo->query(
     "SELECT id, supplier_id, vendor_invoice_number, total_with_vat, status, issue_date, paid_at
        FROM purchase_invoices
       WHERE varsymbol IS NULL
-        AND status != 'cancelled'
+        AND status NOT IN ('cancelled', 'draft')
       ORDER BY supplier_id, issue_date, id"
 );
 $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
