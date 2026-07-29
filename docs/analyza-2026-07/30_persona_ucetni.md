@@ -1,7 +1,7 @@
 # 30 · Persona B — externí účetní
 
 Průchod ročním cyklem externí účetní, která zpracovává agendu majitele instance (2 s.r.o.,
-plátci DPH — PROPSOL kvartální období, BEKRON má období v nastavení nevyplněné, doplnit
+plátci DPH — Beta Servis kvartální období, Alfa Trade má období v nastavení nevyplněné, doplnit
 v rámci N-001), případně obsluhuje více klientů. Stav: v instanci dnes
 **žádný účet účetní neexistuje** — spolupráce běží mimo systém (e-mail, ruční předání), přestože
 fork má role, per-user omezení na firmy i hromadné exporty hotové.

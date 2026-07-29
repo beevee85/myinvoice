@@ -206,6 +206,10 @@ final class SettingsAction
             $insertCur->execute([$newSupplierId, 'EUR', 'EUR — výchozí', '€', 'Euro', 'Euro', 2]);
             $newEurCurId = (int) $pdo->lastInsertId();
 
+            // 2a. Seed výchozího číselníku kategorií nákladu (stejná sada jako migrace 0912).
+            //     Bez něj startuje firma s prázdným seznamem a rozpad nákladů je nepoužitelný.
+            \MyInvoice\Service\Codebook\DefaultExpenseCategories::seed($pdo, $newSupplierId);
+
             // 2b. Volitelný bankovní účet (např. načtený z registru plátců DPH) → na seeded měnu.
             $bank = isset($b['bank_account']) && is_array($b['bank_account']) ? $b['bank_account'] : null;
             if ($bank !== null) {

@@ -26,6 +26,42 @@ Před implementací čehokoli VŽDY ověř v aktuální verzi upstreamu, že to 
 
 - [ ] **KPI dlaždice s trendy** — dashboard: srovnání s předchozím obdobím (↑/↓ %, barva dle směru, příp. sparkline). Zásah: dashboard API (data minulého období) + Dashboard.vue dlaždice. Střední náročnost.
 
+
+### Per-řádková DPH při ISDOC importu se může lišit od dokladu o haléř (nález 29. 7. 2026)
+
+`IsdocToPurchaseInvoiceMapper` zahodí řádkovou daň z ISDOC (`LineExtensionTaxAmount`)
+a nechá ji dopočítat ZDOLA ze základu, kdežto řada dodavatelů ji počítá SHORA z brutto
+(9 600 / 1,21 → daň 1 666,12; zdola vyjde 1 666,11). `PurchaseVatRecapSeeder` to nezachytí,
+protože porovnává jen SOUČET za sazbu — a odchylky jednotlivých řádků se v součtu vyruší
+(`if ($maxDiff <= 0.0) continue;`), takže `vat_overrides` zůstane NULL.
+
+Důsledek: rekapitulace (to, co jde do DP3/KH a co vyžaduje § 73) je správně, ale jednotlivé
+řádky se můžou od PDF dodavatele lišit o haléř. Reálně pozorováno u 4 z 11 řádků.
+
+**Proč zatím neopraveno:** daňový dopad nulový — zákon vyžaduje základ a daň ZA SAZBU,
+ne per řádek. Oprava by znamenala číst `LineExtensionTaxAmount` a po `recompute()` řádky
+přišpendlit, tj. zásah do importní cesty všech ISDOC dokladů. Poměr přínos/riziko zatím
+nevychází; udělat jako samostatný úkol s testem na doklad počítaný shora.
+
+### `InvoiceMath::applyRateOverrides` může přišpendlit reziduum na ODPOČTOVÝ řádek § 37a
+
+Reziduum se přišpendluje na řádek s největším `|base|` v sazbě. Je-li největší řádek
+odpočtový (napárovaný DDKPZ — běžné, když zálohy převyšují největší položku faktury),
+haléř skončí na něm a řádek přestane doslova odpovídat DDKPZ.
+
+V cestě `PurchaseSettlementService` je to maskované — `pinAllSettlementRows()` řádek
+vzápětí přepíše. Projevit se to může při přepočtu MIMO tuto cestu (editace dokladu,
+dávkový `recompute-purchase-invoices.php`), kde odpočtový řádek zůstane posunutý;
+doklad si toho všimne přes příznak `settlement_deduction_mismatch`.
+
+**Proč zatím neopraveno:** `InvoiceMath` je sdílená peněžní matematika VŠECH dokladů
+(vydaných i přijatých) a `$items`, které dostává, dnes příznak odpočtového řádku vůbec
+nenesou (`PurchaseInvoiceCalculator` ho neselectuje). Oprava = protáhnout příznak skrz
+kalkulátor a změnit výběr „nejsilnějšího řádku" — tedy zásah do jádra výpočtu kvůli
+latentní, samodetekující se chybě o haléř. Udělat samostatně, s testem na doklad,
+kde odpočtový řádek převyšuje největší položku.
+
+
 ## Kandidáti na issue u autora (radekhulan/myinvoice) — velké funkce
 
 Levnější než vlastní implementace ve forku: když je autor přijme, získáme je updatem.

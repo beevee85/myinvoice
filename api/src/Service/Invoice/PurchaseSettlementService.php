@@ -237,8 +237,16 @@ final class PurchaseSettlementService
                             ),
                         ];
                     }
+                    // Symetrie s link(): řádky dokladu se po přepočtu vrátí na hodnoty
+                    // dle dokladu dodavatele (§ 73 / § 100), odpočtové řádky zůstanou
+                    // doslova dle zbývajících DDKPZ a haléřový rozdíl ponese samostatný
+                    // řádek „Zaokrouhlení § 37a". Bez snapshotu by recompute uvnitř
+                    // applyGrossTargets rozpustil haléř do zdanitelných řádků faktury.
+                    $rowSnapshot = $this->repo->snapshotItemTotals($finalId);
                     $this->applyGrossTargets($finalId, $supplierId, $final['vat_overrides'] ?? null, $targets);
-                    $this->pinAllSettlementRows($finalId, $supplierId);
+                    $this->repo->restoreItemTotals($rowSnapshot);
+                    $this->pinAllSettlementRows($finalId, $supplierId, false);
+                    $this->syncRoundingRows($finalId, $supplierId, $targets);
                 }
             }
 
@@ -326,7 +334,9 @@ final class PurchaseSettlementService
         // Řádky zpět dle dokladů (faktura z PDF, odpočty dle DDKPZ) a zbytek proti
         // cíli § 37a na jeden viditelný zaokrouhlovací řádek.
         $this->repo->restoreItemTotals($rowSnapshot);
-        $this->pinAllSettlementRows($finalId, $supplierId);
+        // compensate: false — haléřový rozdíl NEpřelévat do zdanitelných řádků faktury
+        // (musejí zůstat dle dokladu dodavatele); absorbuje ho syncRoundingRows() níž.
+        $this->pinAllSettlementRows($finalId, $supplierId, false);
         $this->syncRoundingRows($finalId, $supplierId, $targets);
     }
 
@@ -391,7 +401,7 @@ final class PurchaseSettlementService
      * DDKPZ. Volá se po každém recompute — ten totiž počítá řádky ze sazby a přepsal by
      * i dřív přišpendlené odpočty (druhé párování by rozhodilo první).
      */
-    private function pinAllSettlementRows(int $finalId, int $supplierId): void
+    private function pinAllSettlementRows(int $finalId, int $supplierId, bool $compensate = true): void
     {
         $fresh = $this->repo->find($finalId, $supplierId);
         if ($fresh === null) {
@@ -405,7 +415,7 @@ final class PurchaseSettlementService
             $this->repo->pinSettlementRowTotals($finalId, (int) $d['id'], array_map(
                 static fn (array $g) => ['base' => -$g['base'], 'vat' => -$g['vat'], 'rate' => $g['rate']],
                 $this->rowGroups($src['items'] ?? [])
-            ));
+            ), $compensate);
         }
     }
 

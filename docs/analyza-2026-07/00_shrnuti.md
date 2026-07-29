@@ -1,18 +1,28 @@
 # 00 · Shrnutí — srovnávací analýza fakturačních systémů (červenec 2026)
 
-Porovnal jsem MyInvoice (publikovaný manuál 42 kapitol + API a **reálný stav tvého forku
-4.51.1** včetně databáze instance) s veřejnými nápovědami iDokladu, Vyfakturuj a Fakturoidu
+Porovnal jsem MyInvoice (publikovaný manuál 42 kapitol + API a **reálný stav tvého forku**
+včetně databáze instance) s veřejnými nápovědami iDokladu, Vyfakturuj a Fakturoidu
 (vč. celé sekce pro účetní). Všechna tvrzení o konkurenci mají URL ve
 [feature matici](10_feature_matrix.md); co se dohledat nepodařilo, je poctivě ❔.
+
+> **⟳ Aktualizace 28. 7. večer.** Analýza vznikla ráno nad verzí 4.51.1. Během dne padlo
+> 49 commitů a tři věci se změnily natolik, že jsem dokumenty srovnal s realitou:
+> **(1)** upstream přijal náš PR #245 (opravy DPH výkazů) — vydáno ve v4.52.0, fork je na
+> **4.52.1**; **(2)** dva Must návrhy jsou hotové a nasazené — **N-008** (DDKPZ na přijaté
+> straně vč. § 37a, 4 doklady už v provozu) a **N-019** (koš dokladů s retencí 30 dní);
+> **(3)** dodatečná přiznání DP3 (formy D/E) byla vypnuta, protože generovala plné částky místo
+> rozdílů dle § 141/2 DŘ — **přestala tedy platit jedna z ranních konkurenčních výhod** a vznikl
+> nový návrh **N-020**. Adopce (banka, ceník, účet účetní, `vat_period` Alfa Tradeu) se nezměnila.
 
 ## Tři hlavní zjištění
 
 **1. MyInvoice funkčně nezaostává — v daních a nákupu je nejsilnější ze všech čtyř.**
-Kniha DPH, archiv podání, dodatečná/následná přiznání (fork unikát — negeneruje nikdo jiný),
-platební příkazy s ověřením účtu v registru plátců, AI extrakce bez kreditů, aging/DSO/cash-flow
-forecast, elektronické podpisy PDF — nic z toho konkurence v této úplnosti nemá, a co má, tak
-zamčené v nejdražších tarifech. Fork navíc není pozadu za upstreamem (obsahuje celý master
-+ vlastní opravy DPH výkazů odeslané autorovi jako PR #245).
+Kniha DPH, archiv podání, následné KH, platební příkazy s ověřením účtu v registru plátců,
+AI extrakce bez kreditů, aging/DSO/cash-flow forecast, elektronické podpisy PDF a ⟳ nově DDKPZ
+i na přijaté straně vč. § 37a — nic z toho konkurence v této úplnosti nemá, a co má, tak
+zamčené v nejdražších tarifech. Fork není pozadu za upstreamem a ⟳ jeho opravy DPH výkazů
+autor přijal (PR #245 → v4.52.0). Jediná výjimka: dodatečná DP3 jsou dočasně vypnutá (N-020),
+takže tam zatím napřed nejsme.
 
 **2. Největší reálný gap není v kódu, ale v adopci.** Instance nevyužívá hotové funkce, které
 konkurence prodává jako hlavní přednosti: párování s bankou (0 výpisů — platby klikáš ručně),
@@ -22,8 +32,8 @@ dá dohnat konfigurační seancí bez řádku kódu (návrh N-001).
 
 **3. Skutečné funkční mezery jsou tři, a mají jasné vzory u konkurence:**
 - **Automatický daňový doklad k přijaté platbě** — zákonná povinnost plátce (15 dnů, § 28
-  ZDPH). Vyfakturuj i Fakturoid ho vystavují samy, iDoklad hlídá lhůtu; MyInvoice má jen
-  ruční akci bez hlídání (N-002 + dokončení rozdělané přijaté strany N-008).
+  ZDPH). Vyfakturuj i Fakturoid ho vystavují samy, iDoklad hlídá lhůtu; MyInvoice má na vydané
+  straně jen ruční akci bez hlídání (N-002). ⟳ Přijatá strana (N-008) je od 28. 7. hotová.
 - **Napojení banky bez ručních výpisů** — všichni tři párují z e-mailových avíz či Fio API;
   fork má celý párovací aparát, chybí jen Fio vstup (N-003).
 - **Model spolupráce s účetní** — Fakturoid ukazuje, kam to dotáhnout: role účetní zdarma,
@@ -39,16 +49,17 @@ a DPFO výpočet jsou pro tvoje dvě s.r.o. irelevantní (N-016 = Won't).
 
 | # | Návrh | Proč právě tohle | Náročnost |
 |---|---|---|---|
-| 1 | **N-001 Adopce hotových funkcí** (banka, ceník, účet účetní, vat_period BEKRON) | Nula kódu, odblokuje persony A i B; bez toho nemá smysl stavět dál | S |
-| 2 | **N-002 Auto DDKPZ + hlídání 15denní lhůty** | Jediná legislativní mezera; konkurence ji má celá vyřešenou | M |
+| 1 | **N-001 Adopce hotových funkcí** (banka, ceník, účet účetní, vat_period Alfa Trade) | Nula kódu, odblokuje persony A i B; bez toho nemá smysl stavět dál | S |
+| 2 | **N-002 Auto DDKPZ + hlídání 15denní lhůty** (vydaná strana) | Jediná legislativní mezera; konkurence ji má celá vyřešenou | M |
 | 3 | **N-003 Fio banka** (avíza hned, API pak) | Nejbolestivější třecí místo cyklu (ruční platby); matching aparát už existuje | S+M |
-| 4 | **N-008 DDKPZ přijatá strana — dokončit** | Správnost odpočtů DPH (§ 37a, § 73); práce z většiny hotová (migrace 0904) | M |
+| ~~4~~ | ~~**N-008 DDKPZ přijatá strana**~~ | ✅ ⟳ **HOTOVO 28. 7.** — tři dávky, migrace 0904/0906–0911, 4 doklady v provozu | — |
 | 5 | **N-005 Zamykání období** | Bez něj účetní nemůže věřit předaným datům; Fakturoid = hotový vzor | M–L |
 | 6 | **N-004 Pozvánka pro účetní** | Odstraní tření vzniku přístupu (dnes admin zakládá ručně vč. hesla) | M |
 | 7 | **N-007 E-mailový inbox dokladů** | Denní úspora práce; IMAP infrastruktura v kódu existuje, chybí jen napojení na doklady | M |
 | 8 | **N-011 „Objevte" + kontextová nápověda** | Systémová prevence problému č. 2 (nevyužité funkce); manuál existuje, stačí ho propojit s UI | M (S pro první etapu) |
-| 9 | **N-019 Rozšíření koše** (retence, mezery v řadě, vazby) | Levné doplnění už rozdělané feature 0905 o poznatky z konkurence | S |
+| ~~9~~ | ~~**N-019 Rozšíření koše**~~ | ✅ ⟳ **HOTOVO 28. 7.** — koš 0905 vč. retence 30 dní, cronu výsypu a hlídání vazeb DDKPZ | — |
 | 10 | **N-006 Balíček období** (stav předání + kontrola úplnosti + „chybí doklad") | Největší kus modelu spolupráce s účetní; nejobjemnější položka TOP 10 a staví na N-005 — proto poslední | L |
+| ⟳ nově | **N-020 Dopočet rozdílů pro dodatečné DP3** (§ 141/2 DŘ) | Vrací vypnutou funkci a je to nadstandard — neumí to nikdo z konkurence; nastupuje na uvolněné místo v Should | M |
 
 Proč zrovna těchto deset: řadím podle (a) legislativní povinnosti, (b) odstranění denního
 ručního tření, (c) hotovosti podkladů v kódu. Cenové nabídky (N-009) jsou jediný „konkurenční
@@ -69,5 +80,5 @@ uvádí backlog konzervativní vyšší odhad.
 - [60_backlog.csv](60_backlog.csv) — strojově zpracovatelný backlog (19 položek)
 - [90_zdroje.md](90_zdroje.md) — všechny použité URL s datem snapshotu
 
-Analýza nic neimplementuje; rozdělané práce (DDKPZ přijatá strana, koš dokladů) se nedotýká —
-jen na ně navazuje (N-008, N-019).
+Analýza nic neimplementuje; rozdělaných prací se nedotýká — jen na ně navazuje. ⟳ Obě
+(DDKPZ přijatá strana N-008, koš dokladů N-019) byly během 28. 7. dokončeny a nasazeny.

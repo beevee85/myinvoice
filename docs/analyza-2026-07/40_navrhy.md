@@ -17,14 +17,14 @@ Vše síťové je navrženo jako volitelný modul s konfigurací.
 - **Persona:** Uživatel ✅✅ · Účetní ✅✅
 - **Jak je to dnes v MyInvoice:** instance nevyužívá hotové funkce: banka (0 výpisů, 0 avíz),
   ceník (0 položek), pravidelné fakturace (0), e-mailové odesílací profily (0), účet pro účetní
-  (žádný `accountant`/`readonly` uživatel), kategorie nákladů/tržeb (0); BEKRON nemá vyplněné
+  (žádný `accountant`/`readonly` uživatel), kategorie nákladů/tržeb (0); Alfa Trade nemá vyplněné
   zdaňovací období DPH, EUR měna nemá účet. Zdroj: DB instance, viz [50_fork_odchylky.md](50_fork_odchylky.md) § 5.
 - **Jak to řeší konkurence:** SaaS konkurence tenhle problém řeší onboardingem (Fakturoid
   „Objevte": https://www.fakturoid.cz/podpora/nastaveni/obrazovka-objevte) — u nás to krátkodobě
   nahradí ruční konfigurační seance.
 - **Proč to vadí:** největší část gapu vůči konkurenci je „vypnuto", ne „neexistuje" — ruční
   párování plateb, ruční psaní položek, účetní bez přístupu.
-- **Návrh řešení:** konfigurační seance (žádný kód): 1) doplnit `vat_period` BEKRON; 2) založit
+- **Návrh řešení:** konfigurační seance (žádný kód): 1) doplnit `vat_period` Alfa Trade; 2) založit
   účet účetní (role accountant + omezení na firmy dle dohody); 3) zapnout příjem výpisů Fio
   (GPC upload, do doby N-003); 4) naplnit ceník opakovanými položkami obou firem; 5) založit
   šablony pravidelné fakturace, kde dává smysl; 6) zvážit zapnutí poděkování za platbu;
@@ -36,7 +36,7 @@ Vše síťové je navrženo jako volitelný modul s konfigurací.
 - **Rizika a co nerozbít:** přístup účetní omezit na správné firmy (`user_supplier_access`);
   u výpisů nezapomenout na formát Fio GPC.
 - **Akceptační kritéria:**
-  - [ ] BEKRON má vyplněné zdaňovací období a kompletní EPO identitu
+  - [ ] Alfa Trade má vyplněné zdaňovací období a kompletní EPO identitu
   - [ ] existuje aktivní účet role `accountant` s omezením na dohodnuté firmy a zapnutým 2FA
   - [ ] v Bance je aspoň jeden naimportovaný výpis a spárovaná platba
   - [ ] ceník obsahuje aspoň 5 reálně používaných položek na firmu
@@ -125,7 +125,18 @@ Vše síťové je navrženo jako volitelný modul s konfigurací.
 
 ---
 
-### N-008 · Dokončit DDKPZ na přijaté straně (rozdělaná migrace 0904) **[LEG]**
+### N-008 · Dokončit DDKPZ na přijaté straně (rozdělaná migrace 0904) **[LEG]** — ✅ **HOTOVO 28. 7. 2026**
+
+> **Uzavřeno týž den večer.** Dokončeno ve třech dávkách (commity 6506ca72 → db8dc163, migrace
+> 0904, 0906, 0907, 0909, 0910, 0911): typ `tax_document`, § 37a vyúčtování s korektním
+> zaokrouhlením (viditelný řádek „Zaokrouhlení § 37a"), sazba CZ-NA „Mimo DPH" pro zálohy mimo
+> výkazy, invariant znamének, vyloučení záloh z nákladových agregací, opravy exportů (Pohoda:
+> DIČ + evidenční číslo dodavatele + platební VS; ISDOC: `TaxedDeposits`/`AlreadyClaimed`),
+> blokující rozpor v AI extrakci, CLI přepočet. **V provozu: 4 DDKPZ u Alfa Tradeu.** Akceptační
+> kritéria níže byla splněna a rozšířena; detaily v `CUSTOMIZATIONS.md` (3 dávky 2026-07-28).
+> Zbývá jen provozní ověření před nabídnutím upstreamu (po podání KH za 05–07/2026).
+
+Původní zadání karty (ponecháno pro dohledatelnost):
 
 - **Doména:** Nákup / DPH
 - **Persona:** Uživatel 🟡 · Účetní ✅✅
@@ -333,7 +344,58 @@ Vše síťové je navrženo jako volitelný modul s konfigurací.
 
 ---
 
-### N-019 · Rozšíření zadané feature „koš dokladů" (vazba na 0905)
+### N-020 · Dopočet rozdílů pro dodatečné přiznání DPH (§ 141 odst. 2 DŘ) **[NAD]**
+
+> Karta doplněna 28. 7. večer — reaguje na změnu, která nastala až po ranní analýze.
+
+- **Doména:** Daně a účetní
+- **Persona:** Uživatel 🟡 · Účetní ✅✅
+- **Jak je to dnes v MyInvoice:** formy podání pro DP3 byly zúženy na **B/O**; dodatečné formy
+  **D/E jsou vypnuté** (commit 247867e4, `ReportFormParams` + `DphPriznaniBuilder`), protože
+  builder pro ně generoval plné částky období místo rozdílu proti poslední známé dani — uživatel
+  by jedním klikem stáhl věcně špatné XML ve svůj neprospěch. **Následné KH (N/E) funguje**,
+  protože se podává kompletní. Detaily [50_fork_odchylky.md](50_fork_odchylky.md) § 2.2.
+- **Jak to řeší konkurence:** nikdo — Fakturoid výslovně odkazuje na ruční opravu na portálu
+  (https://www.fakturoid.cz/podpora/ucetnictvi/priznani-k-dph), iDoklad a Vyfakturuj to
+  v nápovědě neřeší (❔). Jde tedy o **nadstandard**, ne o dohánění.
+- **Proč to vadí:** oprava chyby v už podaném přiznání je běžná situace (typicky pozdě dodaný
+  doklad); dnes ji účetní musí spočítat ručně a vyplnit na EPO. Zároveň jde o funkci, kterou
+  analýza ráno uváděla jako naši konkurenční výhodu — dokud nebude dopočet hotový, výhoda neplatí.
+- **Návrh řešení:** k období evidovat **poslední známou daň** (archiv podání `tax_submissions`
+  už XML i souhrny obsahuje — dopočítat z posledního řádného/dodatečného podání za totéž období),
+  builder pro D/E plnit **rozdíly** jednotlivých řádků (nová hodnota − poslední známá) a doplnit
+  `d_zjist`. Náhled musí vedle sebe ukázat: poslední známou daň, novou daň a rozdíl, který se
+  odesílá. Bez uzavřeného archivu podání za období formu nenabízet.
+- **Dopad na datový model:** pravděpodobně žádné nové tabulky — využít `tax_submissions`
+  (form_code, období, `summary_json`); případně doplnit sloupec s rozpisem řádků pro rychlé
+  porovnání.
+- **Kam v UI:** stránka DPH přiznání — selectbox „Forma podání" (vrátit volby D/E) + srovnávací
+  panel v náhledu.
+- **Náročnost:** M
+- **Priorita:** **Should** — zákonnou povinnost lze splnit na EPO, takže ne Must; ale je to
+  dluh vzniklý vypnutím funkce a zároveň příležitost mít něco, co nemá nikdo z konkurence.
+- **Rizika a co nerozbít:** nikdy negenerovat D/E bez doloženého předchozího podání; nedotknout
+  se řádných forem B/O ani následného KH; hlídat znaménka rozdílů (záporná daň = vratka);
+  pokrýt testy scénář „dvě dodatečná přiznání po sobě" (druhé se počítá proti prvnímu).
+- **Akceptační kritéria:**
+  - [ ] dodatečné DP3 obsahuje rozdílové částky proti poslední známé dani, ne plné částky období
+  - [ ] náhled ukazuje poslední známou daň, novou daň i odesílaný rozdíl
+  - [ ] bez předchozího podání za období se forma D/E nenabízí
+  - [ ] druhé dodatečné přiznání se počítá proti prvnímu (test)
+  - [ ] řádné formy B/O a následné KH zůstávají beze změny (regresní testy zelené)
+
+---
+
+### N-019 · Rozšíření zadané feature „koš dokladů" (vazba na 0905) — ✅ **HOTOVO 28. 7. 2026**
+
+> **Uzavřeno týž den** (větev `feature/document-trash` → merge a366c167, migrace 0905): koš
+> u vydaných i přijatých dokladů se snapshoty, **retence s výchozími 30 dny + cron výsyp**
+> (doporučení této karty), read-only guard, vyloučení z agregací, hromadné operace, DPH blokace
+> u dokladů už zahrnutých ve výkazech a respektování vazeb DDKPZ v párovací cestě (commit
+> 4507aae8). Manuál 9.7/17.9 „koš vs. storno vs. trvalé smazání". Zbývá provozní ověření
+> před nabídnutím upstreamu.
+
+Původní zadání karty (ponecháno pro dohledatelnost):
 
 - **Doména:** Prodej / Systém
 - **Persona:** Uživatel ✅ · Účetní ✅

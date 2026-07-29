@@ -150,10 +150,15 @@ function runAutoBackfills(\PDO $db, string $binDir): void
         ],
         [
             'name'    => 'purchase-varsymbols',
+            // Koncept interní číslo dostat NESMÍ — přiděluje se až při draft → received
+            // (TransitionPurchaseInvoiceStatusAction). Bez téhle podmínky očísloval
+            // auto-backfill při KAŽDÉM startu kontejneru všechny rozpracované doklady
+            // a spálil jim čísla z řady. Zrcadlí `NOT IN ('cancelled','draft')` u vydaných
+            // faktur v checku exchange-rates výš.
             'reason'  => 'přijaté faktury bez varsymbolu',
             'count'   => "SELECT COUNT(*) FROM purchase_invoices
                            WHERE varsymbol IS NULL
-                             AND status != 'cancelled'",
+                             AND status NOT IN ('cancelled', 'draft')",
             'script'  => 'backfill-purchase-varsymbols.php',
         ],
     ];

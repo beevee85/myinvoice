@@ -3,8 +3,8 @@
 -- `PurchaseSettlementService::link()` přepíše `vat_overrides` konečné faktury na
 -- cíl podle § 37a (rozdíl). Odpojení posledního daňového dokladu k záloze pak
 -- původní rozklad základ/daň nedokáže zrekonstruovat — z hrubé částky vyjde vždy
--- rozklad koeficientem (475 992,00 → 393 381,82 + 82 610,18), i když doklad
--- dodavatele nesl 393 381,83 + 82 610,17 (rekapitulace § 73 z importu).
+-- rozklad koeficientem (111 000,00 → 91 735,53 + 19 264,47), i když doklad
+-- dodavatele nesl 91 735,54 + 19 264,46 (rekapitulace § 73 z importu).
 --
 -- Sloupec drží JSON snapshot `vat_overrides` z okamžiku PRVNÍHO párování
 -- (`{"overrides": <hodnota|null>}` — samotné NULL ve sloupci znamená „žádná
