@@ -19,6 +19,44 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## 2026-07-29 — Dávkový import, Commit 6b: retrospektivní stínová validace nad historií
+
+**Charakter: FORK ANALYTICKÝ NÁSTROJ — výhradně čtení.** Výsledek měření:
+`docs/batch-import/SHADOW-BASELINE.md`.
+
+**Proč:** stínový režim měří jen NOVĚ zakládané doklady, takže na rozhodnutí „vynutit
+validaci i na importní cesty?" by se čekalo týdny a rozhodovalo by se na hrstce dokladů.
+Historie je přitom v databázi celá.
+
+**`api/src/Service/Validation/HistoricalValidationScanner.php`** + tenké CLI
+`api/bin/shadow-validate-existing.php`: rekonstruuje DTO z uložených dokladů a položek,
+pustí nad ním tutéž `PurchaseInvoiceValidation::invoice()` a agreguje nálezy podle
+pravidla, zdroje zápisu, roku a typu dokladu. Výstup tabulkou nebo `--json`.
+
+**Tvrdá pravidla, všechna otestovaná:**
+* **nulový zápis** — ani do databáze, ani do provozní telemetrie (historická dávka by
+  jinak zašuměla měření nových importů). Test porovnává otisk databáze (počty řádků,
+  `MAX(updated_at)`, součet částek) před a po běhu;
+* **offline** — statický test nad zdrojákem *bez komentářů* hlídá, že tam není ARES,
+  VIES, CRPDPH, ČNB, curl ani write service. (Kontrola nad celým souborem napoprvé
+  spadla na vlastním docblocku, kde ta slova stojí v popisu pravidla.);
+* **jen proti klonu** — `TestDatabaseGuard::DEFAULT_PATTERN` rozšířen o segment `clone`
+  (rozšíření V83), skript proti ostré databázi odmítne start.
+
+**Dvě kategorie nálezů,** protože znamenají něco úplně jiného: `legacy_gap` (údaj se
+tehdy nesbíral — úklid historie) vs. `real_mismatch` (uložené hodnoty si protiřečí —
+tohle rozhoduje o vynucení). Neznámé pravidlo spadne konzervativně do `real_mismatch`.
+
+**VÝSLEDEK (62 dokladů produkce):** 95,2 % prošlo, 3 nálezy, z toho **jediný
+`real_mismatch`** — zaplacený dobropis se správnými součty, jehož část řádků je popisná
+(nulové množství i cena). Ověřeno, že to **nejsou** systémové řádky § 37a ani
+zaokrouhlovací řádek. Vynucení pravidla „množství ≠ 0" by tedy dnes odmítlo účetně
+bezvadný doklad — to je konkrétní věc k rozhodnutí, ne obecné riziko.
+
+**Testy:** 2 148 → **2 170 zelených**, asercí 7 394 → **7 443**.
+
+---
+
 ## 2026-07-29 — Dávkový import, Commit 6: stínová validace importních cest (V76)
 
 **Charakter: FORK — přidaná telemetrie, nulový vliv na zápis.** Provozní návod:

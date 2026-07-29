@@ -39,7 +39,10 @@ final class TestDatabaseGuard
      *         myinvoice-test, myinvoice_testing, myinvoice_qa.
      * Neprojde: myinvoice, myinvoice_37a, myinvoice_backup, myinvoice_citace.
      */
-    public const DEFAULT_PATTERN = '/(^|[_\-])(tests?|testing|ci|qa|sandbox)\d*([_\-]|$)/i';
+    // `clone` je tu kvůli read-only analýzám nad kopií produkčních dat
+    // (api/bin/shadow-validate-existing.php) — ty potřebují realistický objem,
+    // ale nesmějí běžet proti ostré databázi.
+    public const DEFAULT_PATTERN = '/(^|[_\-])(tests?|testing|ci|qa|sandbox|clone)\d*([_\-]|$)/i';
 
     /**
      * Značky ostrého provozu. Blokují VŽDY — i když jméno projde vzorem a i když si

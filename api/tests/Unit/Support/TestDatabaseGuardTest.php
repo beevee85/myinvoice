@@ -68,6 +68,9 @@ final class TestDatabaseGuardTest extends TestCase
         // Pomlčka je stejně platná hranice segmentu jako podtržítko.
         yield 'pomlčky'             => ['mi-test-batch',        TestDatabaseGuard::OK];
         yield 'pomlčka na konci'    => ['myinvoice-test',       TestDatabaseGuard::OK];
+        // Klon produkčních dat pro read-only analýzy (shadow-validate-existing.php).
+        yield 'klon'                => ['myinvoice_clone_shadow', TestDatabaseGuard::OK];
+        yield 'klon s číslem'       => ['myinvoice_clone2',     TestDatabaseGuard::OK];
     }
 
     #[DataProvider('databaseNames')]
