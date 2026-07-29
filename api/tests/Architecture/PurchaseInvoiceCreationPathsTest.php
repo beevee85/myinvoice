@@ -29,14 +29,34 @@ final class PurchaseInvoiceCreationPathsTest extends TestCase
      * Cesty, které zakládají doklad ještě po svém. Seznam se smí jen ZKRACOVAT.
      * Až bude prázdný, je pravidlo V77 splněné v celém repu.
      *
+     * ŽÁDNÁ Z NICH NENÍ MECHANICKÝ PŘESUN — ověřeno čtením, ne odhadem. U každé je
+     * níže konkrétní překážka; kdo je bude převádět, ať k ní nejdřív dopíše
+     * charakterizační test (vzor: `Integration/PurchaseInvoice/Characterization/`).
+     *
+     * Vědomá priorita: jsou to dva jednorázové migrační importéry a generátor
+     * záskoku z bankovního výpisu, ne cesty, kudy tečou běžné doklady (ty — ruční
+     * pořízení, AI import a ISDOC — už převedené jsou).
+     *
      * @var list<string>
      */
     private const NOT_YET_CONVERGED = [
-        // Přijatá faktura vzniklá z bankovního výpisu (nespárovaná platba).
+        // Přijatá faktura vzniklá z nespárované platby v bankovním výpisu.
+        // PŘEKÁŽKA: payload předaný do createDraft NEMÁ klíč `items` — položka se
+        // staví až PO něm, protože potřebuje id nulové sazby z dotazu do vat_rates.
+        // `createWithItems()` by tedy zapsal doklad bez položek. Převod = přesun toho
+        // lookupu před createDraft, tedy restrukturalizace, ne přesun.
         'src/Action/Bank/BankStatementAction.php',
+
         // Import z iDokladu — dvě místa (běžný doklad a doklad z dávky).
+        // PŘEKÁŽKA: vnitřní funkce dělá createDraft + PODMÍNĚNÝ replaceItems
+        // (`if (!empty($items))`) a přepočet NEDĚLÁ — ten volá až volající smyčka
+        // (IdokladImportService:547), po nastavení idoklad_id. Převod by přepočet
+        // přidal dovnitř, takže by běžel dvakrát, a musel by se ve stejném kroku
+        // odebrat z volajícího. Dvě místa naráz, bez testů, cesta řízená cizím API.
         'src/Service/Import/IdokladImportService.php',
-        // Import z Fakturoidu.
+
+        // Import z Fakturoidu — táž překážka, přepočet ve volajícím
+        // (FakturoidImportService:389).
         'src/Service/Import/FakturoidImportService.php',
     ];
 

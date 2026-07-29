@@ -49,13 +49,21 @@ Seznam se smí jen zkracovat. Detekce filtruje na `PurchaseInvoiceRepository` v 
 a na jméno property, aby nechytala vydané faktury (iDoklad i Fakturoid mají vedle sebe
 `$this->invoices->createDraft()` pro vydanou stranu).
 
-**ZBÝVAJÍ tři cesty** (v seznamu `NOT_YET_CONVERGED`), všechny **bez charakterizace**,
-takže je nepřevádím bez ní:
-`Action/Bank/BankStatementAction`, `Service/Import/IdokladImportService` (2 místa),
-`Service/Import/FakturoidImportService`. Plus `UpdatePurchaseInvoiceAction`, která doklad
-nezakládá, ale kroky 2–4 opisuje.
-**Past pro jejich převedení:** iDoklad i Fakturoid volají `replaceItems` podmíněně
-(`if (!empty($items))`), služba bezpodmínečně.
+**ZBÝVAJÍ tři cesty** (v seznamu `NOT_YET_CONVERGED`) a **žádná z nich není mechanický
+přesun** — ověřeno čtením, ne odhadem:
+
+| cesta | překážka |
+|---|---|
+| `Action/Bank/BankStatementAction` | payload do `createDraft` **nemá klíč `items`** — položka se staví až po něm, protože potřebuje id nulové sazby z dotazu do `vat_rates`. `createWithItems()` by zapsal doklad bez položek. Převod = restrukturalizace. |
+| `Service/Import/IdokladImportService` (2 místa) | vnitřní funkce dělá `createDraft` + **podmíněný** `replaceItems` a **přepočet nedělá** — ten volá až volající smyčka (`:547`) po nastavení `idoklad_id`. Převod by přepočet přidal dovnitř (běžel by dvakrát) a musel by se ve stejném kroku odebrat z volajícího. |
+| `Service/Import/FakturoidImportService` | táž překážka, přepočet ve volajícím (`:389`). |
+
+Plus `UpdatePurchaseInvoiceAction`, která doklad nezakládá, ale kroky 2–4 opisuje.
+
+**Vědomá priorita:** jsou to dva jednorázové migrační importéry a generátor záskoku
+z bankovního výpisu — ne cesty, kudy tečou běžné doklady. Ty (ruční pořízení, AI import,
+ISDOC/scan-inbox) převedené **jsou**. Rohatka drží linii; převod zbytku patří k okamžiku,
+kdy do těch importérů bude někdo sahat, a vždy s charakterizací napřed.
 
 **Testy:** 2 138 → **2 141 zelených**, asercí 7 350 → **7 359**, skipped beze změny (31).
 Ověřeno, že rohatka i test pořadí sekvence na simulovaných regresích skutečně padají.
