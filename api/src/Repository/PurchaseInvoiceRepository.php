@@ -422,8 +422,8 @@ final class PurchaseInvoiceRepository
     /**
      * Přišpendlí odpočtovým řádkům § 37a hodnoty DOSLOVA dle zdrojového DDKPZ.
      *
-     * Kalkulátor počítá daň řádku ze sazby (16 528,93 × 21 % = 3 471,08), zatímco
-     * doklad k záloze nese daň spočtenou shora z úplaty (20 000 × 21/121 = 3 471,07).
+     * Kalkulátor počítá daň řádku ze sazby (8 264,46 × 21 % = 3 471,08), zatímco
+     * doklad k záloze nese daň spočtenou shora z úplaty (20 000 × 21/121 = 1 735,54).
      * Odpočet musí sedět na doklad dodavatele (§ 37a pracuje se skutečně přiznanými
      * hodnotami), proto se řádku hodnoty nastaví napevno.
      *

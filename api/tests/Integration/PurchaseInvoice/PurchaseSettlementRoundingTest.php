@@ -25,10 +25,10 @@ use PHPUnit\Framework\TestCase;
  * rekapitulace faktury se pak rozešla s dokladem o 0,01 Kč a při opakovaném
  * unlink/link se haléře KUMULOVALY.
  *
- * Scénář (reálný případ TUkas a.s. / nákup vozu, 2026):
- *   faktura   500 600,00 = základ 413 719,01 + DPH 86 880,99
- *   DDKPZ #1   50 000,00 = základ  41 322,31 + DPH  8 677,69
- *   DDKPZ #2  450 600,00 = základ 372 396,69 + DPH 78 203,31  (shora, zdola by vyšlo 78 203,30)
+ * Scénář (reálný případ Autosalon Gama a.s. / nákup vozu, 2026):
+ *   faktura   111 000,00 = základ 91 735,54 + DPH 19 264,46
+ *   DDKPZ #1   50 000,00 = základ  8 264,46 + DPH  1 735,54
+ *   DDKPZ #2  101 000,00 = základ 83 471,07 + DPH 17 528,93  (shora, zdola by vyšlo 17 528,92)
  *   → rozdíl § 37a: základ +0,01 / daň −0,01, HRUBÝ rozdíl 0,00
  *
  * Izolováno v roce 2097 pod existujícím supplierem, vše uklizeno v tearDown.
@@ -109,22 +109,22 @@ final class PurchaseSettlementRoundingTest extends TestCase
 
         // výchozí stav = doklad dodavatele
         $s = $this->sums($final);
-        self::assertEqualsWithDelta(413719.01, $s['taxable_base'], 0.005);
-        self::assertEqualsWithDelta(86880.99, $s['taxable_vat'], 0.005);
+        self::assertEqualsWithDelta(91735.54, $s['taxable_base'], 0.005);
+        self::assertEqualsWithDelta(19264.46, $s['taxable_vat'], 0.005);
 
         $this->settlement->link($final, $doc1, $this->supplierId, true);
         $this->settlement->link($final, $doc2, $this->supplierId, true);
 
         $s = $this->sums($final);
 
-        self::assertEqualsWithDelta(413719.01, $s['taxable_base'], 0.005,
+        self::assertEqualsWithDelta(91735.54, $s['taxable_base'], 0.005,
             'Základ zdanitelných řádků musí zůstat dle dokladu dodavatele (§ 73).');
-        self::assertEqualsWithDelta(86880.99, $s['taxable_vat'], 0.005,
+        self::assertEqualsWithDelta(19264.46, $s['taxable_vat'], 0.005,
             'DPH zdanitelných řádků musí zůstat dle dokladu dodavatele — haléř nesmí skončit na nich.');
 
-        self::assertEqualsWithDelta(-413719.00, $s['deduction_base'], 0.005,
+        self::assertEqualsWithDelta(-91735.53, $s['deduction_base'], 0.005,
             'Odpočtové řádky doslova dle DDKPZ.');
-        self::assertEqualsWithDelta(-86881.00, $s['deduction_vat'], 0.005,
+        self::assertEqualsWithDelta(-19264.47, $s['deduction_vat'], 0.005,
             'Odpočtové řádky doslova dle DDKPZ.');
 
         self::assertEqualsWithDelta(-0.01, $s['rounding_base'], 0.005,
@@ -155,9 +155,9 @@ final class PurchaseSettlementRoundingTest extends TestCase
             $this->settlement->unlink($final, $doc1, $this->supplierId);
 
             $afterUnlink = $this->sums($final);
-            self::assertEqualsWithDelta(413719.01, $afterUnlink['taxable_base'], 0.005,
+            self::assertEqualsWithDelta(91735.54, $afterUnlink['taxable_base'], 0.005,
                 "Cyklus {$i}: po odpojení musí zdanitelné řádky pořád sedět na doklad.");
-            self::assertEqualsWithDelta(86880.99, $afterUnlink['taxable_vat'], 0.005,
+            self::assertEqualsWithDelta(19264.46, $afterUnlink['taxable_vat'], 0.005,
                 "Cyklus {$i}: po odpojení musí zdanitelné řádky pořád sedět na doklad.");
 
             $this->settlement->link($final, $doc1, $this->supplierId, true);
@@ -183,25 +183,25 @@ final class PurchaseSettlementRoundingTest extends TestCase
         $vendor = $this->vendor('Dodavatel § 37a ' . $dic, $dic);
 
         // Konečná faktura — dvojice řádků dá přesně rekapitulaci dokladu
-        // (366 942,15 + 46 776,86 = 413 719,01; 77 057,85 + 9 823,14 = 86 880,99).
+        // (80 000,00 + 46 776,86 = 91 735,54; 16 800,00 + 9 823,14 = 19 264,46).
         $final = $this->draft($vendor, 'invoice', 'FA-' . $dic, [
-            ['description' => 'Vůz', 'unit_price_without_vat' => 366942.15],
-            ['description' => 'Výbava', 'unit_price_without_vat' => 46776.86],
+            ['description' => 'Vůz', 'unit_price_without_vat' => 80000.00],
+            ['description' => 'Výbava', 'unit_price_without_vat' => 11735.54],
         ]);
 
-        // DDKPZ #1 — dopočet zdola i shora dá shodně 8 677,69, override netřeba.
+        // DDKPZ #1 — dopočet zdola i shora dá shodně 1 735,54, override netřeba.
         $doc1 = $this->draft($vendor, 'tax_document', 'ZD-1-' . $dic, [
-            ['description' => 'Záloha 1', 'unit_price_without_vat' => 41322.31],
+            ['description' => 'Záloha 1', 'unit_price_without_vat' => 8264.46],
         ]);
 
-        // DDKPZ #2 — doklad uvádí 78 203,31 (shora z 450 600), kdežto dopočet zdola
-        // dá 78 203,30. Rekapitulace dle dokladu se drží přes vat_overrides (§ 73),
+        // DDKPZ #2 — doklad uvádí 17 528,93 (shora z 101 000), kdežto dopočet zdola
+        // dá 17 528,92. Rekapitulace dle dokladu se drží přes vat_overrides (§ 73),
         // stejně jako to dělá PurchaseVatRecapSeeder při importu.
         $doc2 = $this->draft($vendor, 'tax_document', 'ZD-2-' . $dic, [
-            ['description' => 'Záloha 2', 'unit_price_without_vat' => 372396.69],
+            ['description' => 'Záloha 2', 'unit_price_without_vat' => 83471.07],
         ]);
         $this->repo->setVatOverrides($doc2, $this->supplierId, [
-            ['rate' => 21.0, 'base' => 372396.69, 'vat' => 78203.31],
+            ['rate' => 21.0, 'base' => 83471.07, 'vat' => 17528.93],
         ]);
         $this->calc->recompute($doc2);
 

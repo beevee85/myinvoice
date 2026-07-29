@@ -12,7 +12,7 @@ včetně databáze instance) s veřejnými nápovědami iDokladu, Vyfakturuj a F
 > straně vč. § 37a, 4 doklady už v provozu) a **N-019** (koš dokladů s retencí 30 dní);
 > **(3)** dodatečná přiznání DP3 (formy D/E) byla vypnuta, protože generovala plné částky místo
 > rozdílů dle § 141/2 DŘ — **přestala tedy platit jedna z ranních konkurenčních výhod** a vznikl
-> nový návrh **N-020**. Adopce (banka, ceník, účet účetní, `vat_period` BEKRONu) se nezměnila.
+> nový návrh **N-020**. Adopce (banka, ceník, účet účetní, `vat_period` Alfa Tradeu) se nezměnila.
 
 ## Tři hlavní zjištění
 
@@ -49,7 +49,7 @@ a DPFO výpočet jsou pro tvoje dvě s.r.o. irelevantní (N-016 = Won't).
 
 | # | Návrh | Proč právě tohle | Náročnost |
 |---|---|---|---|
-| 1 | **N-001 Adopce hotových funkcí** (banka, ceník, účet účetní, vat_period BEKRON) | Nula kódu, odblokuje persony A i B; bez toho nemá smysl stavět dál | S |
+| 1 | **N-001 Adopce hotových funkcí** (banka, ceník, účet účetní, vat_period Alfa Trade) | Nula kódu, odblokuje persony A i B; bez toho nemá smysl stavět dál | S |
 | 2 | **N-002 Auto DDKPZ + hlídání 15denní lhůty** (vydaná strana) | Jediná legislativní mezera; konkurence ji má celá vyřešenou | M |
 | 3 | **N-003 Fio banka** (avíza hned, API pak) | Nejbolestivější třecí místo cyklu (ruční platby); matching aparát už existuje | S+M |
 | ~~4~~ | ~~**N-008 DDKPZ přijatá strana**~~ | ✅ ⟳ **HOTOVO 28. 7.** — tři dávky, migrace 0904/0906–0911, 4 doklady v provozu | — |

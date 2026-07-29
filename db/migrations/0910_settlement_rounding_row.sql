@@ -1,9 +1,9 @@
 -- MyInvoice.cz (fork) — zaokrouhlovací řádek § 37a
 --
 -- Rozpis faktury dodavatele a rozpisy daňových dokladů k záloze se mohou lišit
--- o haléř (každý doklad zaokrouhluje po svých řádcích): FV15260816 nese
--- 393 381,83 + 82 610,17, oba DDKPZ dohromady 393 381,82 + 82 610,18 — obojí
--- hrubě 475 992,00. Dosud se rozdíl „rozpouštěl" do zdanitelných položek
+-- o haléř (každý doklad zaokrouhluje po svých řádcích): FV200000001 nese
+-- 91 735,54 + 19 264,46, oba DDKPZ dohromady 91 735,53 + 19 264,47 — obojí
+-- hrubě 111 000,00. Dosud se rozdíl „rozpouštěl" do zdanitelných položek
 -- (444 000,00 se zobrazilo jako 443 999,99), takže se doklad rozcházel s PDF.
 --
 -- Nově zůstávají VŠECHNY řádky přesně podle dokladů (faktura dle PDF, odpočty

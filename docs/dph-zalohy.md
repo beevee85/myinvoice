@@ -269,21 +269,21 @@ DifferenceTaxableAmount    = rozdíl podle § 37a  (obdobně TaxAmount / TaxIncl
 ```
 
 Náš export konečné faktury s plně zúčtovanou zálohou tedy vypadá takto
-(předpis 393 381,82 + 82 610,18, zálohy tytéž, rozdíl nula):
+(předpis 91 735,53 + 19 264,47, zálohy tytéž, rozdíl nula):
 
 ```xml
 <TaxedDeposits>
-  <TaxedDeposit><ID>ZD915260089</ID><VariableSymbol>815260087</VariableSymbol>
-    <TaxableDepositAmount>16528.93</TaxableDepositAmount>
+  <TaxedDeposit><ID>ZD200000001</ID><VariableSymbol>815260087</VariableSymbol>
+    <TaxableDepositAmount>8264.46</TaxableDepositAmount>
     <TaxInclusiveDepositAmount>20000.00</TaxInclusiveDepositAmount>
     <ClassifiedTaxCategory><Percent>21.00</Percent><VATCalculationMethod>0</VATCalculationMethod></ClassifiedTaxCategory>
   </TaxedDeposit>
   …
 </TaxedDeposits>
 <TaxSubTotal>
-  <TaxableAmount>393381.82</TaxableAmount><TaxAmount>82610.18</TaxAmount>
-  <AlreadyClaimedTaxableAmount>393381.82</AlreadyClaimedTaxableAmount>
-  <AlreadyClaimedTaxAmount>82610.18</AlreadyClaimedTaxAmount>
+  <TaxableAmount>91735.53</TaxableAmount><TaxAmount>19264.47</TaxAmount>
+  <AlreadyClaimedTaxableAmount>91735.53</AlreadyClaimedTaxableAmount>
+  <AlreadyClaimedTaxAmount>19264.47</AlreadyClaimedTaxAmount>
   <DifferenceTaxableAmount>0.00</DifferenceTaxableAmount><DifferenceTaxAmount>0.00</DifferenceTaxAmount>
 </TaxSubTotal>
 ```
@@ -305,7 +305,7 @@ samé nuly. Zálohové faktury se exportují jako `receivedAdvanceInvoice`.
 | Pole v XML | Význam pro KH | Stav |
 |---|---|---|
 | `typ:partnerIdentity/typ:dic` | bez DIČ dodavatele nelze doklad zařadit do **B.2** — spadl by do souhrnného **B.3** | doplňuje se z karty dodavatele, i když ho snapshot dokladu nemá |
-| `inv:originalDocument` | pole „Doklad" = zdroj **evidenčního čísla daňového dokladu** pro B.2 | posílá se číslo dokladu dodavatele (ZD915260089) |
+| `inv:originalDocument` | pole „Doklad" = zdroj **evidenčního čísla daňového dokladu** pro B.2 | posílá se číslo dokladu dodavatele (ZD200000001) |
 | `inv:symVar` | variabilní symbol platby (likvidace úhrad) | u přijatých se posílá **platební VS**, ne naše interní číslo |
 | `typ:priceHigh` / `priceHighVAT` | základ a daň v 21% pásmu | dle dokladu |
 
@@ -321,8 +321,8 @@ platební stranu ([Stormware FAQ 2895](https://www.stormware.cz/podpora/faq/poho
 
 ### Praktická past při ručním pořízení DDKPZ
 
-Kalkulátor počítá daň řádku ze sazby (16 528,93 × 21 % = **3 471,08**), doklad
-dodavatele ale nese daň spočtenou shora z úplaty (20 000 × 21/121 = **3 471,07**).
+Kalkulátor počítá daň řádku ze sazby (8 264,46 × 21 % = **3 471,08**), doklad
+dodavatele ale nese daň spočtenou shora z úplaty (20 000 × 21/121 = **1 735,54**).
 Rozdíl haléře by se objevil v KH proti údaji dodavatele a rozbil párování na
 finanční správě. Systém proto u DDKPZ používá rekapitulaci dle dokladu
 (`vat_overrides`, § 73) a při párování § 37a přišpendlí odpočtovým řádkům

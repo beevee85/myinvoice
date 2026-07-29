@@ -1793,7 +1793,7 @@ final class KhDphTaxScenariosTest extends TestCase
     }
 
     /**
-     * BOD 1 (2026-07-28) — § 37a na úrovni SOUČTŮ dokladu (reálný případ FV15260816):
+     * BOD 1 (2026-07-28) — § 37a na úrovni SOUČTŮ dokladu (reálný případ FV200000001):
      * kladné řádky vč. slevy dealera v mínusu dají po řádkovém zaokrouhlení
      * 393 381,83 + 82 610,17 (hrubě přesně 475 992,00); DDKPZ nesou doslova
      * 393 381,82 + 82 610,18. Rozdíl dvou nezávisle zaokrouhlených řad by dal
@@ -2004,7 +2004,7 @@ final class KhDphTaxScenariosTest extends TestCase
         $svc = $container->get(\MyInvoice\Service\Invoice\PurchaseSettlementService::class);
         $vendor = $this->client('CZ dodavatel — zaokrouhlení', $this->czId, 'CZ699003841', vendor: true);
         $d = sprintf('%04d-%02d-19', self::YEAR, self::MONTH);
-        // Řádky přesně dle PDF FV15260816 (brutto 444 000 / 13 800 / 6 600 / 2 700 /
+        // Řádky přesně dle PDF FV200000001 (brutto 444 000 / 13 800 / 6 600 / 2 700 /
         // 5 300 / 8 400 / −4 808) — jejich součet daní je 82 610,17.
         $this->purchase('FV-ROUND', $vendor, '40', false, 'invoice', $d, $d, [
             [366942.15, 77057.85, 21.0],

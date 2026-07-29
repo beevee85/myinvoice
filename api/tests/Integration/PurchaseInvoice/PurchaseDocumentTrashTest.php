@@ -158,7 +158,7 @@ final class PurchaseDocumentTrashTest extends TestCase
 
     public function testCancelledDocumentCanBeTrashedAndForceDeleted(): void
     {
-        // Přesně scénář BEKRON/Tichý: stornovaný doklad dřív nešel smazat vůbec.
+        // Přesně scénář Alfa Trade/Tichý: stornovaný doklad dřív nešel smazat vůbec.
         $id = $this->insertPurchase('cancelled', 'TRPF2098001');
         $resp = $this->trash($id);
         self::assertSame(200, $resp->getStatusCode(), (string) $resp->getBody());

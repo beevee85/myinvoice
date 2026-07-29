@@ -17,14 +17,14 @@ Vše síťové je navrženo jako volitelný modul s konfigurací.
 - **Persona:** Uživatel ✅✅ · Účetní ✅✅
 - **Jak je to dnes v MyInvoice:** instance nevyužívá hotové funkce: banka (0 výpisů, 0 avíz),
   ceník (0 položek), pravidelné fakturace (0), e-mailové odesílací profily (0), účet pro účetní
-  (žádný `accountant`/`readonly` uživatel), kategorie nákladů/tržeb (0); BEKRON nemá vyplněné
+  (žádný `accountant`/`readonly` uživatel), kategorie nákladů/tržeb (0); Alfa Trade nemá vyplněné
   zdaňovací období DPH, EUR měna nemá účet. Zdroj: DB instance, viz [50_fork_odchylky.md](50_fork_odchylky.md) § 5.
 - **Jak to řeší konkurence:** SaaS konkurence tenhle problém řeší onboardingem (Fakturoid
   „Objevte": https://www.fakturoid.cz/podpora/nastaveni/obrazovka-objevte) — u nás to krátkodobě
   nahradí ruční konfigurační seance.
 - **Proč to vadí:** největší část gapu vůči konkurenci je „vypnuto", ne „neexistuje" — ruční
   párování plateb, ruční psaní položek, účetní bez přístupu.
-- **Návrh řešení:** konfigurační seance (žádný kód): 1) doplnit `vat_period` BEKRON; 2) založit
+- **Návrh řešení:** konfigurační seance (žádný kód): 1) doplnit `vat_period` Alfa Trade; 2) založit
   účet účetní (role accountant + omezení na firmy dle dohody); 3) zapnout příjem výpisů Fio
   (GPC upload, do doby N-003); 4) naplnit ceník opakovanými položkami obou firem; 5) založit
   šablony pravidelné fakturace, kde dává smysl; 6) zvážit zapnutí poděkování za platbu;
@@ -36,7 +36,7 @@ Vše síťové je navrženo jako volitelný modul s konfigurací.
 - **Rizika a co nerozbít:** přístup účetní omezit na správné firmy (`user_supplier_access`);
   u výpisů nezapomenout na formát Fio GPC.
 - **Akceptační kritéria:**
-  - [ ] BEKRON má vyplněné zdaňovací období a kompletní EPO identitu
+  - [ ] Alfa Trade má vyplněné zdaňovací období a kompletní EPO identitu
   - [ ] existuje aktivní účet role `accountant` s omezením na dohodnuté firmy a zapnutým 2FA
   - [ ] v Bance je aspoň jeden naimportovaný výpis a spárovaná platba
   - [ ] ceník obsahuje aspoň 5 reálně používaných položek na firmu
@@ -132,7 +132,7 @@ Vše síťové je navrženo jako volitelný modul s konfigurací.
 > zaokrouhlením (viditelný řádek „Zaokrouhlení § 37a"), sazba CZ-NA „Mimo DPH" pro zálohy mimo
 > výkazy, invariant znamének, vyloučení záloh z nákladových agregací, opravy exportů (Pohoda:
 > DIČ + evidenční číslo dodavatele + platební VS; ISDOC: `TaxedDeposits`/`AlreadyClaimed`),
-> blokující rozpor v AI extrakci, CLI přepočet. **V provozu: 4 DDKPZ u BEKRONu.** Akceptační
+> blokující rozpor v AI extrakci, CLI přepočet. **V provozu: 4 DDKPZ u Alfa Tradeu.** Akceptační
 > kritéria níže byla splněna a rozšířena; detaily v `CUSTOMIZATIONS.md` (3 dávky 2026-07-28).
 > Zbývá jen provozní ověření před nabídnutím upstreamu (po podání KH za 05–07/2026).
 
