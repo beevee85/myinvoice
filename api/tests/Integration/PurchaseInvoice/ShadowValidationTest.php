@@ -165,6 +165,50 @@ final class ShadowValidationTest extends PurchaseInvoiceCharacterizationCase
         self::assertStringContainsString('purchase_invoice_id', $serialized);
     }
 
+    /**
+     * MEZERA, kterou by posun záznamu za zápis jinak vyrobil: doklad, který kromě
+     * validace neprošel ani zápisem, je pro rozhodnutí o vynucení ten NEJZAJÍMAVĚJŠÍ —
+     * a přitom by po sobě nenechal stopu. Loguje se tedy i on, jen s `purchase_invoice_id: null`.
+     */
+    public function testFindingIsRecordedEvenWhenWriteFails(): void
+    {
+        $before  = $this->countInvoices();
+        $payload = $this->invalidPayload('SHADOW-FAIL-001');
+        // Neexistující sazba shodí zápis na FK fk_pii_vat — a zároveň je sama nálezem.
+        $payload['items'][0]['vat_rate_id'] = (int) $this->db->pdo()
+            ->query('SELECT MAX(id) + 1000 FROM vat_rates')->fetchColumn();
+
+        try {
+            $this->writer()->createWithItems($payload, $this->userId, $this->supplierId, 'ai_pdf');
+            self::fail('Zápis měl selhat na FK.');
+        } catch (\PDOException) {
+            // očekáváno
+        }
+
+        // Transakce doklad vrátila…
+        self::assertSame($before, $this->countInvoices(), 'Po neúspěšném zápisu zůstal doklad v DB.');
+
+        // …ale nález se zaznamenal, jinak by měření podhodnocovalo problémové doklady.
+        $findings = $this->findings();
+        self::assertCount(1, $findings, 'Nezapsaný doklad telemetrii nezanechal.');
+        self::assertNull($findings[0]['purchase_invoice_id'], 'Doklad nevznikl, id musí být null.');
+        self::assertTrue($findings[0]['write_failed']);
+        self::assertSame('ai_pdf', $findings[0]['source']);
+        self::assertContains('items.*.vat_rate_id', $findings[0]['rules']);
+    }
+
+    /** Úspěšný zápis se naopak označí jako nezhavarovaný a nese id dokladu. */
+    public function testSuccessfulWriteIsMarkedAsNotFailed(): void
+    {
+        $id = $this->trackInvoice(
+            $this->writer()->createWithItems($this->invalidPayload('SHADOW-OKWRITE-001'), $this->userId, $this->supplierId, 'isdoc')
+        );
+
+        $findings = $this->findings();
+        self::assertFalse($findings[0]['write_failed']);
+        self::assertSame($id, $findings[0]['purchase_invoice_id']);
+    }
+
     /** Čistá data nesmí do logu zapsat nic — jinak by se v šumu nálezy ztratily. */
     public function testValidDataProducesNoFinding(): void
     {

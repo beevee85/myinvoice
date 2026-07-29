@@ -13,17 +13,17 @@ dodavatelích ani částky.
 | | |
 |---|---:|
 | dokladů prověřeno | **62** |
-| prošlo | **59** (95,2 %) |
-| nálezy | **3** (4,8 %) |
+| prošlo | **60** (96,8 %) |
+| nálezy | **2** (3,2 %) |
 | — z toho `legacy_gap` (údaj se tehdy nesbíral) | 2 |
-| — z toho **`real_mismatch`** (hodnoty si protiřečí) | **1** |
+| — z toho **`real_mismatch`** (hodnoty si protiřečí) | **0** |
+| popisných řádků (legitimní dle V43b) | 4 |
 
 ## Podle pravidla
 
 | pravidlo | nálezů | kategorie |
 |---|---:|---|
 | `items.*.description` | 2 | `legacy_gap` |
-| `items.*.quantity` | 1 | `real_mismatch` |
 
 ## Podle zdroje zápisu
 
@@ -31,7 +31,7 @@ Heuristika, viz limity v `SHADOW-VALIDATION.md`.
 
 | zdroj | dokladů | nálezů | podíl |
 |---|---:|---:|---:|
-| `ai_pdf` | 50 | 1 | 2,0 % |
+| `ai_pdf` | 50 | 0 | 0,0 % |
 | `isdoc` | 6 | 2 | 33,3 % |
 | `ai_pdf` nebo ruční s PDF | 6 | 0 | 0,0 % |
 
@@ -42,7 +42,7 @@ Heuristika, viz limity v `SHADOW-VALIDATION.md`.
 | `invoice` | 38 | 2 | 5,3 % |
 | `advance` | 19 | 0 | 0,0 % |
 | `tax_document` | 4 | 0 | 0,0 % |
-| `credit_note` | 1 | 1 | 100,0 % |
+| `credit_note` | 1 | 0 | 0,0 % |
 
 Všechny doklady jsou z roku 2026 (instance běží od jara 2026).
 
@@ -50,44 +50,52 @@ Všechny doklady jsou z roku 2026 (instance běží od jara 2026).
 
 ## Co z toho plyne
 
-**Vynucení validace na importní cesty je reálné, ale ne bez jedné úpravy pravidla.**
+**V historii není ani jeden skutečný rozpor** — po přepsání V43 (viz níže) zůstávají
+jen dva prázdné popisy položek, tedy úklid, ne překážka.
 
-Rozpad je příznivější, než se čekalo: 95 % historie by prošlo beze změny a jediný
-`real_mismatch` v celé databázi má **jednu konkrétní příčinu**, ne systémovou vadu dat.
+### Jak se z jednoho `real_mismatch` stala nula
 
-### Ten jediný skutečný rozpor
+První měření našlo jediný `real_mismatch`: **zaplacený dobropis, jehož součty jsou
+v pořádku**, ale část řádků má nulové množství i cenu a celou částku nese jeden řádek.
+Ověřeno, že to **nejsou** systémové řádky vyúčtování zálohy podle § 37a ani zaokrouhlovací
+řádek (`is_settlement_rounding = 0`, `settlement_source_purchase_invoice_id IS NULL`) —
+bez toho ověření by závěr byl jen domněnka.
 
-Jde o **zaplacený dobropis, jehož součty jsou v pořádku**. Část jeho řádků je popisná —
-mají nulové množství i nulovou cenu a celou částku nese jeden řádek. Ověřeno, že to
-**nejsou** systémové řádky vyúčtování zálohy podle § 37a ani zaokrouhlovací řádek
-(`is_settlement_rounding = 0`, `settlement_source_purchase_invoice_id IS NULL`).
+Ukázalo se, že chyba nebyla v datech, ale **v pravidle**. Původní V43 („quantity > 0")
+byla napsaná příliš hrubě: textové řádky na dokladu jsou normální věc a rozhodující není
+nulové množství, ale **jestli řádek tvrdí, že něco stojí**. V43 proto bylo přepsáno na
+V43/V43b–V43e (`docs/batch-import/PLAN.md`, sekce 13) a skener podle nové definice
+klasifikuje. Ty čtyři řádky jsou teď legitimní `text_line` a doklad prochází.
 
-Pravidlo `InvoiceAmountPolicy::validateItem` ale nulové množství odmítá
-(„Množství nesmí být 0."). Kdyby se validace na importy vynutila v dnešní podobě,
-**odmítla by účetně bezvadný doklad** jen proto, že extrakce vyrobila popisné řádky.
+**Kdyby se tohle neodhalilo, vynucení validace by odmítalo účetně bezvadné doklady.**
+To je přesně ten důvod, proč stínový režim existuje.
 
 ### Ty dva `legacy_gap`
 
 Dvě položky s prázdným popisem na běžných fakturách — typický import bez textu položky.
-Úklid historie, ne důvod odkládat vynucení.
+Prázdný popis u **peněžního** řádku zůstává nálezem právem; jde doplnit ručně.
 
 ### Doporučení
 
-1. **Nejdřív rozhodnout osud popisných řádků.** Buď je importní cesty nemají vůbec tvořit
-   (slučovat je do popisu nosného řádku), nebo je pravidlo „množství ≠ 0" musí pro
-   nulové řádky bez ceny připustit. Rozhodnout by měla účetní — z hlediska DPH je
-   nulový řádek neškodný, z hlediska čitelnosti dokladu může být užitečný.
-2. **Pak vynutit.** Po té úpravě by dnešní historie prošla na 100 % kromě dvou prázdných
-   popisů, které jde doplnit ručně.
-3. **`isdoc` má nejvyšší podíl nálezů** (33 %), ale na 6 dokladech — statisticky
+1. **Vynucení ještě nezapínat.** Ne kvůli číslům — ta jsou příznivá — ale proto, že
+   62 dokladů neukázalo dost *různých* režimů selhání. Hodnota stínového režimu je v tom,
+   že vyjmenuje způsoby, jak se to rozbije, ne že spočítá poměr. Rozhodnutí patří až za
+   dokončený doménový validátor, kdy bude v ruce reálný katalog nálezů.
+2. **Nechat běžet.** Z nových importů se mezitím nabírá materiál bez rizika.
+3. **Přepsat `InvoiceAmountPolicy::validateItem` podle V43b** — ale až s doménovým
+   validátorem, je to změna chování ruční cesty a zaslouží si vlastní commit.
+4. **`isdoc` má nejvyšší podíl nálezů** (33 %), ale na 6 dokladech — statisticky
    bezcenné. Znovu změřit, až jich bude víc.
 
 ---
 
 ## Poznámky k platnosti měření
 
-* **Malý vzorek.** 62 dokladů je málo na procenta; čísla berte jako indikaci, ne statistiku.
-  Skript se dá pustit znovu kdykoli, náklad je nulový (běh trvá setiny sekundy).
+* **Malý vzorek — a nejde jen o procenta.** 62 dokladů je málo hlavně proto, že to
+  neukázalo dost různých režimů selhání. Skript se dá pustit znovu kdykoli, náklad je
+  nulový (běh trvá setiny sekundy).
+* **Skener klasifikuje podle V43b, produkční validátor zatím ne.** Analýza tedy ukazuje
+  stav podle dohodnutého pravidla; vynucení se nezměnilo.
 * **Neměří všechno.** Katalog V1–V86 je širší než `PurchaseInvoiceValidation`. Nevyhodnocené
   skupiny se hlásí ve výstupu výslovně:
   * `V1–V8, V33–V35` → `no_source_document` (integrita souboru a QR jen nad původní dávkou),

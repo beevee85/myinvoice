@@ -37,6 +37,21 @@ takže je to jiná bezpečnostní zóna než databáze. Hlídá to test
 
 Konkrétní hodnoty se dohledávají přes `purchase_invoice_id` v databázi, kam patří.
 
+### Odkud se nálezy počítají
+
+**Validace běží nad DTO PŘED zápisem, ne nad tím, co se z databáze přečte zpátky.**
+Tahle věta je tu schválně natvrdo, protože jsou to dvě různá měření a za rok je snadné
+je zaměnit: měření po zápisu by chytalo navíc zaokrouhlení a normalizaci při ukládání,
+což je jiná otázka než „prošel by tenhle vstup validací?".
+
+### Doklady, které zápisem neprošly
+
+Zaznamenávají se **taky** — s `purchase_invoice_id: null` a `write_failed: true`.
+Kdyby se logovalo jen po úspěšném zápisu, měření by systematicky vynechávalo právě ty
+nejzajímavější doklady: ty, které kromě validace neprošly ani zápisem. Když je
+k dispozici `import_batch_id`, přidá se jako jediná stopa, podle které jde takový
+nález dohledat.
+
 ## 3. Jak číst výsledky
 
 **Kolik nálezů celkem** (za dobu, co sahá rotace logu):

@@ -10,6 +10,7 @@ use MyInvoice\Service\Invoice\PurchaseInvoiceWriteService;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Tests\Support\CollectingLogger;
+use MyInvoice\Tests\Support\NetworkBlockingStreamWrapper;
 use MyInvoice\Tests\Support\PurchaseInvoiceCharacterizationCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
@@ -132,6 +133,33 @@ final class HistoricalValidationScannerTest extends PurchaseInvoiceCharacterizat
         );
     }
 
+    /**
+     * RUNTIME pojistka k té statické: skener poběží s odstřiženými `http`/`https`
+     * streamy. Statická analýza obejde každý refaktor, který volání schová do helperu
+     * nebo si název sestaví dynamicky — tohle projde skutečným během.
+     *
+     * Test nejdřív ověří, že je zámek vůbec ozbrojený (jinak by nic nedokazoval).
+     */
+    public function testScannerRunsWithNetworkDisabled(): void
+    {
+        $this->writeInvoice('HIST-OFFLINE-001', [$this->validItem()]);
+
+        $report = NetworkBlockingStreamWrapper::assertOffline(function (): array {
+            // Sanity: zámek musí být ozbrojený, jinak je zbytek testu bezcenný.
+            $armed = false;
+            try {
+                @file_get_contents('http://example.invalid/probe');
+            } catch (\RuntimeException) {
+                $armed = true;
+            }
+            self::assertTrue($armed, 'Blokace sítě se neaktivovala — test by nic nedokazoval.');
+
+            return $this->scanner->scan($this->supplierId);
+        });
+
+        self::assertGreaterThan(0, $report['scanned'], 'Skener s odstřiženou sítí nedoběhl.');
+    }
+
     /** Zdrojový kód bez komentářů — hlídáme, co se provádí, ne co je v dokumentaci. */
     private static function codeWithoutComments(string $path): string
     {
@@ -195,6 +223,79 @@ final class HistoricalValidationScannerTest extends PurchaseInvoiceCharacterizat
         // Prázdný popis je úklid historie, nulové množství je skutečný rozpor.
         self::assertGreaterThan(0, $report['by_category'][HistoricalValidationScanner::LEGACY_GAP]);
         self::assertGreaterThan(0, $report['by_category'][HistoricalValidationScanner::REAL_MISMATCH]);
+    }
+
+    // ------------------------------------------------- delta katalogu V43b / V43c / V43d
+
+    /**
+     * V43b: popisný řádek (nulové množství I cena, neprázdný popis) je legitimní.
+     * Odhaleno na reálném dobropisu, který měl správné součty a jen popisné řádky navíc —
+     * původní pravidlo „quantity > 0" by ho odmítlo.
+     */
+    public function testTextLineIsLegitimateAndNotAFinding(): void
+    {
+        $this->writeInvoice('HIST-TEXT-001', [
+            $this->validItem(),
+            ['description' => 'Fakturujeme vám na základě objednávky', 'quantity' => 0, 'unit' => 'ks',
+             'unit_price_without_vat' => 0, 'vat_rate_id' => $this->vatRateId('CZ-21'), 'order_index' => 1],
+        ]);
+
+        $report = $this->scanner->scan($this->supplierId);
+
+        self::assertSame(0, $report['failed'], 'Popisný řádek se pořád počítá jako nález.');
+        self::assertSame(1, $report['text_lines'], 'Popisný řádek se nezapočítal.');
+        self::assertArrayNotHasKey('items.*.quantity', $report['by_rule']);
+    }
+
+    /** V43b druhá půlka: nulový řádek BEZ popisu není popis, ale ztracená extrakce. */
+    public function testZeroLineWithoutDescriptionStaysAFinding(): void
+    {
+        $this->writeInvoice('HIST-TEXT-002', [
+            $this->validItem(),
+            ['description' => '', 'quantity' => 0, 'unit' => 'ks',
+             'unit_price_without_vat' => 0, 'vat_rate_id' => $this->vatRateId('CZ-21'), 'order_index' => 1],
+        ]);
+
+        $report = $this->scanner->scan($this->supplierId);
+
+        self::assertGreaterThan(0, $report['failed']);
+        self::assertArrayHasKey('items.*.description', $report['by_rule']);
+        self::assertSame(0, $report['text_lines'], 'Řádek bez popisu se započítal jako popisný.');
+    }
+
+    /** V43c: nulové množství, ale nenulová cena — řádek tvrdí, že něco stojí. Skutečná chyba. */
+    public function testZeroQuantityWithPriceStaysAFinding(): void
+    {
+        $this->writeInvoice('HIST-TEXT-003', [
+            $this->validItem(),
+            ['description' => 'Něco za peníze', 'quantity' => 0, 'unit' => 'ks',
+             'unit_price_without_vat' => 250, 'vat_rate_id' => $this->vatRateId('CZ-21'), 'order_index' => 1],
+        ]);
+
+        $report = $this->scanner->scan($this->supplierId);
+
+        self::assertArrayHasKey('items.*.quantity', $report['by_rule']);
+        self::assertSame(
+            HistoricalValidationScanner::REAL_MISMATCH,
+            HistoricalValidationScanner::categoryOf('items.*.quantity'),
+        );
+    }
+
+    /** V43d: doklad jen z popisů nenese žádnou částku — vlastní nález. */
+    public function testDocumentMadeOnlyOfTextLinesIsAFinding(): void
+    {
+        $this->writeInvoice('HIST-TEXT-004', [
+            ['description' => 'Jen text', 'quantity' => 0, 'unit' => 'ks',
+             'unit_price_without_vat' => 0, 'vat_rate_id' => $this->vatRateId('CZ-21'), 'order_index' => 0],
+        ]);
+
+        $report = $this->scanner->scan($this->supplierId);
+
+        self::assertArrayHasKey('items.no_money_line', $report['by_rule']);
+        self::assertSame(
+            HistoricalValidationScanner::REAL_MISMATCH,
+            HistoricalValidationScanner::categoryOf('items.no_money_line'),
+        );
     }
 
     /** Bezvadná historie nesmí v reportu nic vyrobit. */

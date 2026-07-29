@@ -19,6 +19,61 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## 2026-07-29 — Dávkový import: opravy telemetrie + delta katalogu V43
+
+**Charakter: FORK — oprava bezpečnosti telemetrie, uzavření mezery v měření
+a přepis pravidla V43 podle zjištění z historie.**
+
+### 1. Do logu telemetrie nesmí téct obsah dokladu
+Záznam nesl číslo dokladu a datum vystavení. Logy se rotují, kopírují a někdy posílají do
+agregátorů — jiná bezpečnostní zóna než databáze. Nově jen metadata: identifikátor
+pravidla (`items.3.quantity` → `items.*.quantity`), severity, typ dokladu, zdroj, tenant
+a **id dokladu pro dohledání**. Texty hlášek vypuštěny. Kvůli id se záznam přesunul za
+zápis. Hlídá `testLogNeverContainsDocumentContent` (zapíše doklad s nezaměnitelnými
+hodnotami a ověří, že se ani jedna neobjeví v serializovaném kontextu).
+
+### 2. Mezera: doklady, které zápisem neprošly, telemetrii nezanechávaly
+Posun záznamu za zápis vyřadil z měření právě ty nejzajímavější případy. Nově se
+zaznamenávají i ony — `purchase_invoice_id: null`, `write_failed: true`, a když je
+k dispozici, i `import_batch_id` jako jediná stopa k dohledání.
+
+### 3. Odkud se nálezy počítají
+**Nad DTO PŘED zápisem**, ne nad tím, co se přečte z databáze zpět. Jsou to dvě různá
+měření (to druhé by chytalo i zaokrouhlení a normalizaci při ukládání). Zapsáno
+natvrdo do `SHADOW-VALIDATION.md`, ať to za rok nikdo nezamění.
+
+### 4. Runtime kontrola offline režimu
+Ke statické analýze zdrojáku přibyl `NetworkBlockingStreamWrapper` — skener běží
+s odstřiženými `http`/`https` streamy. Statickou kontrolu obejde refaktor, který volání
+schová do helperu; tohle projde skutečným během. Test nejdřív ověří, že je zámek
+ozbrojený, jinak by nic nedokazoval. Přiznané omezení: streamy nechytí ext-curl, proto
+obě kontroly vedle sebe.
+
+### 5. DELTA KATALOGU — V43 přepsáno (V43, V43b–V43e)
+Retrospektivní měření našlo jediný `real_mismatch`: zaplacený dobropis se **správnými
+součty**, jehož část řádků je popisná. Ověřeno, že to nejsou systémové řádky § 37a ani
+zaokrouhlovací řádek. Chyba nebyla v datech, ale v pravidle — původní V43 („quantity > 0")
+byla příliš hrubá. Rozhodující není nulové množství, ale **jestli řádek tvrdí, že něco
+stojí**. Nové znění v `docs/batch-import/PLAN.md`, sekce 13, včetně dopadu na prompt.
+
+`HistoricalValidationScanner` už podle V43b klasifikuje (analýza), produkční
+`InvoiceAmountPolicy` se **nemění** — jeho přepis je změna chování ruční cesty a patří
+ke commitu s doménovým validátorem.
+
+**Nové měření: 96,8 % prošlo, `real_mismatch` = 0**, zbývají dva prázdné popisy položek
+(`legacy_gap`) a 4 popisné řádky uznané jako legitimní.
+
+**Vynucení se ještě nezapíná** — ne kvůli číslům, ale protože 62 dokladů neukázalo dost
+různých režimů selhání. Rozhodnutí patří až za dokončený doménový validátor.
+
+**Hygiena:** dump produkční DB po vytvoření klonu smazán (`shred`), klon po doměření
+zahozen. `/root` má 0700, ale leží tam 27 dumpů z dřívějších session (1,6 MB) — úklid
+na uživateli, nejsou z této práce.
+
+**Testy:** 2 170 → **2 177 zelených**, asercí 7 443 → **7 463**.
+
+---
+
 ## 2026-07-29 — Dávkový import, Commit 6b: retrospektivní stínová validace nad historií
 
 **Charakter: FORK ANALYTICKÝ NÁSTROJ — výhradně čtení.** Výsledek měření:

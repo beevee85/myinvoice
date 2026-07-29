@@ -80,7 +80,8 @@ echo "\n" . str_repeat('=', 78) . "\n\n";
 
 printf("Dokladů prověřeno : %d\n", $report['scanned']);
 printf("Prošlo            : %d  (%s)\n", $report['passed'], $pct($report['passed'], $report['scanned']));
-printf("Nálezy            : %d  (%s)\n\n", $report['failed'], $pct($report['failed'], $report['scanned']));
+printf("Nálezy            : %d  (%s)\n", $report["failed"], $pct($report["failed"], $report["scanned"]));
+printf("Popisných řádků   : %d  (legitimní dle V43b, do matematiky nevstupují)\n\n", $report["text_lines"] ?? 0);
 
 printf("  z toho legacy_gap    (údaj se tehdy nesbíral) : %d\n", $report['by_category'][HistoricalValidationScanner::LEGACY_GAP]);
 printf("  z toho real_mismatch (hodnoty si protiřečí)   : %d   <<< tohle rozhoduje\n\n",

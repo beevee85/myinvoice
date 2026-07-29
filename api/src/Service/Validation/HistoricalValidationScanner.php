@@ -56,6 +56,7 @@ final class HistoricalValidationScanner
         'note_above_items'        => self::LEGACY_GAP,
         'note_below_items'        => self::LEGACY_GAP,
         'items.*.description'     => self::LEGACY_GAP,
+        'items.no_money_line'     => self::REAL_MISMATCH,
 
         // Uložené hodnoty si protiřečí — tohle rozhoduje o vynucení.
         'vendor_id'                    => self::REAL_MISMATCH,
@@ -117,6 +118,7 @@ final class HistoricalValidationScanner
             'by_source'           => [],
             'by_year'             => [],
             'by_document_kind'    => [],
+            'text_lines'          => 0,
             'skipped_rule_groups' => self::SKIPPED_RULE_GROUPS,
         ];
 
@@ -152,7 +154,11 @@ final class HistoricalValidationScanner
     private function evaluate(array $invoice, array $itemRows, array $vatRates, array &$report): void
     {
         $dto    = $this->reconstructDto($invoice, $itemRows);
-        $errors = PurchaseInvoiceValidation::invoice($dto, $vatRates);
+        $errors = self::applyTextLineDelta(
+            PurchaseInvoiceValidation::invoice($dto, $vatRates),
+            $dto['items'],
+            $report,
+        );
 
         $source = self::classifySource($invoice);
         $year   = (int) substr((string) ($invoice['issue_date'] ?? '0000'), 0, 4);
@@ -177,6 +183,54 @@ final class HistoricalValidationScanner
             $report['by_rule'][$rule] = ($report['by_rule'][$rule] ?? 0) + 1;
             $report['by_category'][self::categoryOf($rule)]++;
         }
+    }
+
+    /**
+     * DELTA KATALOGU V43b/V43d — textové řádky na dokladu jsou legitimní.
+     *
+     * `InvoiceAmountPolicy::validateItem()` odmítá nulové množství paušálně, ale
+     * rozhodující není nulové množství — rozhodující je, jestli řádek TVRDÍ, ŽE NĚCO
+     * STOJÍ. Popisný řádek (nulové množství I cena, neprázdný popis) do matematiky
+     * nevstupuje a doklad nekazí; nález se proto zahodí a jen se spočítá.
+     *
+     * Prázdný popis u nulového řádku se NEZAHAZUJE — to není popis, to je ztracená
+     * extrakce, a `items.*.description` na něj upozorní.
+     *
+     * V43d: doklad složený jen z popisů žádnou částku nenese → vlastní nález.
+     *
+     * ⚠️ Tohle je klasifikace ANALÝZY, ne změna vynucení. Produkční
+     * `InvoiceAmountPolicy` nulové množství pořád odmítá; jeho přepis patří ke commitu
+     * s doménovým validátorem. Viz `docs/batch-import/PLAN.md`, sekce 13.
+     *
+     * @param array<string,string[]> $errors
+     * @param list<array<string,mixed>> $items
+     * @param array<string,mixed> $report
+     * @return array<string,string[]>
+     */
+    private static function applyTextLineDelta(array $errors, array $items, array &$report): array
+    {
+        $moneyLines = 0;
+
+        foreach ($items as $index => $item) {
+            $isZeroQty   = abs((float) ($item['quantity'] ?? 0)) < 1e-9;
+            $isZeroPrice = abs((float) ($item['unit_price_without_vat'] ?? 0)) < 1e-9;
+            $hasText     = trim((string) ($item['description'] ?? '')) !== '';
+
+            if ($isZeroQty && $isZeroPrice && $hasText) {
+                unset($errors["items.{$index}.quantity"]);
+                $report['text_lines'] = ($report['text_lines'] ?? 0) + 1;
+                continue;
+            }
+            if (!$isZeroQty || !$isZeroPrice) {
+                $moneyLines++;
+            }
+        }
+
+        if ($items !== [] && $moneyLines === 0) {
+            $errors['items.no_money_line'] = ['Doklad nemá žádný peněžní řádek (V43d).'];
+        }
+
+        return $errors;
     }
 
     /**

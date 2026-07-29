@@ -360,7 +360,11 @@ zadrátované uvnitř importéru/akce, **NE** = neexistuje, musíme napsat.
 | V40 received_at ≥ issue | **NE** | nové |
 | V41 sazba platná k DUZP | **ČÁST** | `vat_rates.valid_from/valid_to` v DB **jsou**, `vatRateMap()` je ignoruje |
 | V42 otevřené účetní období | **ČÁST** | `GET /api/codebooks/years` |
-| V43 qty × cena == základ | **ČÁST** | `InvoiceMath::compute()` + `reconcileLineAmount()` |
+| V43 peněžní řádek: qty ≠ 0, qty × cena == základ | **ČÁST** | `InvoiceMath::compute()` + `reconcileLineAmount()` — viz DELTA níže |
+| V43b popisný řádek (qty == 0 ∧ cena == 0 ∧ popis ≠ '') | **NE** | legitimní, INFO `text_line`; prázdný popis u nulového řádku = FAIL |
+| V43c nekonzistentní řádek (qty == 0 ∧ cena ≠ 0, nebo základ ≠ qty × cena) | **NE** | tohle je skutečná chyba, kterou původní V43 mířila zasáhnout |
+| V43d aspoň jeden peněžní řádek na dokladu | **NE** | doklad nesmí být jen z popisů |
+| V43e dobropis: znaménko konzistentní napříč peněžními řádky | **ČÁST** | `warnings()` hlídá smíšené znaky, ale jen jako WARN |
 | V44–V46 rekapitulace, tolerance | **ČÁST** | `maybeFlagTotalsMismatch()` (práh 2 %), `applyRoundingFromPdfTotal()` (práh 1 Kč) — jiné prahy než v zadání |
 | V47 rounding ±0,50 | **NE** | nové |
 | V48 vat_overrides § 73 | **ANO** | `setVatOverrides()` + `PurchaseVatRecapSeeder` + `InvoiceMath` |
@@ -544,3 +548,40 @@ chová bit-pro-bit jako dnes.
 **O-13** (fixtures) a k rozsahu **Commitu 1**.
 
 Do té doby nepokračuji na Commit 1 a nepřipravuji ani kostru.
+
+---
+
+## 13. DELTA KATALOGU — V43 přepsáno (rozhodnutí 29. 7. 2026)
+
+Původní V43 („quantity > 0") byla napsaná příliš hrubě. **Textové řádky na dokladu jsou
+normální věc** — rozhodující není nulové množství, ale jestli řádek tvrdí, že něco stojí.
+Odhaleno retrospektivní stínovou validací: jediný `real_mismatch` v celé historii byl
+zaplacený dobropis se správnými součty, jehož část řádků je popisná. Vynucení původního
+pravidla by ho odmítlo.
+
+| ID | pravidlo | severity |
+|---|---|---|
+| **V43** | Peněžní řádek: `quantity ≠ 0` ∧ `unit_price` číselné ∧ `quantity × unit_price == řádkový základ` (tolerance 0,01 Kč) | FAIL |
+| **V43b** | Popisný řádek: `quantity == 0` ∧ `unit_price == 0` ∧ `description` neprázdná → legitimní, do matematiky nevstupuje, zapíše se jako INFO `text_line`. **Prázdná `description` u nulového řádku = FAIL** (to není popis, to je ztracená extrakce) | INFO / FAIL |
+| **V43c** | Nekonzistentní řádek: `quantity == 0` ∧ `unit_price ≠ 0`, nebo `quantity ≠ 0` ∧ základ ≠ `quantity × unit_price` | FAIL |
+| **V43d** | Aspoň jeden peněžní řádek na dokladu (doklad nesmí být jen z popisů) | FAIL |
+| **V43e** | U dobropisu smí být `quantity` nebo cena záporná; znaménko musí být konzistentní napříč všemi peněžními řádky | FAIL na míchání |
+
+### Dopad na prompt (Commit 10)
+
+Do šablony dávkové cesty patří výslovně:
+
+> Volný text z dokladu patří do `note_above_items` / `note_below_items` nebo do
+> `description` peněžního řádku, **ne** do samostatných nulových řádků. Když už textový
+> řádek vznikne, musí mít neprázdný popis. Popisné řádky nikdy nevytvářej jen proto,
+> že se text na dokladu vizuálně nachází mezi položkami.
+
+### Dopad na dnešní kód
+
+`InvoiceAmountPolicy::validateItem()` (produkční validátor ruční cesty) nulové množství
+pořád odmítá. **Přepis patří do commitu s doménovým validátorem**, ne sem — je to změna
+chování ruční cesty a zaslouží si vlastní commit a charakterizaci.
+
+Do té doby platí: **analytický** skener (`HistoricalValidationScanner`) už podle V43b
+klasifikuje, aby baseline ukazoval realitu podle dohodnutého pravidla; **enforcement**
+se nemění.

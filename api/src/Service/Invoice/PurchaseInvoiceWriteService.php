@@ -81,12 +81,20 @@ final class PurchaseInvoiceWriteService
      */
     public function createWithItems(array $data, int $userId, int $supplierId, string $source = 'unknown'): int
     {
-        $id = $this->inTransaction(function () use ($data, $userId, $supplierId): int {
-            $newId = $this->repo->createDraft($data, $userId, $supplierId);
-            $this->applyItemsAndTotals($newId, $data, $supplierId);
+        try {
+            $id = $this->inTransaction(function () use ($data, $userId, $supplierId): int {
+                $newId = $this->repo->createDraft($data, $userId, $supplierId);
+                $this->applyItemsAndTotals($newId, $data, $supplierId);
 
-            return $newId;
-        });
+                return $newId;
+            });
+        } catch (\Throwable $writeFailure) {
+            // Doklad nevznikl — nález přesto zaznamenat. Kdyby se logovalo jen po
+            // úspěšném zápisu, měření by systematicky vynechávalo právě ty nejhorší
+            // doklady (ty, které kromě validace neprošly ani zápisem).
+            $this->recordShadowValidation($data, $supplierId, null, $source, $writeFailure);
+            throw $writeFailure;
+        }
 
         // AŽ PO commitu: záznam odkazuje na id dokladu, takže musí existovat. Kdyby
         // se logovalo uvnitř transakce, ukazovaly by nálezy po rollbacku do prázdna.
@@ -115,27 +123,50 @@ final class PurchaseInvoiceWriteService
      *
      * Selhání záznamu nesmí shodit zápis dokladu — telemetrie není důležitější než data.
      *
-     * @param array<string,mixed> $data
+     * MĚŘÍ SE DTO PŘED ZÁPISEM, ne to, co se z databáze přečte zpátky. Jsou to dvě různá
+     * měření: to druhé by chytalo i zaokrouhlení a normalizaci při ukládání, což je jiná
+     * otázka než „prošel by tenhle vstup validací?".
+     *
+     * @param array<string,mixed> $data      DTO tak, jak vstoupil do zápisu
+     * @param int|null            $purchaseInvoiceId `null` = zápis selhal, doklad nevznikl
      */
-    private function recordShadowValidation(array $data, int $supplierId, int $purchaseInvoiceId, string $source): void
-    {
+    private function recordShadowValidation(
+        array $data,
+        int $supplierId,
+        ?int $purchaseInvoiceId,
+        string $source,
+        ?\Throwable $writeFailure = null,
+    ): void {
         try {
             $errors = PurchaseInvoiceValidation::invoice($data, $this->repo->vatRateMap());
             if ($errors === []) {
                 return;
             }
 
+            $context = [
+                'source'              => $source,
+                'supplier_id'         => $supplierId,
+                'purchase_invoice_id' => $purchaseInvoiceId,
+                'document_kind'       => (string) ($data['document_kind'] ?? 'invoice'),
+                'severity'            => 'error',
+                'rules'               => self::ruleIds($errors),
+                'rule_count'          => count($errors),
+                'write_failed'        => $writeFailure !== null,
+            ];
+            // Odkaz na dávku, když existuje — u nezapsaného dokladu je to jediná stopa,
+            // podle které jde nález dohledat. Není to obsah dokladu, jen náhodný token.
+            if (($data['import_batch_id'] ?? null) !== null) {
+                $context['import_batch_id'] = (string) $data['import_batch_id'];
+            }
+            if ($writeFailure !== null) {
+                $context['write_error_class'] = $writeFailure::class;
+            }
+
             $this->logger->warning(
-                self::SHADOW_LOG_PREFIX . ' doklad by neprošel sdílenou validací (zápis proběhl)',
-                [
-                    'source'              => $source,
-                    'supplier_id'         => $supplierId,
-                    'purchase_invoice_id' => $purchaseInvoiceId,
-                    'document_kind'       => (string) ($data['document_kind'] ?? 'invoice'),
-                    'severity'            => 'error',
-                    'rules'               => self::ruleIds($errors),
-                    'rule_count'          => count($errors),
-                ],
+                self::SHADOW_LOG_PREFIX . ($writeFailure !== null
+                    ? ' doklad by neprošel sdílenou validací (a zápis navíc selhal)'
+                    : ' doklad by neprošel sdílenou validací (zápis proběhl)'),
+                $context,
             );
         } catch (\Throwable $e) {
             $this->logger->error(self::SHADOW_LOG_PREFIX . ' stínovou validaci se nepodařilo provést', [
