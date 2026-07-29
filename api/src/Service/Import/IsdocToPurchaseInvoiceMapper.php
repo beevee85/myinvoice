@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Import;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
+use MyInvoice\Service\Invoice\PurchaseInvoiceWriteService;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -34,10 +35,11 @@ final class IsdocToPurchaseInvoiceMapper
         private readonly PurchaseInvoiceCalculator $calc,
         private readonly ClientResolver $clientResolver,
         private readonly PurchaseInvoiceCnbApplier $cnbApplier,
-        // FORK: pro stínovou validaci ve write service. ZÁMĚRNĚ poslední a volitelný —
-        // třída se konstruuje pozičně i v testech a povinný šestý argument by je rozbil.
-        // Kontejner sem vlastní logger doplní autowiringem.
+        // FORK: obojí ZÁMĚRNĚ poslední a volitelné — třída se konstruuje pozičně
+        // i v testech a povinný argument navíc by je rozbil. Kontejner obojí doplní
+        // autowiringem, takže v provozu jde o regulérní závislost, ne o skrytou.
         private readonly ?LoggerInterface $logger = null,
+        private readonly ?PurchaseInvoiceWriteService $writeService = null,
     ) {}
 
     /**
@@ -215,13 +217,13 @@ final class IsdocToPurchaseInvoiceMapper
     /**
      * FORK: sdílená zapisovací sekvence (hlavička → položky → § 73 → přepočet).
      *
-     * Skládá se výhradně ze závislostí, které tahle třída už drží, takže ji záměrně
-     * NEprotahujeme konstruktorem — je konstruovaný pozičně i v testech a další
-     * argument by volání rozbil bez jediného přínosu. Služba je bezstavová.
+     * Přednost má služba z kontejneru (regulérní závislost, poslední volitelný parametr
+     * konstruktoru). Fallback složený z vlastních závislostí je tu jen pro poziční
+     * konstrukci v testech, kde se sedmý argument nepředává — v provozu se nepoužije.
      */
-    private function writer(): \MyInvoice\Service\Invoice\PurchaseInvoiceWriteService
+    private function writer(): PurchaseInvoiceWriteService
     {
-        return new \MyInvoice\Service\Invoice\PurchaseInvoiceWriteService(
+        return $this->writeService ?? new PurchaseInvoiceWriteService(
             $this->db,
             $this->repo,
             $this->calc,

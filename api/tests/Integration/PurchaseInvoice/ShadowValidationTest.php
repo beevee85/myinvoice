@@ -209,6 +209,39 @@ final class ShadowValidationTest extends PurchaseInvoiceCharacterizationCase
         self::assertSame($id, $findings[0]['purchase_invoice_id']);
     }
 
+    /**
+     * NÁLEZY SE POČÍTAJÍ NAD DTO **PŘED** ZÁPISEM, ne nad tím, co se z databáze přečte zpět.
+     *
+     * Dosud to bylo jen tvrzení v komentáři a v dokumentaci — první refaktor by ho tiše
+     * otočil. Test to rozhodne daty, která se zápisem NORMALIZUJÍ:
+     *
+     *   `quantity = 0.0001` projde validací (je nenulové), ale sloupec je `DECIMAL(10,3)`,
+     *   takže v databázi skončí jako `0.000`. Kdyby se validace pouštěla až nad uloženým
+     *   stavem, ohlásila by „Množství nesmí být 0." — a tenhle test spadne.
+     */
+    public function testFindingsAreComputedOverInputDtoNotStoredRow(): void
+    {
+        $payload = $this->validPayload('SHADOW-DTO-001');
+        $payload['items'][0]['quantity'] = 0.0001;
+
+        $id = $this->trackInvoice(
+            $this->writer()->createWithItems($payload, $this->userId, $this->supplierId, 'isdoc')
+        );
+
+        // Ověř, že se hodnota při ukládání SKUTEČNĚ znormalizovala — jinak by test nic nedokazoval.
+        $stmt = $this->db->pdo()->prepare('SELECT quantity FROM purchase_invoice_items WHERE purchase_invoice_id = ?');
+        $stmt->execute([$id]);
+        self::assertSame(0.0, (float) $stmt->fetchColumn(), 'Množství se při zápisu nezaokrouhlilo — test ztratil smysl.');
+
+        // Přesto žádný nález: validace viděla vstupní DTO (0.0001), ne uložených 0.000.
+        self::assertSame(
+            [],
+            $this->findings(),
+            'Stínová validace počítá nad ULOŽENÝM stavem místo nad vstupním DTO. '
+            . 'Jsou to dvě různá měření — to druhé chytá i zaokrouhlení při ukládání.',
+        );
+    }
+
     /** Čistá data nesmí do logu zapsat nic — jinak by se v šumu nálezy ztratily. */
     public function testValidDataProducesNoFinding(): void
     {

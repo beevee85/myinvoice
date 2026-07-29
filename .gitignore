@@ -45,3 +45,8 @@ COMMIT_MSG.tmp
 ISSUE_COMMENT.tmp
 RELEASE_NOTES.tmp
 api-20??-??-??
+
+# Lokální fixtures — reálné doklady třetích stran, viz api/tests/fixtures/local/README.md
+api/tests/fixtures/local/*
+!api/tests/fixtures/local/.gitkeep
+!api/tests/fixtures/local/README.md

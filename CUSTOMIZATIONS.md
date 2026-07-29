@@ -19,6 +19,61 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## 2026-07-30 — Dávkový import: brána před Commitem 7 (P1–P6)
+
+**Charakter: FORK — synchronizace, kotvy pro merge, tři doplněné testy, DI úklid.**
+
+### Sesynchronizováno s `custom` (merge `ec6cfb07`)
+Základna se rozešla o 12 commitů. Jediný konflikt byl v tomhle souboru (obě strany
+přidávaly záznamy nahoru) — vyřešen zachováním obou. **Tři upstream soubory, které
+fork mění, `custom` nesáhl**, změny se aplikují beze změny a rohatka drží.
+**Migrace 0912 je obsazená** (`0912_default_expense_categories.sql`) → **fork migrace
+dávkového importu začnou na 0913.**
+
+### KOTVY PRO OPĚTOVNÉ NASAZENÍ PO UPGRADU
+
+Tři soubory upstreamu, které fork mění. U `AiPdfExtractor` je konflikt při dalším
+merge **téměř jistý** (32 upstream commitů). Řeš podle téhle tabulky, ne podle paměti.
+
+| soubor | kotva (co hledat) | co se mění | proč |
+|---|---|---|---|
+| `api/src/Action/PurchaseInvoice/CreatePurchaseInvoiceAction.php` | konstruktor, param `private readonly PurchaseInvoiceCalculator $calc` | **nahradit** za `PurchaseInvoiceWriteService $writer` | kalkulátor tam byl jen kvůli `recompute` |
+| tentýž | blok `try { $id = $this->repo->createDraft(...) } … $this->calc->recompute($id);` (u upstreamu ~ř. 106–124) | **celý nahradit** jedním `$id = $this->writer->createWithItems($body, $userId, $supplierId, 'manual');` uvnitř téhož try/catch | sekvence patří do write service |
+| `api/src/Service/Import/AiPdfExtractor.php` | konstruktor, poslední param `?LoggerInterface $logger = null` | **za něj přidat** `private readonly ?PurchaseInvoiceWriteService $writeService = null` | poslední a volitelný, ať poziční konstrukce v testech přežije |
+| tentýž | trojice `$id = $this->repo->createDraft($payload, …); $this->repo->replaceItems($id, $items); $this->calc->recompute($id);` (v `createDraft()`, u upstreamu ~ř. 713) | **nahradit** za `$id = $this->writer()->createWithItems($payload, $userId, $supplierId, 'ai_pdf');` | `$payload['items']` je totéž pole jako `$items` |
+| tentýž | před `private function tagImportBatch(` | **vložit** privátní `writer()` s fallbackem `$this->writeService ?? new PurchaseInvoiceWriteService($this->db, $this->repo, $this->calc, $this->logger)` | fallback jen pro poziční konstrukci v testech |
+| `api/src/Service/Import/IsdocToPurchaseInvoiceMapper.php` | konstruktor, za `PurchaseInvoiceCnbApplier $cnbApplier` | **přidat** `?LoggerInterface $logger = null` a `?PurchaseInvoiceWriteService $writeService = null` | obojí poslední a volitelné |
+| tentýž | trojice `createDraft` + `replaceItems` + `recompute` (~ř. 129) | **nahradit** za `$id = $this->writer()->createWithItems($payload, $userId, $supplierId, 'isdoc');` | totéž jako u AI cesty |
+| tentýž | před `private function fetchTenantIc(` | **vložit** privátní `writer()` (stejný fallback) | |
+| `api/tests/bootstrap.php` | `\DG\BypassFinals::enable();` | **za něj** `TestDatabaseGuard::assertOrExit(dirname(__DIR__, 2));` | **pořadí je load-bearing** — guard před BypassFinals shodí 123 unit testů |
+
+**Kontrola po merge:** `vendor/bin/phpunit --filter "PurchaseInvoiceCreationPaths|PurchaseInvoiceWritePath|TestDatabaseGuardWiring"`.
+Rohatka i wiring test odhalí, když se kterákoli kotva po merge nevrátí.
+
+### Doplněno po auditu
+
+* **P1** — `.gitignore` nově pokrývá `api/tests/fixtures/local/*` (výjimky `.gitkeep`
+  a `README.md`). Adresář vytvořen i s návodem: reálné doklady třetích stran se sem
+  smějí položit, ale **nikdy se necommitnou**; verzované fixtures musí být syntetické.
+  Doloženo `git check-ignore -v`.
+* **P2** — `ShadowValidationTest::testFindingsAreComputedOverInputDtoNotStoredRow`.
+  Tvrzení „nálezy se počítají nad DTO PŘED zápisem" bylo dosud jen komentář (nález č. 4
+  vlastního auditu). Test dá `quantity = 0.0001`, ověří, že se v DB uložilo `0.000`
+  (`DECIMAL(10,3)`), a vyžaduje **žádný nález** — kdyby validace četla uložený stav,
+  ohlásila by „Množství nesmí být 0.".
+* **P3** — `PurchaseInvoiceTenantScopingTest` (V64), 4 testy: zápis na cizího dodavatele,
+  čtení cizího dokladu, `setVatOverrides` pod cizím tenantem, tenant scope skeneru.
+  Dosud bylo V64 kryté jen nepřímo a přejmenováním by ochrana zmizela.
+* **P4** — inline konstrukce write service nahrazena **regulérní závislostí**: poslední
+  volitelný parametr konstruktoru u obou tříd, fallback zůstává jen pro poziční
+  konstrukci v testech. Skrytá závislost z produkčního kódu zmizela.
+
+### Ověřeno
+`CreatePurchaseInvoiceAction` **nikdo nekonstruuje pozičně** — `grep -rn "new CreatePurchaseInvoiceAction" api/ web/`
+nevrací nic, jde výhradně přes DI. Záměna parametru v konstruktoru je proto bezpečná.
+
+---
+
 ## 2026-07-29 — Dávkový import: evidence k V43, tabulka divergencí, A3 doloženo
 
 **Charakter: FORK DOKUMENTACE** — bez zásahu do kódu i testů.

@@ -47,6 +47,10 @@ final class AiPdfExtractor
         private readonly \MyInvoice\Repository\TaxConstantsRepository $taxConstants,
         private readonly PurchaseInvoicePdfArchiver $pdfArchiver,
         ?LoggerInterface $logger = null,
+        // FORK: sdílená zapisovací sekvence. ZÁMĚRNĚ poslední a volitelná — třída se
+        // konstruuje pozičně i v testech a povinný patnáctý argument by je rozbil.
+        // Kontejner ji doplní autowiringem, takže v provozu je to regulérní závislost.
+        private readonly ?\MyInvoice\Service\Invoice\PurchaseInvoiceWriteService $writeService = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
     }
@@ -349,14 +353,13 @@ final class AiPdfExtractor
     /**
      * FORK: sdílená zapisovací sekvence (hlavička → položky → § 73 → přepočet).
      *
-     * Skládá se výhradně ze závislostí, které tahle třída už drží, takže ji záměrně
-     * NEprotahujeme konstruktorem — ten má 14 parametrů a je konstruovaný pozičně
-     * i v testech, kde by patnáctý argument rozbil volání bez jediného přínosu.
-     * Služba je bezstavová, takže její vytvoření nic nestojí.
+     * Přednost má služba z kontejneru (regulérní závislost, poslední volitelný parametr
+     * konstruktoru). Fallback složený z vlastních závislostí je tu jen pro poziční
+     * konstrukci v testech, kde se patnáctý argument nepředává — v provozu se nepoužije.
      */
     private function writer(): \MyInvoice\Service\Invoice\PurchaseInvoiceWriteService
     {
-        return new \MyInvoice\Service\Invoice\PurchaseInvoiceWriteService(
+        return $this->writeService ?? new \MyInvoice\Service\Invoice\PurchaseInvoiceWriteService(
             $this->db,
             $this->repo,
             $this->calc,
