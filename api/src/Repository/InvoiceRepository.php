@@ -508,11 +508,14 @@ final class InvoiceRepository
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
                 AND i.deleted_at IS NULL
-                AND i.varsymbol LIKE ?
+                AND (i.varsymbol LIKE ?
+                     OR i.note_above_items LIKE ? OR i.note_below_items LIKE ?
+                     OR i.internal_note LIKE ?)
               ORDER BY i.issue_date DESC, i.id DESC
               LIMIT " . (int) $limit
         );
-        $stmt->execute([$supplierId, '%' . $esc . '%']);
+        $like = '%' . $esc . '%';
+        $stmt->execute([$supplierId, $like, $like, $like, $like]);
         return array_map(static fn (array $r) => [
             'id'             => (int) $r['id'],
             'varsymbol'      => $r['varsymbol'] !== null ? (string) $r['varsymbol'] : null,
@@ -605,8 +608,14 @@ final class InvoiceRepository
         if (!empty($filters['q'])) {
             // Escape % a _ wildcards aby uživatelský input nedělal slow-query DoS / nečekanou shodu
             $q = addcslashes((string) $filters['q'], '%_\\');
-            $where[] = '(i.varsymbol LIKE ? OR c.company_name LIKE ?)';
+            // Poznámky (vč. interní) se hledají i uprostřed textu — volný klíč k dokladu,
+            // aby šel spárovat s přijatými doklady k témuž případu (např. VIN vozu).
+            $where[] = '(i.varsymbol LIKE ? OR c.company_name LIKE ?'
+                     . ' OR i.note_above_items LIKE ? OR i.note_below_items LIKE ? OR i.internal_note LIKE ?)';
             $params[] = $q . '%';
+            $params[] = '%' . $q . '%';
+            $params[] = '%' . $q . '%';
+            $params[] = '%' . $q . '%';
             $params[] = '%' . $q . '%';
         }
 
