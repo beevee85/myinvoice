@@ -360,6 +360,7 @@ final class AiPdfExtractor
             $this->db,
             $this->repo,
             $this->calc,
+            $this->logger,
         );
     }
 
@@ -730,7 +731,7 @@ final class AiPdfExtractor
         // FORK: hlavička + položky + přepočet jde přes sdílenou write service, tedy
         // v JEDNÉ transakci místo tří samostatných zápisů. `$payload['items']` je totéž
         // pole jako `$items`, takže sekvence je krok za krokem shodná s předchozí verzí.
-        $id = $this->writer()->createWithItems($payload, $userId, $supplierId);
+        $id = $this->writer()->createWithItems($payload, $userId, $supplierId, 'ai_pdf');
         // Naseeduj ruční rekapitulaci DPH dle dokladu (§ 73) — uloží základ/DPH dle
         // dokladu dodavatele. Varování (rozdíl > tolerance) zapíšeme až na konci, ať
         // ho pozdější setExtractionWarning() (mismatch / neplátce) nepřepíše.

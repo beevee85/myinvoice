@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Import;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 /**
  * Mapper z ISDOC normalized array (z IsdocParser) na purchase_invoice draft.
@@ -32,6 +34,10 @@ final class IsdocToPurchaseInvoiceMapper
         private readonly PurchaseInvoiceCalculator $calc,
         private readonly ClientResolver $clientResolver,
         private readonly PurchaseInvoiceCnbApplier $cnbApplier,
+        // FORK: pro stínovou validaci ve write service. ZÁMĚRNĚ poslední a volitelný —
+        // třída se konstruuje pozičně i v testech a povinný šestý argument by je rozbil.
+        // Kontejner sem vlastní logger doplní autowiringem.
+        private readonly ?LoggerInterface $logger = null,
     ) {}
 
     /**
@@ -129,7 +135,7 @@ final class IsdocToPurchaseInvoiceMapper
         // FORK: hlavička + položky + přepočet jde přes sdílenou write service, tedy
         // v JEDNÉ transakci místo tří samostatných zápisů. `$payload['items']` je totéž
         // pole jako `$items`, takže sekvence je krok za krokem shodná s předchozí verzí.
-        $id = $this->writer()->createWithItems($payload, $userId, $supplierId);
+        $id = $this->writer()->createWithItems($payload, $userId, $supplierId, 'isdoc');
 
         // Seed override rekapitulace DPH dle dokladu (§ 73) — z <TaxTotal> (ISDOC)
         // nebo <invoiceSummary> (Pohoda). Drobné rozdíly zapeče dle dokladu, větší
@@ -219,6 +225,7 @@ final class IsdocToPurchaseInvoiceMapper
             $this->db,
             $this->repo,
             $this->calc,
+            $this->logger ?? new NullLogger(),
         );
     }
 

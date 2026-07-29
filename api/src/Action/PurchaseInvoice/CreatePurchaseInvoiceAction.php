@@ -110,7 +110,7 @@ final class CreatePurchaseInvoiceAction
         // FORK: zapisovací sekvence (hlavička → položky → rekapitulace § 73 → přepočet)
         // se přesunula do PurchaseInvoiceWriteService, ať ji nemá každá cesta vlastní.
         try {
-            $id = $this->writer->createWithItems($body, $userId, $supplierId);
+            $id = $this->writer->createWithItems($body, $userId, $supplierId, 'manual');
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
         } catch (\PDOException $e) {

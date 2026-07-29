@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
+use Psr\Log\LoggerInterface;
 
 /**
  * FORK (beevee85) — sdílená zapisovací sekvence přijaté faktury.
@@ -49,10 +51,14 @@ use MyInvoice\Repository\PurchaseInvoiceRepository;
  */
 final class PurchaseInvoiceWriteService
 {
+    /** Prefix hlášky ve stínovém režimu — jediný záchytný bod pro agregaci z logu. */
+    public const SHADOW_LOG_PREFIX = 'shadow-validation:';
+
     public function __construct(
         private readonly Connection $db,
         private readonly PurchaseInvoiceRepository $repo,
         private readonly PurchaseInvoiceCalculator $calc,
+        private readonly LoggerInterface $logger,
     ) {}
 
     /**
@@ -70,16 +76,63 @@ final class PurchaseInvoiceWriteService
      * která vrstva se volá.
      *
      * @param array<string,mixed> $data payload dokladu včetně klíčů `items` a `vat_overrides`
+     * @param string $source odkud zápis přišel — jen pro stínovou validaci (viz `recordShadowValidation`)
      * @return int id založeného konceptu
      */
-    public function createWithItems(array $data, int $userId, int $supplierId): int
+    public function createWithItems(array $data, int $userId, int $supplierId, string $source = 'unknown'): int
     {
+        $this->recordShadowValidation($data, $supplierId, $source);
+
         return $this->inTransaction(function () use ($data, $userId, $supplierId): int {
             $id = $this->repo->createDraft($data, $userId, $supplierId);
             $this->applyItemsAndTotals($id, $data, $supplierId);
 
             return $id;
         });
+    }
+
+    /**
+     * STÍNOVÝ REŽIM (pravidlo V76) — spustí sdílenou validaci a jen ZAZNAMENÁ nálezy.
+     * Nic neodmítne a chování zápisu nijak neovlivní.
+     *
+     * PROČ: `PurchaseInvoiceValidation::invoice()` dnes hlídá jen ruční pořízení; importní
+     * cesty ji nikdy nevolaly a mají vlastní, slabší kontroly. Než se validace na importy
+     * vynutí, potřebujeme vědět, KOLIK dnešních dokladů by neprošlo a proč — vynutit ji
+     * naslepo by mohlo zablokovat běžný provoz.
+     *
+     * Zapisuje se jen do logu (žádná tabulka, žádná migrace) a jen když nálezy JSOU.
+     * Jmenovatel pro procenta se dá vzít z `SELECT COUNT(*) FROM purchase_invoices`
+     * za totéž období.
+     *
+     * Selhání záznamu nesmí shodit zápis dokladu — telemetrie není důležitější než data.
+     *
+     * @param array<string,mixed> $data
+     */
+    private function recordShadowValidation(array $data, int $supplierId, string $source): void
+    {
+        try {
+            $errors = PurchaseInvoiceValidation::invoice($data, $this->repo->vatRateMap());
+            if ($errors === []) {
+                return;
+            }
+
+            $this->logger->warning(
+                self::SHADOW_LOG_PREFIX . ' doklad by neprošel sdílenou validací (zápis proběhl)',
+                [
+                    'source'                => $source,
+                    'supplier_id'           => $supplierId,
+                    'vendor_invoice_number' => (string) ($data['vendor_invoice_number'] ?? ''),
+                    'issue_date'            => (string) ($data['issue_date'] ?? ''),
+                    'fields'                => array_keys($errors),
+                    'errors'                => $errors,
+                ],
+            );
+        } catch (\Throwable $e) {
+            $this->logger->error(self::SHADOW_LOG_PREFIX . ' stínovou validaci se nepodařilo provést', [
+                'source' => $source,
+                'error'  => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

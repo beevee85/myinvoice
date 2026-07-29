@@ -19,6 +19,51 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## 2026-07-29 — Dávkový import, Commit 6: stínová validace importních cest (V76)
+
+**Charakter: FORK — přidaná telemetrie, nulový vliv na zápis.** Provozní návod:
+`docs/batch-import/SHADOW-VALIDATION.md`.
+
+**Co to dělá:** `PurchaseInvoiceWriteService` nově spouští
+`PurchaseInvoiceValidation::invoice()` v režimu **„jen zaznamenat"** — nic neodmítne,
+jen při nálezu zapíše `WARNING` s prefixem `shadow-validation:` do aplikačního logu.
+Týká se všech cest, které přes službu zapisují: **ruční pořízení, AI import,
+ISDOC/scan-inbox**.
+
+**Proč:** validace dosud hlídala jen ruční pořízení. Vynutit ji na importy naslepo by
+mohlo zablokovat běžný provoz. Nejdřív potřebujeme vědět, **kolik dokladů a proč** by
+neprošlo — teprve pak se dá rozhodnout, a klidně pro každou cestu jinak.
+
+**Bez migrace a bez zásahu do auditu.** Zvažoval jsem vlastní tabulku (lepší agregace)
+a `activity_log` (dohledatelnost u dokladu), ale první znamená migraci navíc a druhá
+zašumí audit provozní telemetrií. Log je odinstalovatelný tím, že se přestane číst;
+`docs/batch-import/SHADOW-VALIDATION.md` má hotové příkazy na rozpad podle cesty
+i podle toho, které pole neprošlo, a upozornění, že jmenovatel je potřeba vzít z DB.
+
+**Zdroj zápisu** se propisuje do nálezu (`manual` / `ai_pdf` / `isdoc`) — bez toho by
+nešlo rozhodnout per cestu. Je to volitelný čtvrtý argument `createWithItems()`
+s defaultem `unknown`, takže případný nový volající telemetrii nerozbije, jen se
+projeví jako neoznačený.
+
+**Selhání záznamu zápis neshodí** — telemetrie není důležitější než data; zaloguje se
+jako `ERROR` se stejným prefixem.
+
+**Zapojení loggeru bez rozbití testů:** `IsdocToPurchaseInvoiceMapper` dostal
+`?LoggerInterface $logger = null` jako **poslední, volitelný** parametr — poziční
+konstrukce v charakterizačních testech (5 argumentů) tím zůstala funkční a kontejner
+si logger doplní autowiringem. `AiPdfExtractor` už vlastní logger měl.
+
+**Nové testy:** `tests/Support/CollectingLogger.php` (PSR-3 do paměti) +
+`tests/Integration/PurchaseInvoice/ShadowValidationTest.php` (5 testů): vadná data
+projdou a zanechají nález, čistá data nezanechají nic, zdroj se propíše, **táž data
+ruční cestou skončí 400 a v DB nevznikne nic** (to je jádro V76 — rozdíl mezi
+„zaznamenat" a „vynutit" na stejném vstupu), a reálná ISDOC cesta nález skutečně vyvolá.
+
+**Testy:** 2 141 → **2 146 zelených**, asercí 7 359 → **7 382**, skipped beze změny (31).
+Charakterizační testy prošly opět beze změny.
+
+---
+
 ## 2026-07-29 — Dávkový import, Commit 5: konvergence importních cest (V77)
 
 **Charakter: FORK REFAKTORING — bez změny chování** (kromě toho, že převedené cesty

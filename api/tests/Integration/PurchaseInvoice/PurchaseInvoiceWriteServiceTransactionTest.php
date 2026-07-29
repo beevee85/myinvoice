@@ -73,7 +73,12 @@ final class PurchaseInvoiceWriteServiceTransactionTest extends PurchaseInvoiceCh
             },
         );
 
-        return new PurchaseInvoiceWriteService($this->container->get(Connection::class), $repo, $calc);
+        return new PurchaseInvoiceWriteService(
+            $this->container->get(Connection::class),
+            $repo,
+            $calc,
+            new \Psr\Log\NullLogger(),
+        );
     }
 
     /** @return array<string,mixed> */
