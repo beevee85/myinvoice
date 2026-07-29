@@ -425,16 +425,24 @@ final class PurchaseInvoiceRepository
      * Kalkulátor počítá daň řádku ze sazby (16 528,93 × 21 % = 3 471,08), zatímco
      * doklad k záloze nese daň spočtenou shora z úplaty (20 000 × 21/121 = 3 471,07).
      * Odpočet musí sedět na doklad dodavatele (§ 37a pracuje se skutečně přiznanými
-     * hodnotami), proto se řádku hodnoty nastaví napevno a vzniklý haléř se přesune
-     * na nejsilnější NEodpočtový řádek téže sazby — součet za sazbu (a tím i celý
-     * doklad, přiznání a KH) zůstává nedotčený. Bez protiřádku se řádek nepřišpendlí
-     * (radši drobná odchylka řádku než rozbitý součet dokladu).
+     * hodnotami), proto se řádku hodnoty nastaví napevno.
+     *
+     * `$compensate` řídí, co se stane se vzniklým haléřem:
+     *   - `true`  — přesune se na nejsilnější NEodpočtový řádek téže sazby, aby součet
+     *     za sazbu zůstal nedotčený. Bez protiřádku se řádek nepřišpendlí (radši drobná
+     *     odchylka řádku než rozbitý součet dokladu). Historické chování; ponecháno jako
+     *     výchozí kvůli zpětné kompatibilitě.
+     *   - `false` — haléř se NEpřelévá do zdanitelných řádků. Volá se tak z
+     *     {@see \MyInvoice\Service\Invoice\PurchaseSettlementService}, kde rozdíl vzápětí
+     *     absorbuje samostatný řádek „Zaokrouhlení § 37a" (syncRoundingRows). Kompenzace
+     *     by tam zrušila efekt restoreItemTotals() a rozešla by zdanitelné řádky s PDF
+     *     dodavatele (§ 73 / § 100 ZDPH) — navíc kumulativně při opakovaném unlink/link.
      *
      * $targets = hodnoty v pořadí vložení (addSettlementRows), už se záporným znaménkem.
      *
      * @param list<array{base:float, vat:float, rate:float}> $targets
      */
-    public function pinSettlementRowTotals(int $finalId, int $sourceTaxDocId, array $targets): void
+    public function pinSettlementRowTotals(int $finalId, int $sourceTaxDocId, array $targets, bool $compensate = true): void
     {
         if ($targets === []) return;
         $pdo = $this->db->pdo();
@@ -472,10 +480,18 @@ final class PurchaseInvoiceRepository
             if ($deltaBase === 0.0 && $deltaVat === 0.0) {
                 continue;
             }
-            $compStmt->execute([$finalId, (float) $t['rate']]);
-            $comp = $compStmt->fetch(PDO::FETCH_ASSOC);
-            if ($comp === false) {
-                continue; // není kam haléř přesunout — součet dokladu má přednost
+            // Kompenzace haléře na nejsilnějším ZDANITELNÉM řádku sazby se smí použít
+            // jen tam, kde za pinováním nenásleduje zaokrouhlovací řádek § 37a (unlink).
+            // V link() ji vypínáme ($compensate = false): tam už rozdíl absorbuje
+            // samostatný řádek „Zaokrouhlení § 37a" a kompenzace by rozhodila řádky
+            // faktury, které musejí zůstat DOSLOVA dle dokladu dodavatele (§ 73 / § 100).
+            $comp = null;
+            if ($compensate) {
+                $compStmt->execute([$finalId, (float) $t['rate']]);
+                $comp = $compStmt->fetch(PDO::FETCH_ASSOC);
+                if ($comp === false) {
+                    continue; // není kam haléř přesunout — součet dokladu má přednost
+                }
             }
             $update->execute([
                 round((float) $t['base'], 2),
@@ -483,9 +499,11 @@ final class PurchaseInvoiceRepository
                 round((float) $t['base'] + (float) $t['vat'], 2),
                 (int) $row['id'],
             ]);
-            $compBase = round((float) $comp['total_without_vat'] - $deltaBase, 2);
-            $compVat  = round((float) $comp['total_vat'] - $deltaVat, 2);
-            $update->execute([$compBase, $compVat, round($compBase + $compVat, 2), (int) $comp['id']]);
+            if ($comp !== null) {
+                $compBase = round((float) $comp['total_without_vat'] - $deltaBase, 2);
+                $compVat  = round((float) $comp['total_vat'] - $deltaVat, 2);
+                $update->execute([$compBase, $compVat, round($compBase + $compVat, 2), (int) $comp['id']]);
+            }
         }
     }
 

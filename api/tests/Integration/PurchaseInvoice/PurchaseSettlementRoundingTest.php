@@ -1,0 +1,298 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Integration\PurchaseInvoice;
+
+use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
+use MyInvoice\Service\Invoice\PurchaseSettlementService;
+use PDO;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * § 37a — zdanitelné řádky konečné faktury musejí zůstat DLE DOKLADU dodavatele
+ * (§ 73 / § 100 ZDPH) i po napárování více daňových dokladů k přijaté záloze;
+ * haléřový rozdíl nese výhradně řádek „Zaokrouhlení § 37a".
+ *
+ * Regrese: pinSettlementRowTotals() dřív rozdíl kompenzoval na NEJSILNĚJŠÍM zdanitelném
+ * řádku sazby, čímž zrušil efekt restoreItemTotals(). Projevilo se to, když se
+ * dopočtená hodnota odpočtového řádku lišila od hodnoty na DDKPZ (typicky když
+ * dodavatel počítá daň SHORA z brutto, kdežto kalkulátor ZDOLA ze základu):
+ * rekapitulace faktury se pak rozešla s dokladem o 0,01 Kč a při opakovaném
+ * unlink/link se haléře KUMULOVALY.
+ *
+ * Scénář (reálný případ TUkas a.s. / nákup vozu, 2026):
+ *   faktura   500 600,00 = základ 413 719,01 + DPH 86 880,99
+ *   DDKPZ #1   50 000,00 = základ  41 322,31 + DPH  8 677,69
+ *   DDKPZ #2  450 600,00 = základ 372 396,69 + DPH 78 203,31  (shora, zdola by vyšlo 78 203,30)
+ *   → rozdíl § 37a: základ +0,01 / daň −0,01, HRUBÝ rozdíl 0,00
+ *
+ * Izolováno v roce 2097 pod existujícím supplierem, vše uklizeno v tearDown.
+ * Soft-skip, pokud chybí cfg.php (CI runner bez DB).
+ */
+#[Group('integration')]
+final class PurchaseSettlementRoundingTest extends TestCase
+{
+    private const YEAR = 2097;
+
+    private Connection $db;
+    private PurchaseInvoiceRepository $repo;
+    private PurchaseInvoiceCalculator $calc;
+    private PurchaseSettlementService $settlement;
+
+    private int $supplierId = 0;
+    private int $currencyId = 0;
+    private int $vatRate21 = 0;
+    private int $userId = 0;
+    private int $czId = 0;
+
+    /** @var int[] */
+    private array $piIds = [];
+    /** @var int[] */
+    private array $vendorIds = [];
+
+    protected function setUp(): void
+    {
+        $rootDir = dirname(__DIR__, 4);
+        if (!is_file($rootDir . '/cfg.php')) {
+            $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
+        }
+        try {
+            $c = Bootstrap::buildApp()->getContainer();
+            $this->db         = $c->get(Connection::class);
+            $this->repo       = $c->get(PurchaseInvoiceRepository::class);
+            $this->calc       = $c->get(PurchaseInvoiceCalculator::class);
+            $this->settlement = $c->get(PurchaseSettlementService::class);
+        } catch (\Throwable $e) {
+            $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
+        }
+
+        $pdo = $this->db->pdo();
+        $this->supplierId = (int) ($pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        $this->currencyId = (int) ($pdo->query("SELECT id FROM currencies WHERE code='CZK' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
+        $this->vatRate21  = (int) ($pdo->query("SELECT id FROM vat_rates WHERE code='CZ-21' LIMIT 1")->fetchColumn() ?: 0);
+        $this->userId     = (int) ($pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        $this->czId       = (int) ($pdo->query("SELECT id FROM countries WHERE iso2='CZ' LIMIT 1")->fetchColumn() ?: 0);
+
+        if ($this->supplierId === 0 || $this->currencyId === 0 || $this->vatRate21 === 0
+            || $this->userId === 0 || $this->czId === 0) {
+            $this->markTestSkipped('Chybí základní data v DB.');
+        }
+    }
+
+    protected function tearDown(): void
+    {
+        if (!isset($this->db)) return;
+        $pdo = $this->db->pdo();
+        // nejdřív uvolnit vazby § 37a, ať nevadí FK
+        foreach ($this->piIds as $id) {
+            $pdo->prepare('UPDATE purchase_invoices SET settled_by_purchase_invoice_id = NULL,
+                                  advance_purchase_invoice_id = NULL WHERE id = ?')->execute([$id]);
+        }
+        foreach ($this->piIds as $id) {
+            $pdo->prepare('DELETE FROM purchase_invoice_items WHERE purchase_invoice_id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM purchase_invoices WHERE id = ?')->execute([$id]);
+        }
+        foreach ($this->vendorIds as $id) {
+            $pdo->prepare('DELETE FROM clients WHERE id = ?')->execute([$id]);
+        }
+        $this->db->close();
+    }
+
+    public function testTaxableRowsStayPerDocumentAfterLinkingTwoTaxDocuments(): void
+    {
+        [$final, $doc1, $doc2] = $this->scenario('CZ20970001');
+
+        // výchozí stav = doklad dodavatele
+        $s = $this->sums($final);
+        self::assertEqualsWithDelta(413719.01, $s['taxable_base'], 0.005);
+        self::assertEqualsWithDelta(86880.99, $s['taxable_vat'], 0.005);
+
+        $this->settlement->link($final, $doc1, $this->supplierId, true);
+        $this->settlement->link($final, $doc2, $this->supplierId, true);
+
+        $s = $this->sums($final);
+
+        self::assertEqualsWithDelta(413719.01, $s['taxable_base'], 0.005,
+            'Základ zdanitelných řádků musí zůstat dle dokladu dodavatele (§ 73).');
+        self::assertEqualsWithDelta(86880.99, $s['taxable_vat'], 0.005,
+            'DPH zdanitelných řádků musí zůstat dle dokladu dodavatele — haléř nesmí skončit na nich.');
+
+        self::assertEqualsWithDelta(-413719.00, $s['deduction_base'], 0.005,
+            'Odpočtové řádky doslova dle DDKPZ.');
+        self::assertEqualsWithDelta(-86881.00, $s['deduction_vat'], 0.005,
+            'Odpočtové řádky doslova dle DDKPZ.');
+
+        self::assertEqualsWithDelta(-0.01, $s['rounding_base'], 0.005,
+            'Haléřový rozdíl § 37a patří na zaokrouhlovací řádek.');
+        self::assertEqualsWithDelta(0.01, $s['rounding_vat'], 0.005,
+            'Haléřový rozdíl § 37a patří na zaokrouhlovací řádek.');
+
+        self::assertEqualsWithDelta(0.0, $s['total_base'], 0.005,
+            'Hrubý rozdíl § 37a je nulový → doklad musí vyjít na nulu.');
+        self::assertEqualsWithDelta(0.0, $s['total_vat'], 0.005);
+
+        $header = $this->repo->find($final, $this->supplierId);
+        self::assertEqualsWithDelta(0.0, (float) $header['total_with_vat'], 0.005);
+        self::assertEqualsWithDelta(0.0, (float) $header['amount_to_pay'], 0.005);
+    }
+
+    public function testRepeatedUnlinkAndLinkDoesNotAccumulateRounding(): void
+    {
+        [$final, $doc1, $doc2] = $this->scenario('CZ20970002');
+
+        $this->settlement->link($final, $doc1, $this->supplierId, true);
+        $this->settlement->link($final, $doc2, $this->supplierId, true);
+        $first = $this->sums($final);
+
+        // dva plné cykly odpojení + napárování
+        for ($i = 0; $i < 2; $i++) {
+            $this->settlement->unlink($final, $doc2, $this->supplierId);
+            $this->settlement->unlink($final, $doc1, $this->supplierId);
+
+            $afterUnlink = $this->sums($final);
+            self::assertEqualsWithDelta(413719.01, $afterUnlink['taxable_base'], 0.005,
+                "Cyklus {$i}: po odpojení musí zdanitelné řádky pořád sedět na doklad.");
+            self::assertEqualsWithDelta(86880.99, $afterUnlink['taxable_vat'], 0.005,
+                "Cyklus {$i}: po odpojení musí zdanitelné řádky pořád sedět na doklad.");
+
+            $this->settlement->link($final, $doc1, $this->supplierId, true);
+            $this->settlement->link($final, $doc2, $this->supplierId, true);
+
+            $again = $this->sums($final);
+            self::assertEqualsWithDelta($first['taxable_base'], $again['taxable_base'], 0.005,
+                "Cyklus {$i}: haléře se nesmějí kumulovat.");
+            self::assertEqualsWithDelta($first['taxable_vat'], $again['taxable_vat'], 0.005,
+                "Cyklus {$i}: haléře se nesmějí kumulovat.");
+            self::assertEqualsWithDelta(0.0, $again['total_base'], 0.005);
+            self::assertEqualsWithDelta(0.0, $again['total_vat'], 0.005);
+        }
+    }
+
+    /**
+     * Postaví scénář: konečná faktura (2 zdanitelné řádky dle dokladu) + 2 DDKPZ.
+     *
+     * @return array{0:int,1:int,2:int} [finalId, taxDoc1Id, taxDoc2Id]
+     */
+    private function scenario(string $dic): array
+    {
+        $vendor = $this->vendor('Dodavatel § 37a ' . $dic, $dic);
+
+        // Konečná faktura — dvojice řádků dá přesně rekapitulaci dokladu
+        // (366 942,15 + 46 776,86 = 413 719,01; 77 057,85 + 9 823,14 = 86 880,99).
+        $final = $this->draft($vendor, 'invoice', 'FA-' . $dic, [
+            ['description' => 'Vůz', 'unit_price_without_vat' => 366942.15],
+            ['description' => 'Výbava', 'unit_price_without_vat' => 46776.86],
+        ]);
+
+        // DDKPZ #1 — dopočet zdola i shora dá shodně 8 677,69, override netřeba.
+        $doc1 = $this->draft($vendor, 'tax_document', 'ZD-1-' . $dic, [
+            ['description' => 'Záloha 1', 'unit_price_without_vat' => 41322.31],
+        ]);
+
+        // DDKPZ #2 — doklad uvádí 78 203,31 (shora z 450 600), kdežto dopočet zdola
+        // dá 78 203,30. Rekapitulace dle dokladu se drží přes vat_overrides (§ 73),
+        // stejně jako to dělá PurchaseVatRecapSeeder při importu.
+        $doc2 = $this->draft($vendor, 'tax_document', 'ZD-2-' . $dic, [
+            ['description' => 'Záloha 2', 'unit_price_without_vat' => 372396.69],
+        ]);
+        $this->repo->setVatOverrides($doc2, $this->supplierId, [
+            ['rate' => 21.0, 'base' => 372396.69, 'vat' => 78203.31],
+        ]);
+        $this->calc->recompute($doc2);
+
+        // DDKPZ musí být mimo koncept, jinak je link() odmítne.
+        foreach ([$doc1, $doc2] as $d) {
+            $this->db->pdo()->prepare("UPDATE purchase_invoices SET status='received' WHERE id=?")->execute([$d]);
+        }
+
+        return [$final, $doc1, $doc2];
+    }
+
+    /**
+     * @param list<array{description:string, unit_price_without_vat:float}> $items
+     */
+    private function draft(int $vendorId, string $kind, string $number, array $items): int
+    {
+        $date = self::YEAR . '-06-30';
+        $payload = [
+            'vendor_id'             => $vendorId,
+            'vendor_invoice_number' => $number,
+            'document_kind'         => $kind,
+            'issue_date'            => $date,
+            'tax_date'              => $date,
+            'due_date'              => $date,
+            'received_at'           => $date,
+            'currency_id'           => $this->currencyId,
+            'items'                 => [],
+        ];
+        $id = $this->repo->createDraft($payload, $this->userId, $this->supplierId);
+        $this->piIds[] = $id;
+
+        $rows = [];
+        foreach ($items as $i => $it) {
+            $rows[] = [
+                'description'            => $it['description'],
+                'quantity'               => 1.0,
+                'unit'                   => 'ks',
+                'unit_price_without_vat' => $it['unit_price_without_vat'],
+                'vat_rate_id'            => $this->vatRate21,
+                'vat_classification_code' => '40',
+                'order_index'            => $i,
+            ];
+        }
+        $this->repo->replaceItems($id, $rows);
+        $this->calc->recompute($id);
+
+        return $id;
+    }
+
+    private function vendor(string $name, string $dic): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, dic,
+                                  main_email, language, currency_default_id, is_customer, is_vendor)
+             VALUES (?, ?, "Test 1", "Praha", "11000", ?, ?, "v@example.com", "cs", ?, 0, 1)'
+        );
+        $stmt->execute([$this->supplierId, $name, $this->czId, $dic, $this->currencyId]);
+        $id = (int) $this->db->pdo()->lastInsertId();
+        $this->vendorIds[] = $id;
+        return $id;
+    }
+
+    /**
+     * Součty řádků rozdělené na zdanitelné / odpočtové (§ 37a) / zaokrouhlovací.
+     *
+     * @return array{taxable_base:float, taxable_vat:float, deduction_base:float,
+     *               deduction_vat:float, rounding_base:float, rounding_vat:float,
+     *               total_base:float, total_vat:float}
+     */
+    private function sums(int $purchaseInvoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT settlement_source_purchase_invoice_id AS src, is_settlement_rounding AS rnd,
+                    total_without_vat AS base, total_vat AS vat
+               FROM purchase_invoice_items WHERE purchase_invoice_id = ?'
+        );
+        $stmt->execute([$purchaseInvoiceId]);
+
+        $out = ['taxable_base' => 0.0, 'taxable_vat' => 0.0, 'deduction_base' => 0.0,
+                'deduction_vat' => 0.0, 'rounding_base' => 0.0, 'rounding_vat' => 0.0,
+                'total_base' => 0.0, 'total_vat' => 0.0];
+
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $base = (float) $r['base'];
+            $vat  = (float) $r['vat'];
+            $key  = !empty($r['rnd']) ? 'rounding' : (!empty($r['src']) ? 'deduction' : 'taxable');
+            $out[$key . '_base'] += $base;
+            $out[$key . '_vat']  += $vat;
+            $out['total_base']   += $base;
+            $out['total_vat']    += $vat;
+        }
+        return array_map(static fn (float $v): float => round($v, 2), $out);
+    }
+}
