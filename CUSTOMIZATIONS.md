@@ -19,6 +19,28 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## DOHODA: rezervované pásmo migrací pro dávkový import — **0913–0919**
+
+Fork migrace číslujeme od 0900. Souběžné session pracují na téže větvi `custom`
+a **0912 už si jedna vzala** (`0912_default_expense_categories.sql`), zatímco byla
+plánovaná pro dávkový import.
+
+**Pásmo `0913–0919` je rezervováno pro dávkový import** (`feat/batch-import-subscription`).
+Jiná práce ať sahá od 0920 výš.
+
+**Číslo se přiděluje až v okamžiku commitu**, ne dopředu — a vždy s ověřením, že je
+pořád volné:
+
+```bash
+ls -1 db/migrations/ | sort | tail -3          # nejvyšší obsazené
+git ls-tree --name-only custom db/migrations/ | sort | tail -3   # i to, co má custom
+```
+
+Kdyby bylo celé pásmo obsazené, rezervovat další a zapsat sem — ne přečíslovávat
+cizí migrace.
+
+---
+
 ## 2026-07-30 — Dávkový import: brána před Commitem 7 (P1–P6)
 
 **Charakter: FORK — synchronizace, kotvy pro merge, tři doplněné testy, DI úklid.**
