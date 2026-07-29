@@ -126,9 +126,10 @@ final class IsdocToPurchaseInvoiceMapper
             ];
         }
 
-        $id = $this->repo->createDraft($payload, $userId, $supplierId);
-        $this->repo->replaceItems($id, $items);
-        $this->calc->recompute($id);
+        // FORK: hlavička + položky + přepočet jde přes sdílenou write service, tedy
+        // v JEDNÉ transakci místo tří samostatných zápisů. `$payload['items']` je totéž
+        // pole jako `$items`, takže sekvence je krok za krokem shodná s předchozí verzí.
+        $id = $this->writer()->createWithItems($payload, $userId, $supplierId);
 
         // Seed override rekapitulace DPH dle dokladu (§ 73) — z <TaxTotal> (ISDOC)
         // nebo <invoiceSummary> (Pohoda). Drobné rozdíly zapeče dle dokladu, větší
@@ -203,6 +204,22 @@ final class IsdocToPurchaseInvoiceMapper
                 // rounding je „nice to have" — faktura je vytvořená správně i bez něj.
             }
         }
+    }
+
+    /**
+     * FORK: sdílená zapisovací sekvence (hlavička → položky → § 73 → přepočet).
+     *
+     * Skládá se výhradně ze závislostí, které tahle třída už drží, takže ji záměrně
+     * NEprotahujeme konstruktorem — je konstruovaný pozičně i v testech a další
+     * argument by volání rozbil bez jediného přínosu. Služba je bezstavová.
+     */
+    private function writer(): \MyInvoice\Service\Invoice\PurchaseInvoiceWriteService
+    {
+        return new \MyInvoice\Service\Invoice\PurchaseInvoiceWriteService(
+            $this->db,
+            $this->repo,
+            $this->calc,
+        );
     }
 
     private function fetchTenantIc(int $supplierId): ?string

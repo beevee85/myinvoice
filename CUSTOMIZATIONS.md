@@ -19,6 +19,49 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## 2026-07-29 — Dávkový import, Commit 5: konvergence importních cest (V77)
+
+**Charakter: FORK REFAKTORING — bez změny chování** (kromě toho, že převedené cesty
+nově zapisují atomicky). Charakterizační testy prošly **beze změny testů**.
+
+**Převedeno na `PurchaseInvoiceWriteService::createWithItems()`:**
+* `Service/Import/AiPdfExtractor:713` — AI import PDF,
+* `Service/Import/IsdocToPurchaseInvoiceMapper:129` — ISDOC/Pohoda, a tím i **scan-inbox
+  a bundle import**, které na mapper delegují (vlastní kopii nikdy neměly).
+
+U obou byl payload klíč `items` totožný s polem předávaným do `replaceItems`, takže
+sekvence je krok za krokem shodná; přibyla jen transakce. Klíč `vat_overrides` payload
+neobsahuje, takže krok 3 je no-op — rekapitulaci § 73 jim dodává `PurchaseVatRecapSeeder`
+až po zápisu, jako dosud.
+
+**Proč se služba konstruuje inline, ne přes konstruktor:** `AiPdfExtractor` má
+14 parametrů a obě třídy se konstruují **pozičně i v testech**; patnáctý argument by
+volání rozbil a vynutil úpravu charakterizačních testů, které mají zůstat nedotčené.
+Služba je bezstavová a skládá se výhradně ze závislostí, které obě třídy už drží
+(`Connection`, `PurchaseInvoiceRepository`, `PurchaseInvoiceCalculator`), takže je to
+kompozice, ne skrytá závislost. Zdůvodnění je v docblocku obou metod `writer()`.
+
+**Nový `api/tests/Architecture/PurchaseInvoiceCreationPathsTest.php` — ROHATKA (V77).**
+Drží seznam dosud nepřevedených cest a vyžaduje, aby seděl PŘESNĚ: spadne, když přibude
+nová cesta zakládající doklad mimo službu, když se převedená cesta vrátí k přímému zápisu
+(typicky merge upstreamu), i když se cesta převede, ale zapomene vyškrtnout ze seznamu.
+Seznam se smí jen zkracovat. Detekce filtruje na `PurchaseInvoiceRepository` v souboru
+a na jméno property, aby nechytala vydané faktury (iDoklad i Fakturoid mají vedle sebe
+`$this->invoices->createDraft()` pro vydanou stranu).
+
+**ZBÝVAJÍ tři cesty** (v seznamu `NOT_YET_CONVERGED`), všechny **bez charakterizace**,
+takže je nepřevádím bez ní:
+`Action/Bank/BankStatementAction`, `Service/Import/IdokladImportService` (2 místa),
+`Service/Import/FakturoidImportService`. Plus `UpdatePurchaseInvoiceAction`, která doklad
+nezakládá, ale kroky 2–4 opisuje.
+**Past pro jejich převedení:** iDoklad i Fakturoid volají `replaceItems` podmíněně
+(`if (!empty($items))`), služba bezpodmínečně.
+
+**Testy:** 2 138 → **2 141 zelených**, asercí 7 350 → **7 359**, skipped beze změny (31).
+Ověřeno, že rohatka i test pořadí sekvence na simulovaných regresích skutečně padají.
+
+---
+
 ## 2026-07-29 — Dávkový import, Commit 4: transakce nad zapisovací sekvencí (V75)
 
 **Charakter: FORK — JEDINÁ ZMĚNA CHOVÁNÍ celého refaktoringu**, proto samostatný commit

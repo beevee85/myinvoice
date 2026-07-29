@@ -347,6 +347,23 @@ final class AiPdfExtractor
     }
 
     /**
+     * FORK: sdílená zapisovací sekvence (hlavička → položky → § 73 → přepočet).
+     *
+     * Skládá se výhradně ze závislostí, které tahle třída už drží, takže ji záměrně
+     * NEprotahujeme konstruktorem — ten má 14 parametrů a je konstruovaný pozičně
+     * i v testech, kde by patnáctý argument rozbil volání bez jediného přínosu.
+     * Služba je bezstavová, takže její vytvoření nic nestojí.
+     */
+    private function writer(): \MyInvoice\Service\Invoice\PurchaseInvoiceWriteService
+    {
+        return new \MyInvoice\Service\Invoice\PurchaseInvoiceWriteService(
+            $this->db,
+            $this->repo,
+            $this->calc,
+        );
+    }
+
+    /**
      * Označí právě vytvořený doklad identifikátorem importní dávky (#232), pokud byl
      * předán. Selhání je „nice to have" — doklad je už správně vytvořený.
      */
@@ -710,9 +727,10 @@ final class AiPdfExtractor
         if ($existingId !== null) {
             return $existingId;
         }
-        $id = $this->repo->createDraft($payload, $userId, $supplierId);
-        $this->repo->replaceItems($id, $items);
-        $this->calc->recompute($id);
+        // FORK: hlavička + položky + přepočet jde přes sdílenou write service, tedy
+        // v JEDNÉ transakci místo tří samostatných zápisů. `$payload['items']` je totéž
+        // pole jako `$items`, takže sekvence je krok za krokem shodná s předchozí verzí.
+        $id = $this->writer()->createWithItems($payload, $userId, $supplierId);
         // Naseeduj ruční rekapitulaci DPH dle dokladu (§ 73) — uloží základ/DPH dle
         // dokladu dodavatele. Varování (rozdíl > tolerance) zapíšeme až na konci, ať
         // ho pozdější setExtractionWarning() (mismatch / neplátce) nepřepíše.
