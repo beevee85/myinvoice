@@ -1,6 +1,6 @@
 # CUSTOMIZATIONS.md — evidence vlastních úprav této instalace
 
-Instalace: `faktury.betka.eu`, VPS, `/opt/myinvoice`. Pravidla práce viz `CLAUDE.md` (gitignored, jen na serveru).
+Instalace: `faktury.example.com`, VPS, `/opt/myinvoice`. Pravidla práce viz `CLAUDE.md` (gitignored, jen na serveru).
 
 Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná úprava tiše nevypadla.
 
@@ -16,6 +16,34 @@ Uživatel chce tyto fork funkce navrhnout autorovi. Detailní checklist „před
 | Daňový doklad k přijaté záloze (DDKPZ) + § 37a na přijaté straně (0904, 0906–0911, hotfix 2026-07-29) | 2026-07-28 (tři dávky) + 2026-07-29 | **kandidát — ODLOŽENO na později** (rozhodnutí 28. 7. 2026: nejdřív provozní ověření, ideálně po podání KH za 05–07/2026; pořadí: nejdřív koš, pak DDKPZ, ať se nemusí odstřihávat) | přečíslovat migrace 0904/0906 do upstream řady; oddělit od fork-only koše (DocumentTrashPolicy, TrashGuard v settlement akcích) a od sazby CZ-NA, pokud ji upstream nechce; doplnit kapitolu manuálu + openapi (endpointy settlement-doc-candidates / final-candidates / link-settlement-doc) |
 
 Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jednu z těchto funkcí upstream nemá.
+
+---
+
+## 2026-07-29 — očista verzovaných souborů od reálných dat
+
+**Charakter: HYGIENA REPA.** Fork veřejného repa je na GitHubu vždy veřejný, takže cokoli
+commitnutého je publikované. Pravidlo: **do gitu jen neutrální, vymyšlená data.**
+
+**Co se změnilo:** ve verzovaných souborech nahrazeny reálné identifikátory neutrálními
+podle mapy `replace-map.txt` (mimo repo) — názvy firem, IČO/DIČ, doména, čísla dokladů,
+VIN, čísla objednávek a bankovní spojení. Dotčeno 15 souborů (`CUSTOMIZATIONS.md`,
+`docs/analyza-2026-07/*`, `docs/dph-zalohy.md`, testy, migrace 0907/0910).
+
+Modelový scénář § 37a v `PurchaseSettlementRoundingTest` používá vymyšlené částky, které
+zachovávají vlastnost, na které test stojí: záloha 10 000,00 (dopočet zdola sedí)
++ záloha 101 000,00 (zdola by dalo o 0,01 míň) = faktura 111 000,00, rozdíl § 37a
+základ +0,01 / daň −0,01 při nulovém hrubém rozdílu.
+
+**ZBÝVÁ:** v `api/tests/Integration/Report/KhDphTaxScenariosTest.php` a
+`api/tests/Unit/Service/Import/AiPdfExtractorUnitTest.php` zůstaly reálné ČÁSTKY
+(identifikátory očištěné jsou). Ty testy kódují jemné zaokrouhlovací vztahy — jeden
+scénář má hrubý rozdíl 0,00, jiný doplatek 0,01 — a plošná náhrada je rozbila
+(8 pádů). Samotné částky bez názvu firmy a čísla dokladu nikoho neidentifikují, takže
+to není akutní; přepsat je ale chce jako samostatný úkol scénář po scénáři s ověřením.
+
+**Poučení:** náhrady dělat JEDNÍM průchodem (regex alternace, nejdelší vzor první).
+Sekvenční `str_replace` se řetězí — `376852.89` → `83471.07` a pozdější pravidlo
+`3471.07` z toho udělalo `81735.54`.
 
 ---
 
@@ -58,7 +86,7 @@ draft → received (`TransitionPurchaseInvoiceStatusAction::ensureVarsymbol`) �
 existuje jen pro doklady, které draft opustily, ale číslo nedostaly (AI auto-paid, viz
 docblock skriptu).
 
-Projev: nasazení 29. 7. očíslovalo tři koncepty TUkas (#62 → PF2606004, #63 → ZA2604004,
+Projev: nasazení 29. 7. očíslovalo tři koncepty Autosalon Gama (#62 → PF2606004, #63 → ZA2604004,
 #64 → ZA2606003). Vrátit je na NULL nemá smysl bez téhle opravy — příští restart je
 přidělí znovu.
 
@@ -90,15 +118,15 @@ zdanitelný řádek** téže sazby. 3. dávka pak zavedla samostatný řádek �
 a `restoreItemTotals()`, aby zdanitelné řádky zůstaly PŘESNĚ dle dokladu dodavatele.
 Kompenzace ale zůstala aktivní a běží **až za** `restoreItemTotals()`, takže jeho efekt ruší.
 
-**Projev** (reálný případ TUkas a.s., přijatá faktura 226020278 / #62, nákup vozu):
+**Projev** (reálný případ Autosalon Gama a.s., přijatá faktura 100000001 / #62, nákup vozu):
 - rekapitulace zdanitelných řádků se rozešla s PDF dodavatele o 0,01 Kč
-  (86 881,00 místo 86 880,99), 5 z 11 řádků mělo posunutou daň;
+  (19 264,47 místo 19 264,46), 5 z 11 řádků mělo posunutou daň;
 - zaokrouhlovací řádek vyšel −0,01 / **0,00** místo −0,01 / **+0,01**;
 - `unlink()` navíc kompenzoval bez jakéhokoli snapshotu řádků, takže **každý cyklus
-  unlink→link ukousl další haléř** (ověřeno na #57: 393 381,83 → …,82 → …,81).
+  unlink→link ukousl další haléř** (ověřeno na #57: 91 735,54 → …,82 → …,81).
 
 Spouštěč: dopočtená hodnota odpočtového řádku se liší od hodnoty na DDKPZ — typicky když
-dodavatel počítá daň SHORA z brutto (450 600 / 1,21), kdežto kalkulátor ZDOLA ze základu.
+dodavatel počítá daň SHORA z brutto (101 000 / 1,21), kdežto kalkulátor ZDOLA ze základu.
 Doklad, u kterého dopočet náhodou sedí (referenční #57 při prvním párování), problém neukáže.
 
 **Co se změnilo:**
@@ -117,14 +145,14 @@ rozdílem § 37a do DP3/KH nevstupuje a celý odpočet nesou DDKPZ (ty byly spr�
 **Testy:** nový `tests/Integration/PurchaseInvoice/PurchaseSettlementRoundingTest.php`
 (2 testy, 24 asercí): zdanitelné řádky zůstávají dle dokladu po napárování dvou DDKPZ;
 opakovaný unlink/link haléře nekumuluje. Proti neopravenému kódu první test **padá**
-(86 881,00 ≠ 86 880,99). Suita **2017 zelených** (2015 + 2 nové), 6 685 asercí.
+(19 264,47 ≠ 19 264,46). Suita **2017 zelených** (2015 + 2 nové), 6 685 asercí.
 
 **Jak ověřit po merge:** `vendor/bin/phpunit --filter 'PurchaseSettlementRounding'`;
 v detailu konečné faktury s DDKPZ musí součet zdanitelných řádků odpovídat rekapitulaci
 na PDF dodavatele a zaokrouhlovací řádek § 37a nést základ i daň s opačným znaménkem.
 
 **Data:** produkční #62 srovnáno ručně už 28. 7. (skript `/root/tmp/tukas/fix-lines.php`)
-— po nasazení této opravy by tentýž stav vyrobila služba sama. Doklad #57 (Direct auto,
+— po nasazení této opravy by tentýž stav vyrobila služba sama. Doklad #57 (Autocentrum Delta,
 `paid`) drift z minulosti nese, je ale vyrovnaný (0,00/0,00) a do výkazů nevstupuje;
 přepárovávat ho není nutné.
 
@@ -139,7 +167,7 @@ přepárovávat ho není nutné.
 2. **„Mimo DPH" nikdy ve výkazech:** položky se sazbou CZ-NA dostávají explicitní klasifikaci **`NA`** (migrace **0909**, dphdp3_line i kh_section NULL) — dřív měly NULL a spadly na klasifikaci HLAVIČKY (COALESCE ve `VatLedgerService`) → hrozil ř. 40 / KH B.2. Navíc pojistka přímo v ledgeru (vyloučení sazby CZ-NA) a test `testOutOfScopeRateNeverEntersReports`.
 3. **DUZP se v seznamu nedopočítává** z data vystavení (zálohy mají „—"); editor u zálohy DUZP nepředvyplňuje (jinak by ho uložení vrátilo zpět).
 4. **Zaokrouhlovací řádek § 37a** (migrace **0910**): řádky dokladu se po párování vracejí PŘESNĚ na hodnoty dodavatele (dřív se do nich rozpouštěl haléř — 443 999,99 místo 444 000,00), odpočty zůstávají doslova dle DDKPZ a rozdíl nese jeden viditelný řádek „Zaokrouhlení § 37a". Součet položek = rekapitulace = hlavička. Řádek je v sazbě rozdílu (ne „mimo DPH") — jinak by v sazbě zůstal rozdíl 0,01/−0,01 a doklad by hlásil rozpor znamének.
-5. **Popis odpočtu** nese i zálohovou fakturu: „Odpočet zálohy — daňový doklad ZD915260089 (ZF815260087)".
+5. **Popis odpočtu** nese i zálohovou fakturu: „Odpočet zálohy — daňový doklad ZD200000001 (ZF200000001)".
 6. **Přepočet je dávkový, ne líný:** ověřeno, že GET detailu je read-only (nezapisuje); nový CLI **`api/bin/recompute-purchase-invoices.php`** (dry-run default, `--apply`, `--supplier=`, `--from=`) srovná hlavičkové součty s položkami napříč DB a vypíše doklady vyžadující přepárování. Idempotentní.
 7. **Exporty pro účetní (P1):** Pohoda u přijatých dostávala NAŠE interní číslo v `symVar` (rozbité párování plateb) a **neposílala DIČ ani evidenční číslo dokladu dodavatele** → doklad by v KH spadl do B.3 místo B.2. Nově: `symVar` = platební VS, `inv:originalDocument` = číslo dokladu dodavatele, a chybějící DIČ/IČO ve `vendor_snapshot` se doplní z karty klienta. ISDOC: řádky se sazbou CZ-NA jdou jako `VATApplicable=false`.
 8. **AI import:** rozpor „doklad nese DPH × dodavatel neplátce" je nově **skutečně blokující** (migrace **0911**, sloupec `extraction_blocking`) — přechod z konceptu vrací 409, dokud uživatel rozpor nevyřeší nebo upozornění vědomě nezavře; dřív se hláška při přechodu tiše mazala. Duplicitní a ISDOC větve importu vracejí `document_kind` (select v dávce už nepadá na „Faktura"); `integrations.ts` má správný typ.
@@ -154,7 +182,7 @@ přepárovávat ho není nutné.
 
 **Co se změnilo:**
 1. **§ 37a haléřové zaokrouhlení (bug na PF2607001):** rozdíl se počítá z HRUBÉHO rozdílu per sazba (dosavadní hrubá hodnota sazby − hrubá hodnota DDKPZ), základ a daň se z něj odvodí koeficientem § 37 (`PurchaseSettlementService::applyGrossTargets`). Dřív se odečítaly zvlášť základy a zvlášť daně dvou nezávisle zaokrouhlených řad → základ +0,01 / daň −0,01. Plná záloha teď dá 0,00/0,00/0,00.
-2. **Odpočtové řádky doslova dle DDKPZ** (`PurchaseInvoiceRepository::pinSettlementRowTotals`): kalkulátor by daň řádku spočetl ze sazby (16 528,93 × 21 % = 3 471,08), doklad ale nese daň shora z úplaty (20 000 × 21/121 = 3 471,07). Řádek se přišpendlí a haléř se přesune na nejsilnější NEodpočtový řádek téže sazby — součet dokladu (a tím DP3/KH) zůstává nedotčený. Přišpendlení se obnovuje po KAŽDÉM přepočtu (`pinAllSettlementRows`) — druhé párování dřív rozhodilo první.
+2. **Odpočtové řádky doslova dle DDKPZ** (`PurchaseInvoiceRepository::pinSettlementRowTotals`): kalkulátor by daň řádku spočetl ze sazby (8 264,46 × 21 % = 3 471,08), doklad ale nese daň shora z úplaty (20 000 × 21/121 = 1 735,54). Řádek se přišpendlí a haléř se přesune na nejsilnější NEodpočtový řádek téže sazby — součet dokladu (a tím DP3/KH) zůstává nedotčený. Přišpendlení se obnovuje po KAŽDÉM přepočtu (`pinAllSettlementRows`) — druhé párování dřív rozhodilo první.
 3. **Invariant znamének** `vat_sign_mismatch` (`PurchaseInvoiceValidation::hasVatSignMismatch` + flag v `find()` + banner v detailu): u nenulové sazby nesmí mít základ a daň opačné znaménko → jinak „doklad ke kontrole". Platí pro všechny přijaté doklady.
 4. **UI:** prázdný panel „Vyúčtování zálohy — Není propojeno" se nezobrazuje, je-li doklad vyúčtován přes § 37a nebo jde-li o DDKPZ.
 5. **Záloha (advance) — sazba a DUZP:** nová položka číselníku **CZ-NA „Mimo DPH"** (migrace **0906**) místo „0 % osvobozeno" (osvobozené plnění se vykazuje v přiznání, mimo DPH ne); položka se sazbou CZ-NA nikdy nedostane klasifikační kód (`replaceItems`) → nikdy nespadne do DP3/KH. DUZP se u typu `advance` v editoru skrývá, při přetypování se čistí (`updateDocumentKind`, `create`/`updateDraft`).
@@ -166,7 +194,7 @@ přepárovávat ho není nutné.
 - KH: DDKPZ v B.2 (DIČ dodavatele, ev. číslo dokladu dodavatele, DPPD = den přijetí úplaty), konečná faktura s nulovým rozdílem se **neuvádí**, zálohy nikde (ověřeno i ve stavu `received`). DP3 ř. 40 sedí v obou měsících záloh.
 - ISDOC: DDKPZ `DocumentType 5` + `VATApplicable true`; **nově se generuje `<TaxedDeposits>` + `AlreadyClaimed*`/`Difference*`** (dřív odešla konečná faktura jako doklad se samými nulami a dvěma záhadnými minusovými řádky). Auto-odpočtové řádky se do `InvoiceLines` nevypisují. Zálohová faktura (typ 4) má nulovou rekapitulaci DPH a **žádné `TaxPointDate`** (dřív se DUZP dopočítalo z data vystavení — `PurchaseInvoiceExportService`).
 - Pohoda: DDKPZ = `receivedInvoice` (v `invoiceTypeType` typ pro přijatý daňový doklad k záloze neexistuje), zálohy `receivedAdvanceInvoice`.
-- `unlink()` vrací **přesně** předchozí rekapitulaci — snapshot `settlement_recap_backup` (migrace **0907**); z hrubé částky ji zrekonstruovat nelze (475 992,00 → vždy 393 381,82/82 610,18, i když doklad nesl …,83/…,17).
+- `unlink()` vrací **přesně** předchozí rekapitulaci — snapshot `settlement_recap_backup` (migrace **0907**); z hrubé částky ji zrekonstruovat nelze (111 000,00 → vždy 91 735,53/19 264,47, i když doklad nesl …,83/…,17).
 - `buildVatBreakdown` zaokrouhluje (dřív 0,00 vycházelo jako 5.8e-11 v JSON API).
 
 **Testy:** +10 v `KhDphTaxScenariosTest` (§ 37a: plná záloha na nulu vč. slevy v mínusu, doplatek, přeplatek se sazbou zálohy, dvě sazby se zálohou jen k jedné, invariant znamének, zaplacená záloha mimo DPH/KH/DzP, 15denní lhůty ve 4 scénářích). `PurchaseAdvanceLinkTest` srovnán na novou sémantiku nákladů. Suita **1975 zelených**, type-check OK. Pozn.: testy vyžadují v `cfg.php` sekci `varsymbol.templates` (jinak 6 chyb v `RecurringGeneratorTest`).
@@ -183,13 +211,13 @@ přepárovávat ho není nutné.
 3. **`PurchaseSettlementService`** (nový): link/unlink DDKPZ ↔ konečná faktura v transakci s atomickým claimem; volitelné doplnění odpočtových řádků (per sazba+klasifikace+majetek) + `vat_overrides` = rekapitulace − DDKPZ (haléřová přesnost vůči dokladu, reziduum přišpendlí InvoiceMath); unlink řádky odebere a settlementové overrides odstraní. Guardy: draft/storno/dobropis/RC/bez nároku/`advance_paid_amount`≠0 (dvojí odečet), potvrzení visícího AI návrhu vazby na zálohu. Nové endpointy: GET settlement-doc-candidates, GET final-candidates, POST/DELETE link-settlement-doc (+ openapi).
 4. **Ochrany integrity:** storno/smazání/změna typu dokladu s vazbami vrací 409 (`has_settlement_links`); editor nesmí smazat flagované odpočtové řádky (`settlement_rows_locked`); `settlement_source` z klientského payloadu prochází whitelistem; guard změny typu i v `updateDraft`. UI warningy: `settlement_deduction_mismatch` (§ 37a nesedí/chybí), `tax_document_late` (> 15 dnů od úplaty, § 28/8), `advance_missing_warning` (zaplacená záloha bez spárovaného DD/faktury po 15 dnech). Cash výdaje (`TaxProfileRepository::monthExpenses`): DDKPZ se nikdy nesčítá; zaplacená záloha vypadává jen ukazuje-li na ni ne-DDKPZ doklad.
 5. **AI extrakce:** prompt zná `tax_document` (rozpoznání „daňový doklad k přijaté záloze", den přijetí platby → tax_date, `advance_reference` → návrh párování přes VS). **Konflikt „doklad s DPH × dodavatel neplátce": sazby se už NEPŘEPISUJÍ na 0 %** — zůstanou dle dokladu, odpočet konzervativně 'none', blokující varování „ověř DIČ". Kontrola součtu: rozdíl „K úhradě" z PDF vs. uloženo ≥ 1 Kč → warning (dřív se tiše zahodil). Jediný whitelist typů: `PurchaseInvoiceValidation::ALLOWED_DOC_KINDS` (BE 4 duplicity sjednoceny) + `web/src/constants/purchaseDocumentKinds.ts` (FE 4 selecty vč. AI dávkového — doplněn i `advance`).
-6. **ARES skupinová registrace DPH (kořen chyby „Direct auto Praha = neplátce"):** `AresClient` čte `stavZdrojeSkDph`+`dicSkDph` → člen DPH skupiny je plátce s DIČ skupiny CZ699*; `VendorVatPayerResolver` vrací DIČ z registru a doplní ho na kartu (jen bylo-li prázdné); `ClientResolver`/ClientForm/Setup preferují `dic_sk_dph` jako fallback.
+6. **ARES skupinová registrace DPH (kořen chyby „Autocentrum Delta = neplátce"):** `AresClient` čte `stavZdrojeSkDph`+`dicSkDph` → člen DPH skupiny je plátce s DIČ skupiny CZ699*; `VendorVatPayerResolver` vrací DIČ z registru a doplní ho na kartu (jen bylo-li prázdné); `ClientResolver`/ClientForm/Setup preferují `dic_sk_dph` jako fallback.
 
 **Soubory:** db/migrations/0904; api/src: Service/Invoice/PurchaseSettlementService (nový), Repository/PurchaseInvoiceRepository (vazby, kandidáti, whitelist, DZ prefix, payload flagy), Validation/PurchaseInvoiceValidation, Action/PurchaseInvoice/{LinkSettlementDoc,UnlinkSettlementDoc,SettlementDocCandidates,FinalCandidates} (nové) + {Delete,Update,Transition,SetDocumentKind}, Service/Import/{AiPdfExtractor,AnthropicClient,ClientResolver,IsdocParser,IsdocToPurchaseInvoiceMapper}, Service/Ares/{AresClient,VendorVatPayerResolver}, Repository/{ClientRepository,TaxProfileRepository}, Export/PurchaseInvoiceExportService, Pdf/PurchaseInvoicePdfRenderer, Routes, openapi; web/src: constants/purchaseDocumentKinds.ts (nový), api/{purchaseInvoices,clients}.ts, pages purchase-invoices/{InvoiceDetail,InvoiceEditor,InvoiceList}, admin/Integrations, clients/ClientForm, Setup, i18n cs/en.
 
 **Testy:** KhDphTaxScenariosTest +4 (DDKPZ B.2 nad limit + ř. 40, B.3 do limitu, konečná jen rozdílem, PurchaseSettlementService haléřová přesnost + unlink restore), AiPdfExtractorUnitTest +6 (documentShowsVat, normalizeDocumentKind), PurchaseImportBatchAndKindTest aktualizován na novou sémantiku guardů. Suita 1952 zelených; adversarial review (20 agentů) — 14 potvrzených nálezů opraveno.
 
-**Jak ověřit po merge:** `vendor/bin/phpunit --filter 'KhDphTaxScenarios|PurchaseImportBatchAndKind|AiPdfExtractorUnit'` zelené; editor přijaté faktury nabízí 5 typů; AI import ukáže select se všemi typy; detail konečné faktury umí „Spárovat s daň. dokladem k záloze" a po spárování ukazuje minusové řádky; ARES lookup IČO 25114719 vrací plátce + DIČ CZ699003841.
+**Jak ověřit po merge:** `vendor/bin/phpunit --filter 'KhDphTaxScenarios|PurchaseImportBatchAndKind|AiPdfExtractorUnit'` zelené; editor přijaté faktury nabízí 5 typů; AI import ukáže select se všemi typy; detail konečné faktury umí „Spárovat s daň. dokladem k záloze" a po spárování ukazuje minusové řádky; ARES lookup IČO 44444444 vrací plátce + DIČ CZ699003841.
 
 ## 2026-07-28 — UPDATE z upstreamu: v4.51.0 → **v4.52.0** (přijetí našeho PR #245)
 
@@ -253,7 +281,7 @@ Tři oddělené operace: **storno/dobropis** (beze změny, primární cesta) →
 
 **Charakter: BUGFIX — ✅ PŘIJATO UPSTREAMEM** (PR #245 mergnut, vydáno ve **v4.52.0**; od merge tagu je to už upstream kód, ne fork úprava — při dalších updatech se nekontroluje). Fork VERSION bump 4.51.1 zanikl s přechodem na 4.52.0.
 
-1. **CZ-NACE / c_okec:** ukládání normalizuje na 6místný kód číselníku MFČR (73.11/7311 → 731100, 62020 → 620200); pod 4 číslice (oddíl z ARES, např. „74") → 422 a neuloží se. ARES prefill bere NEJDELŠÍ kód z czNace, u pouhého oddílu nechává pole prázdné + `cz_nace_note` pro UI (Settings toast). Build (normalizeOkec) neúplný kód VYNECHÁ (c_okec optional — dřív by šel ven a EPO hlásilo propustnou chybu 30). UI: placeholder 731100, nový hint, inline validace, normalizace na blur. EpoIdentityValidator u DP3 varuje i na neúplný kód s odkazem na chybu 30. **Data: PROPSOL cz_nace_code opraveno „74" → „731100".**
+1. **CZ-NACE / c_okec:** ukládání normalizuje na 6místný kód číselníku MFČR (73.11/7311 → 731100, 62020 → 620200); pod 4 číslice (oddíl z ARES, např. „74") → 422 a neuloží se. ARES prefill bere NEJDELŠÍ kód z czNace, u pouhého oddílu nechává pole prázdné + `cz_nace_note` pro UI (Settings toast). Build (normalizeOkec) neúplný kód VYNECHÁ (c_okec optional — dřív by šel ven a EPO hlásilo propustnou chybu 30). UI: placeholder 731100, nový hint, inline validace, normalizace na blur. EpoIdentityValidator u DP3 varuje i na neúplný kód s odkazem na chybu 30. **Data: Beta Servis cz_nace_code opraveno „74" → „731100".**
 2. **Propustná chyba 49:** DP3 preview porovnává součet daně z dokladů na ř. 40/41 s round(zaokrouhlený základ × sazba) a rozdíl hlásí warningem („…neupravuj ji" — hodnota odpovídá KH B.2/B.3). XML se nikdy nepřepisuje, generování se neblokuje. Ověřeno na Q1/2026: rozdíl 1 Kč na ř. 40 (5227 vs 5228).
 3. Testy: CzNaceNormalizationTest, CzNaceAndRoundingTest (nové), AresNormalizeNaceTest přepsán na novou sémantiku (nejdelší kód; oddíl → prázdno+note). Manuál kap. 29 (tabulka c_okec, troubleshooting chyb 30/49). Suita 1942 zelených.
 
@@ -262,7 +290,7 @@ Tři oddělené operace: **storno/dobropis** (beze změny, primární cesta) →
 **Charakter: BUGFIX — ✅ PŘIJATO UPSTREAMEM** (PR #245 mergnut, vydáno ve **v4.52.0**; upstream kód, při updatech se nekontroluje). Podklady zůstávají v `/root/vat-fix-snapshots/`.
 
 1. **BUG 5 — zámek stavu bez cesty ven z UI:** oba editory (vydané i přijaté) zobrazují u uzamčeného dokladu výstražný pruh + admin tlačítko **„Odemknout k editaci"** → modal s výslovnými následky a povinným checkboxem; formulář je do odemčení `fieldset[disabled]`; příznak nepřežije reload a `?force=1` z URL se ignoruje. Backend: bez force 409 s návodem, force bez admin 403; audit **`invoice.force_edit` / `purchase_invoice.force_edit`** s diffem polí + starým/novým snapshotem (dřív jen `force_updated` bez detailu). Nový **POST `/api/invoices/{id}/rebuild-snapshots`** („Obnovit údaje klienta", admin) — přepíše jen snapshoty z live dat i u zaplacené faktury, audit `invoice.rebuild_snapshots`.
-2. **BUG 6 — EPO XML bez povinné identifikace:** nový **`EpoIdentityValidator`** (povinné: kód FÚ, **ÚzP/c_pracufo**, DIČ, typ poplatníka, e-mail; u PO opr_*; doporučené: telefon, CZ-NACE u DP3). KH/DP3/SHV preview i download vrací **422 `epo_identity_incomplete`** s `missing[]` + `settings_url`; report stránky to kreslí jako blok s výčtem a odkazem na `/admin/settings#epo`; Settings mají kotvu #epo, badge „Nekompletní — EPO podání selže", červené hinty a nápovědu ÚzP. PUT suppliers vrací `epo_ready`+`missing` (informativně). **POZOR: BEKRON (supplier 1) nemá ÚzP ani oprávněnou osobu → jeho výkazy vrací 422, dokud se pole nedoplní** (PROPSOL je kompletní).
+2. **BUG 6 — EPO XML bez povinné identifikace:** nový **`EpoIdentityValidator`** (povinné: kód FÚ, **ÚzP/c_pracufo**, DIČ, typ poplatníka, e-mail; u PO opr_*; doporučené: telefon, CZ-NACE u DP3). KH/DP3/SHV preview i download vrací **422 `epo_identity_incomplete`** s `missing[]` + `settings_url`; report stránky to kreslí jako blok s výčtem a odkazem na `/admin/settings#epo`; Settings mají kotvu #epo, badge „Nekompletní — EPO podání selže", červené hinty a nápovědu ÚzP. PUT suppliers vrací `epo_ready`+`missing` (informativně). **POZOR: Alfa Trade (supplier 1) nemá ÚzP ani oprávněnou osobu → jeho výkazy vrací 422, dokud se pole nedoplní** (Beta Servis je kompletní).
 3. **Bonus — VIES vs. skupinová registrace:** CZ DIČ s kmenem 699* se ověřuje v registru plátců DPH (CrpDphClient), ne ve VIES (falešné „není platné"); `VendorVatPayerResolver` u CZ699 nikdy nepersistuje neplátce z VIES.
 
 Testy: ForceEditUnlockTest, EpoIdentityGuardTest, ViesClientCzRoutingTest (+2). Bez migrací. openapi + manuál kap. 9/17/29 aktualizovány, HTML regenerováno. Ověřit po merge: suita zelená; editor vydané faktury ukazuje zámek+odemčení; KH preview u nekompletního tenanta vrací výčet chybějících polí.

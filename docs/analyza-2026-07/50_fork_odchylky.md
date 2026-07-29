@@ -58,7 +58,7 @@ Snapshot: 2026-07-28. Zdroje: lokální git (`/opt/myinvoice`), databáze běž�
   nespadne do DP3/KH), invariant znamének, vyloučení záloh z nákladových agregací, opravy
   exportů (Pohoda: DIČ + evidenční číslo dodavatele + platební VS; ISDOC: `TaxedDeposits`
   a `AlreadyClaimed` dle § 37a), blokující rozpor v AI extrakci a CLI přepočet dokladů.
-  **Reálně v provozu: BEKRON má 4 DDKPZ.** → uzavírá návrh N-008.
+  **Reálně v provozu: Alfa Trade má 4 DDKPZ.** → uzavírá návrh N-008.
 - **Koš dokladů** (0905) — soft-delete se snapshoty, retence (výchozí **30 dní**), cron výsyp,
   hromadné operace, read-only guard a vyloučení z agregací; DPH blokace u dokladů ve výkazech.
   → uzavírá návrh N-019 (retenci i hlídání vazeb doporučovala analýza a jsou v implementaci).
@@ -101,15 +101,15 @@ není manuál, ale **kontextová** nápověda (odkazy z konkrétních obrazovek 
 
 ## 5. Reálná konfigurace a data instance (večer 2026-07-28)
 
-- **Dodavatelé (2):** BEKRON, s.r.o. (IČ 28173309, plátce, PO, řada `{YY}FA/{MM}/{CC}`,
-  splatnost 14 dní) · PROPSOL, s.r.o. (IČ 24682993, plátce, PO, kvartální DPH,
+- **Dodavatelé (2):** Alfa Trade s.r.o. (IČ 11111111, plátce, PO, řada `{YY}FA/{MM}/{CC}`,
+  splatnost 14 dní) · Beta Servis s.r.o. (IČ 22222222, plátce, PO, kvartální DPH,
   řada `{YYYY}{MM}{CC}`).
-  ⚠ **BEKRON stále nemá vyplněné `vat_period`** (PROPSOL má quarterly) → součást N-001.
+  ⚠ **Alfa Trade stále nemá vyplněné `vat_period`** (Beta Servis má quarterly) → součást N-001.
 - **Uživatelé:** 1 aktivní admin (2FA), 1 deaktivovaný. **Žádný účet s rolí účetní** —
   infrastruktura existuje (nově upstream `user_suppliers` + role per firmu), ale účetní
   přístup nemá. Klíčové pro personu B.
 - **Data:** 13 klientů (7 dodavatelů), 13 vydaných faktur, přijaté doklady:
-  BEKRON 2 faktury + 4 zálohy + **4 DDKPZ**, PROPSOL 36 faktur + 15 záloh + 1 dobropis;
+  Alfa Trade 2 faktury + 4 zálohy + **4 DDKPZ**, Beta Servis 36 faktur + 15 záloh + 1 dobropis;
   15 dokumentů v DMS, **156+ záznamů v archivu podání**, sazby DPH 21/12/0/RC + ⟳ CZ-NA „Mimo DPH".
 - **AI import:** BYOK Anthropic, 55+ extrakcí. ARES i VIES se používají.
 - **Banka — infrastruktura nevyužita:** 0 výpisů, 0 transakcí, 0 IMAP účtů, 0 spárovaných plateb.

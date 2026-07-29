@@ -1,8 +1,8 @@
 # 20 · Persona A — běžný uživatel (majitel malého s.r.o. / OSVČ)
 
-Průchod ročním cyklem fakturace v MyInvoice (stav fork ⟳ 4.52.1, instance faktury.betka.eu)
+Průchod ročním cyklem fakturace v MyInvoice (stav fork ⟳ 4.52.1, instance faktury.example.com)
 a srovnání s tím, jak stejný krok řeší iDoklad, Vyfakturuj a Fakturoid. Konkrétní kontext
-instance: 2 firmy (BEKRON, PROPSOL — obě s.r.o., plátci DPH), fakturuje jednatel sám,
+instance: 2 firmy (Alfa Trade, Beta Servis — obě s.r.o., plátci DPH), fakturuje jednatel sám,
 platby označuje ručně (banka nenapojena), účetnictví zpracovává externí účetní.
 
 ## 1. Onboarding a první spuštění
@@ -89,7 +89,7 @@ používá (156 podání v archivu).
 **Konkurence:** všichni generují XML jen v nejvyšších tarifech; Vyfakturuj jen „podklady"
 (část řádků ručně), Fakturoid bez vývozu/dovozu, dodatečná podání nikdo.
 
-**Třecí místo TM-A6:** žádné vůči konkurenci (jsme napřed). Interní: BEKRON nemá vyplněné
+**Třecí místo TM-A6:** žádné vůči konkurenci (jsme napřed). Interní: Alfa Trade nemá vyplněné
 zdaňovací období (`vat_period`) — drobnost s dopadem na výkazy → N-001.
 
 ## 7. Podklady pro účetní
