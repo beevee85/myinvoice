@@ -2608,6 +2608,20 @@
     "unpaid_upcoming": "Nezaplacené (před splatností)",
     "unpaid_none": "Žádné neuhrazené faktury"
   },
+  "bank_api": {
+    "title": "Automatické stahování z banky",
+    "subtitle": "Pohyby se stáhnou přímo z Fio API a rovnou se spárují s fakturami — bez ručního nahrávání výpisu.",
+    "enabled": "Stahovat automaticky",
+    "token_placeholder": "Token z internetového bankovnictví Fio",
+    "token_saved": "Token je uložený — vyplň jen při změně",
+    "test": "Otestovat",
+    "fetch_now": "Stáhnout teď",
+    "saved": "Napojení uloženo.",
+    "fetched": "Staženo {created} nových pohybů, spárováno {matched}.",
+    "never_fetched": "Zatím nestahováno.",
+    "no_accounts": "Nejdřív vyplň číslo účtu u některé měny výše.",
+    "hint": "Token vytvoříš ve Fio internetovém bankovnictví (Nastavení → API). Stačí právo pro čtení; platnost je nejvýše 180 dní, pak se token obnovuje. Stahuje se posledních 90 dní s překryvem, takže opakované stažení nic nezduplikuje."
+  },
   "bank_accounts": {
     "title": "Bankovní účty",
     "subtitle": "Bankovní výpisy, měny a účty dodavatele, stavy na účtech a e-mailová avíza (IMAP).",

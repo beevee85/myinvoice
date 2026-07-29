@@ -858,7 +858,7 @@ final class BankStatementAction
         // SET NULL → platba zůstane, ztratí ale vazbu; payment_matches CASCADE → vazba
         // přijaté faktury zmizí úplně). U GPC/PDF chování neměníme.
         // Počítáme ŽIVĚ (ne uložený matched_count) — odolné vůči stale hodnotě.
-        if (in_array((string) $ownedRow['source'], ['email_notice', 'idoklad'], true)) {
+        if (in_array((string) $ownedRow['source'], ['email_notice', 'idoklad', 'fio'], true)) {
             $matchedLive = (int) $pdo->query(
                 "SELECT COUNT(*) FROM bank_transactions
                   WHERE statement_id = " . (int) $id . "
@@ -980,7 +980,7 @@ final class BankStatementAction
         // PDF — přikládání PDF u něj nedává smysl. UI tlačítko skrývá, server pro jistotu blokuje.
         $srcStmt = $this->db->pdo()->prepare('SELECT source FROM bank_statements WHERE id = ?');
         $srcStmt->execute([$id]);
-        if (in_array((string) $srcStmt->fetchColumn(), ['email_notice', 'idoklad'], true)) {
+        if (in_array((string) $srcStmt->fetchColumn(), ['email_notice', 'idoklad', 'fio'], true)) {
             return Json::error($response, 'unsupported', 'K virtuálnímu výpisu nelze přikládat PDF.', 400);
         }
 

@@ -15,6 +15,8 @@ Uživatel chce tyto fork funkce navrhnout autorovi. Detailní checklist „před
 | Omezení uživatele na vybrané firmy (0900) | 2026-07-02 FÁZE 2 | ✅ **PŘEVZATO JINAK** — PR #247 zavřen, autor vydal vlastní implementaci (`user_suppliers` + role per firmu) ve **v4.52.0**; naše verze odstraněna migrací 0908 | hotovo |
 | Daňový doklad k přijaté záloze (DDKPZ) + § 37a na přijaté straně (0904, 0906–0911, hotfix 2026-07-29) | 2026-07-28 (tři dávky) + 2026-07-29 | **kandidát — ODLOŽENO na později** (rozhodnutí 28. 7. 2026: nejdřív provozní ověření, ideálně po podání KH za 05–07/2026; pořadí: nejdřív koš, pak DDKPZ, ať se nemusí odstřihávat) | přečíslovat migrace 0904/0906 do upstream řady; oddělit od fork-only koše (DocumentTrashPolicy, TrashGuard v settlement akcích) a od sazby CZ-NA, pokud ji upstream nechce; doplnit kapitolu manuálu + openapi (endpointy settlement-doc-candidates / final-candidates / link-settlement-doc) |
 
+| Přímé napojení na Fio banku (0921) | 2026-07-29 | **kandidát** — samostatná funkce, nezávislá na ostatních fork blocích | přečíslovat migraci 0921 do upstream řady; upstream bude nejspíš chtít abstrakci „poskytovatel API" místo Fio-only tabulky |
+
 Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jednu z těchto funkcí upstream nemá.
 
 ---
@@ -191,6 +193,97 @@ na PDF dodavatele a zaokrouhlovací řádek § 37a nést základ i daň s opačn
 — po nasazení této opravy by tentýž stav vyrobila služba sama. Doklad #57 (Autocentrum Delta,
 `paid`) drift z minulosti nese, je ale vyrovnaný (0,00/0,00) a do výkazů nevstupuje;
 přepárovávat ho není nutné.
+
+---
+
+## 2026-07-29 — Přímé napojení na Fio banku (REST API), migrace 0921
+
+**Charakter: FORK FEATURE** — realizace návrhu **N-003** ze srovnávací analýzy
+(`docs/analyza-2026-07/40_navrhy.md`). Větev `feat/fio-bank`.
+
+**Proč:** párovací aparát i cron infrastruktura existují, chyběl jen zdroj dat — platby
+se musely nahrávat ručně z GPC výpisu. Fio nabízí veřejné REST API s tokenem.
+(Pozn.: parser Fio e-mailových avíz v repu už byl, takže „fáze a" návrhu odpadla —
+zbývala jen konfigurace IMAP účtu.)
+
+**Co se změnilo:**
+1. **`FioApiClient`** — čte JEN `/periods/{token}/{od}/{do}/transactions.json`. Endpoint
+   `/last/` se vědomě NEpoužívá: posouvá serverovou zarážku už při stažení, ne po našem
+   uložení, takže pád mezi HTTP odpovědí a commitem by znamenal tiše a nevratně ztracené
+   pohyby. `/periods/` je idempotentní. Mapování číslovaných sloupců (22 = ID pohybu,
+   0 = datum, 1 = objem, …), **obranné parsování data** (dnes `2026-03-01+0100`, příklady
+   v oficiálním PDF z roku 2012 mají epoch v ms — epoch se převádí do aplikační zóny,
+   jinak by půlnoční pohyb spadl o den vedle a na přelomu měsíce do jiného období),
+   překlad chybových stavů do češtiny (500 = neplatný/propadlý token, ne výpadek banky).
+   Token je součástí URL, takže se **nikdy** nedostane do výjimky ani do logu.
+2. **`FioTransactionImporter`** — klouzavé okno od posledního uloženého pohybu mínus
+   7 dní (zpětná doúčtování a storna), nejdál 89 dní zpět. Deduplikace aplikačně přes
+   `(source='fio', source_ref)` — DB unikát repo vědomě nemá (0136/0139 ho zrušily,
+   protože blokoval upgrade). Syntetický měsíční výpis (statement_id je NOT NULL),
+   měna se bere z účtu (Fio ji u některých výstupů plní konstantně, viz #109).
+3. **Pořadí autority zdrojů** (jinak dvojí úhrada faktury): nahraný výpis (GPC/PDF) →
+   **Fio API** → e-mailové avízo / iDoklad. `EmailNoticeReconciler` rozšířen na obou
+   stranách: přebírat smí i zdroj `fio` (po slabších zdrojích, ne po jiném `fio`),
+   a `fio` naopak ustoupí existujícímu oficiálnímu výpisu.
+4. **`bank_api_credentials`** (migrace **0921**) — token per bankovní účet (`currencies.id`,
+   ne per měnu; víc účtů v jedné měně je podporovaný scénář), šifrovaný `SecretEncryption`.
+   Vědomě NEjde o sloupec na `currencies` — ta se serializuje do veřejného
+   `/api/v1/settings/currencies` a tajemství by tam byla trvalá past. Enum `source`
+   rozšířen na `bank_statements` i `bank_transactions`.
+5. **API + UI + cron:** `BankApiCredentialsAction` (list/save/delete/test/fetch, admin only,
+   token se do UI ani do auditu nevrací — jen `has_token` a příznak „token se měnil"),
+   sekce *Automatické stahování z banky* v Banka → Bankovní účty, `cron-fio-bank.php`
+   + wrappery `.sh`/`.cmd`; položka v `CronCatalog` se sama propíše do crontabu image.
+
+**Testy:** `FioApiClientTest` (8 unit — mapování sloupců, obě varianty data vč. přelomu
+měsíce, prázdné období, pohyb bez ID), `FioTransactionImporterTest` (6 integračních —
+uložení + syntetický výpis, idempotence opakovaného stažení, měsíční členění výpisů,
+kurzor, ustoupení oficiálnímu výpisu). Suita **2040 zelených**, type-check i build OK.
+
+**Jak ověřit po merge:** migrace 0921 aplikovaná; Banka → Bankovní účty ukazuje sekci
+s účty; po vložení tokenu **Otestovat** vrátí počet pohybů za 7 dní; **Stáhnout teď**
+založí pohyby se zdrojem `fio` a spáruje je; druhé spuštění nic nezduplikuje.
+
+**Opraveno adversariální kontrolou vlastní změny (8 potvrzených nálezů před commitem):**
+- **Dedup fungoval jen jedním směrem** (kritické): když Fio API stáhlo pohyb dřív, než
+  dorazilo e-mailové avízo, avízo se spárovalo bez jakékoli cross-source kontroly →
+  dvojí úhrada faktury. Cesta avíz totiž volala matcher rovnou. Nově
+  `BankEmailNoticeScanner` předává `EmailNoticeReconciler` do
+  `createTransactionFromNotice()` a slabší zdroj ustoupí. Pozn.: touž dírou trpěl
+  i souběh GPC → avízo, takže oprava zavírá i starší chybu. Test
+  `testAvizoPoFioApiNezaplatiFakturuDvakrat`.
+- **Převzatý Fio pohyb zůstával `unmatched`** místo `ignored` (whitelist v `transfer()`
+  znal jen `idoklad`) — po „Přepárovat" na Fio výpisu by se úhrada založila znovu.
+- **Guard mazání výpisu** (`BankStatementAction`) neznal `fio`, takže šlo smazat
+  syntetický měsíční výpis s desítkami spárovaných pohybů; kaskáda by vzala
+  `payment_matches` a odpojila `invoice_payments`. Doplněno na obou místech.
+- **Tichá díra v okně:** když je kurzor starší než 90denní historie API, interval mezi
+  ním a oknem se nestáhne nikdy. Nově se rozpozná a stav se zapíše jako chyba
+  s konkrétním rozsahem („doplň nahráním výpisu"), ne jako `ok`.
+- **Nerozpoznané pohyby** se počítaly mezi „už existovalo" — při změně formátu data
+  u banky by tichá ztráta plateb vypadala jako úspěšný běh. Nový čítač `dropped`
+  překlápí stav na chybu.
+- **Nerozšifrovatelný token** (výměna `secret_encryption_key`) účet tiše vyřadil ze
+  stahování se zelenými ukazateli — nově se loguje.
+- **Chyba mimo `FioApiException`** (např. deadlock) přeskočila zápis stavu a zastavila
+  ostatní účty → `catch (\Throwable)` + `recordFetch('error')`.
+- **`PDOException` se vracela jako `validation_failed`** s textem DB chyby (jména tabulek
+  a indexů) — nově propadne jako 500. Fallback `supplierId` srovnán na 0 jako u ostatních
+  46 volání (dřív 1, tedy „neznámý tenant = dodavatel č. 1" na endpointu s tokeny).
+- Test se opravil z **kritického nálezu**: `cleanup()` mazal podle produkčního názvu
+  výpisu `Fio API %` a rušil `bank_api_credentials` celého dodavatele — proti reálné DB
+  by kaskádou smazal skutečné pohyby i vazby plateb. Nově si test zakládá VLASTNÍ
+  bankovní účet a uklízí výhradně jeho data.
+
+**Známé dluhy:**
+- Souběh cronu a tlačítka „Stáhnout teď" není zamčený; při přesném souběhu by aplikační
+  dedup mohl minout (DB unikát není). Řešení = advisory lock (GET_LOCK) v importéru.
+- Rate limit 30 s/token se nehlídá aktivně — při ručním stažení hned po cronu vrátí
+  banka 409 s naváděcí hláškou.
+- Při HTTP 413 (příliš mnoho pohybů v okně) se okno automaticky nepůlí; první běh
+  na velmi frekventovaném účtu může skončit chybou a je potřeba doplnit výpisem.
+- `DbErrorLogger` nemá `token_enc` v seznamu maskovaných polí — při chybě dotazu by se
+  do logu dostal šifrovaný token (ciphertext, ne plaintext).
 
 ---
 

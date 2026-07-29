@@ -9,6 +9,7 @@ import {
   type BankEmailImapSettings,
   type BankEmailProcessedMessage,
   type BankEmailProvider,
+  type BankApiAccount,
   type CurrencyAccount,
   type Supplier,
 } from '@/api/settings'
@@ -272,6 +273,8 @@ async function load() {
 }
 
 onMounted(load)
+// FORK 0921: stav napojení na Fio API se načítá vedle ostatních dat účtů.
+onMounted(loadBankApi)
 
 async function loadMessagesPage(p: number) {
   const np = Math.min(Math.max(1, p), messagesTotalPages.value)
@@ -717,6 +720,63 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
     toast.error(apiErrorMessage(e, t('common.error')))
   }
 }
+// ── FORK 0921: přímé napojení na banku (Fio API) ────────────────────────────
+// Token do UI nikdy nechodí zpátky — server vrací jen has_token. Prázdné pole
+// při uložení proto znamená „ponech dosavadní token", ne „smaž ho".
+const bankApiAccounts = ref<BankApiAccount[]>([])
+const bankApiTokens = reactive<Record<number, string>>({})
+const bankApiBusy = ref(false)
+const bankApiLoadError = ref('')
+
+async function loadBankApi() {
+  try {
+    bankApiAccounts.value = await settingsApi.listBankApiAccounts()
+    bankApiLoadError.value = ''
+  } catch (e) {
+    bankApiLoadError.value = apiErrorMessage(e)
+  }
+}
+
+async function saveBankApi(acc: BankApiAccount, enabled: boolean) {
+  bankApiBusy.value = true
+  try {
+    const token = (bankApiTokens[acc.currency_id] ?? '').trim()
+    bankApiAccounts.value = await settingsApi.saveBankApiAccount(acc.currency_id, { enabled, token })
+    bankApiTokens[acc.currency_id] = ''
+    toast.success(t('bank_api.saved'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    bankApiBusy.value = false
+  }
+}
+
+async function testBankApi(acc: BankApiAccount) {
+  if (acc.id === null) return
+  bankApiBusy.value = true
+  try {
+    const res = await settingsApi.testBankApiAccount(acc.id)
+    res.ok ? toast.success(res.message) : toast.error(res.message)
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    bankApiBusy.value = false
+  }
+}
+
+async function fetchBankApiNow() {
+  bankApiBusy.value = true
+  try {
+    const { result, accounts } = await settingsApi.fetchBankApiNow()
+    bankApiAccounts.value = accounts
+    if (result.errors.length > 0) toast.error(result.errors[0])
+    else toast.success(t('bank_api.fetched', { created: result.created, matched: result.matched }))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    bankApiBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -832,6 +892,68 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
 
         <div class="px-5 py-3 border-t border-neutral-200 bg-neutral-50 text-xs text-neutral-600">
           {{ t('bank_accounts.multi_account_hint') }}
+        </div>
+      </section>
+
+      <!-- FORK 0921 — Automatické stahování pohybů z banky (Fio API) -->
+      <section class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <header class="px-5 py-3 border-b border-neutral-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('bank_api.title') }}</h2>
+            <p class="text-xs text-neutral-500 mt-0.5">{{ t('bank_api.subtitle') }}</p>
+          </div>
+          <button type="button" :disabled="bankApiBusy" @click="fetchBankApiNow"
+            class="cursor-pointer shrink-0 self-start sm:self-auto whitespace-nowrap h-9 px-4 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium rounded-md">
+            {{ t('bank_api.fetch_now') }}
+          </button>
+        </header>
+
+        <div v-if="bankApiLoadError" class="px-5 py-3 text-sm text-warning-700 bg-warning-50">{{ bankApiLoadError }}</div>
+
+        <div v-else-if="bankApiAccounts.length === 0" class="px-5 py-4 text-sm text-neutral-500">
+          {{ t('bank_api.no_accounts') }}
+        </div>
+
+        <div v-else class="divide-y divide-neutral-200">
+          <div v-for="acc in bankApiAccounts" :key="acc.currency_id" class="px-5 py-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div class="min-w-0">
+                <div class="text-sm font-medium">
+                  {{ acc.account_number }}<span v-if="acc.bank_code">/{{ acc.bank_code }}</span>
+                  <span class="text-neutral-500 font-normal"> · {{ acc.currency }}</span>
+                </div>
+                <p v-if="acc.last_fetch_at" class="text-xs mt-0.5"
+                   :class="acc.last_fetch_status === 'error' ? 'text-danger-600' : 'text-neutral-500'">
+                  {{ formatDate(acc.last_fetch_at) }} — {{ acc.last_fetch_message }}
+                </p>
+                <p v-else class="text-xs text-neutral-500 mt-0.5">{{ t('bank_api.never_fetched') }}</p>
+              </div>
+              <label class="flex items-center gap-2 text-sm shrink-0">
+                <input type="checkbox" :checked="acc.enabled" :disabled="bankApiBusy"
+                  @change="saveBankApi(acc, ($event.target as HTMLInputElement).checked)"
+                  class="rounded border-neutral-300 text-primary-600" />
+                {{ t('bank_api.enabled') }}
+              </label>
+            </div>
+
+            <div class="mt-3 flex flex-col sm:flex-row gap-2">
+              <input v-model="bankApiTokens[acc.currency_id]" type="password" autocomplete="off"
+                :placeholder="acc.has_token ? t('bank_api.token_saved') : t('bank_api.token_placeholder')"
+                class="flex-1 h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+              <button type="button" :disabled="bankApiBusy" @click="saveBankApi(acc, acc.enabled)"
+                class="cursor-pointer h-9 px-4 border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 text-sm rounded-md">
+                {{ t('common.save') }}
+              </button>
+              <button type="button" v-if="acc.id !== null && acc.has_token" :disabled="bankApiBusy" @click="testBankApi(acc)"
+                class="cursor-pointer h-9 px-4 border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 text-sm rounded-md">
+                {{ t('bank_api.test') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="px-5 py-3 border-t border-neutral-200 bg-neutral-50 text-xs text-neutral-600">
+          {{ t('bank_api.hint') }}
         </div>
       </section>
       </div>

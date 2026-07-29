@@ -89,6 +89,17 @@ final class CronCatalog
                 'weekdays_only' => false,
                 'critical' => false,
             ],
+            // FORK 0921: stahování pohybů z Fio API. Banka pouští nejvýš 1 dotaz
+            // za 30 s na token, půlhodinový interval je proto bezpečný.
+            [
+                'script' => 'cron-fio-bank',
+                'recommended' => 'every_30_min',
+                'linux_cron' => '*/30 * * * *',
+                'windows_schtasks' => '/sc minute /mo 30',
+                'max_age_hours' => 4,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
             [
                 'script' => 'cron-scan-purchase-inbox',
                 'recommended' => 'every_10_min',

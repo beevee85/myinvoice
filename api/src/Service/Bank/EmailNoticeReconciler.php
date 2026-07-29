@@ -55,9 +55,18 @@ final class EmailNoticeReconciler
         );
         $stmt->execute([$gpcTxId]);
         $gpc = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($gpc === false || (string) $gpc['source'] !== 'statement') {
-            return null; // dedup je jen směrem GPC ← avízo
+        // Přebírat smí jen zdroj, který je nad avízem: oficiální výpis (GPC/PDF) a
+        // FORK 0921 nově i Fio API — obojí jsou data přímo z banky, kdežto avízo je
+        // parsovaný e-mail. Pořadí autority: výpis > Fio API > avízo / iDoklad.
+        $arriving = $gpc === false ? '' : (string) $gpc['source'];
+        if ($gpc === false || !in_array($arriving, ['statement', 'fio'], true)) {
+            return null; // dedup je jen směrem shora dolů
         }
+        // Fio API nepřebírá po jiném Fio API záznamu (dva různé pohyby se stejnou
+        // částkou a VS jsou legitimní); přebírá jen po slabších zdrojích.
+        $weakerSources = $arriving === 'statement'
+            ? ['email_notice', 'idoklad', 'fio']
+            : ['email_notice', 'idoklad'];
 
         $amount      = (float) $gpc['amount'];
         $gpcVsDigits = VariableSymbolNormalizer::digits((string) ($gpc['variable_symbol'] ?? ''));
@@ -76,16 +85,19 @@ final class EmailNoticeReconciler
         // Kandidáti: spárované e-mailové transakce TÉHOŽ supplierа (vlastnictví ověřeno
         // přes invoice_payments/payment_matches.supplier_id) se stejnou částkou (vč.
         // znaménka) v okně ±DATE_WINDOW_DAYS kolem data zaúčtování.
+        // Seznam zdrojů je uzavřený výčet z kódu (viz $weakerSources), ne vstup uživatele.
+        $weakerIn = "'" . implode("','", $weakerSources) . "'";
         $cand = $pdo->prepare(
             "SELECT bt.id, bt.source, bt.match_status, bt.matched_invoice_id, bt.matched_at, bt.matched_by,
                     bt.variable_symbol, bt.counterparty_account, bt.currency, bt.statement_id,
                     bs.account_number AS stmt_account, bs.bank_code AS stmt_bank, bs.currency AS stmt_currency
                FROM bank_transactions bt
                JOIN bank_statements   bs ON bs.id = bt.statement_id
-              WHERE bt.source IN ('email_notice','idoklad')
-                AND bs.source IN ('email_notice','idoklad')
+              WHERE bt.source IN ({$weakerIn})
+                AND bs.source IN ('email_notice','idoklad','fio')
                 AND ((bt.source = 'email_notice' AND bs.source = 'email_notice')
-                  OR (bt.source = 'idoklad' AND bs.source = 'idoklad'))
+                  OR (bt.source = 'idoklad' AND bs.source = 'idoklad')
+                  OR (bt.source = 'fio' AND bs.source = 'fio'))
                 AND bt.id <> ?
                 AND ABS(bt.amount - ?) <= ?
                 AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL ? DAY) AND DATE_ADD(?, INTERVAL ? DAY)
@@ -168,7 +180,16 @@ final class EmailNoticeReconciler
         );
         $stmt->execute([$secondaryTxId]);
         $secondary = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($secondary === false || (string) $secondary['source'] !== 'idoklad') return null;
+        // FORK 0921: pořadí důvěryhodnosti zdrojů je výpis (GPC/PDF) > Fio API >
+        // avízo / iDoklad. Slabší zdroj ustoupí, pokud už tentýž pohyb v systému je —
+        // jinak by tatáž platba uhradila fakturu dvakrát. Dřív se to řešilo jen
+        // u iDokladu, takže avízo dorazivší PO výpisu duplicitu vyrobilo.
+        $secondarySource = $secondary === false ? '' : (string) $secondary['source'];
+        if ($secondary === false || !in_array($secondarySource, ['idoklad', 'fio', 'email_notice'], true)) return null;
+        // Nad Fio API stojí jen oficiální výpis; nad avízem a iDokladem i Fio API.
+        $authoritative = $secondarySource === 'fio'
+            ? "(bt.source = 'statement' AND bs.source IN ('gpc','pdf'))"
+            : "((bt.source = 'statement' AND bs.source IN ('gpc','pdf')) OR (bt.source = 'fio' AND bs.source = 'fio'))";
         if ($this->resolveSupplierId($pdo, (string) $secondary['stmt_account'], (string) ($secondary['stmt_bank'] ?? '')) === 0) return null;
 
         $candidates = $pdo->prepare(
@@ -176,7 +197,7 @@ final class EmailNoticeReconciler
                     bs.account_number AS stmt_account, bs.bank_code AS stmt_bank,
                     bs.currency AS stmt_currency
                FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
-              WHERE bt.source = 'statement' AND bs.source IN ('gpc','pdf')
+              WHERE {$authoritative}
                 AND ABS(bt.amount - ?) <= ?
                 AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL ? DAY) AND DATE_ADD(?, INTERVAL ? DAY)"
         );
@@ -292,7 +313,7 @@ final class EmailNoticeReconciler
                     SET match_status = ?, matched_invoice_id = NULL,
                         matched_at = NULL, matched_by = NULL
                   WHERE id = ?"
-            )->execute([$secondarySource === 'idoklad' ? 'ignored' : 'unmatched', $emailTxId]);
+            )->execute([in_array($secondarySource, ['idoklad', 'fio'], true) ? 'ignored' : 'unmatched', $emailTxId]);
 
             // Přepočti matched_count avízo-výpisu (GPC výpis řeší StatementImporter).
             $pdo->prepare(

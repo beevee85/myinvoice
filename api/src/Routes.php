@@ -57,6 +57,7 @@ use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\SignatureDocumentSelectionAction;
 use MyInvoice\Action\Settings\SigningProfilesAction;
 use MyInvoice\Action\Settings\SupplierInvoiceCounterAction;
+use MyInvoice\Action\Bank\BankApiCredentialsAction;
 use MyInvoice\Action\Bank\BankEmailNoticeAction;
 use MyInvoice\Action\Bank\BankStatementAction;
 use MyInvoice\Action\Dashboard\SummaryAction;
@@ -658,6 +659,12 @@ final class Routes
         $app->post   ('/api/settings/currencies',                     [SettingsAction::class, 'createCurrency']);
         $app->put    ('/api/settings/currencies/{id:[0-9]+}',         [SettingsAction::class, 'updateCurrency']);
         $app->delete ('/api/settings/currencies/{id:[0-9]+}',         [SettingsAction::class, 'deleteCurrency']);
+        // FORK 0921: přímé napojení na banku (Fio API) — token, test, ruční stažení.
+        $app->get    ('/api/settings/bank-api',                       [BankApiCredentialsAction::class, 'list']);
+        $app->put    ('/api/settings/bank-api/{currencyId:[0-9]+}',   [BankApiCredentialsAction::class, 'save']);
+        $app->delete ('/api/settings/bank-api/{id:[0-9]+}',           [BankApiCredentialsAction::class, 'delete']);
+        $app->post   ('/api/settings/bank-api/{id:[0-9]+}/test',      [BankApiCredentialsAction::class, 'test']);
+        $app->post   ('/api/settings/bank-api/fetch',                 [BankApiCredentialsAction::class, 'fetch']);
         $app->get    ('/api/settings/bank-email-notices',             [BankEmailNoticeAction::class, 'overview']);
         $app->put    ('/api/settings/bank-email-notices/imap',        [BankEmailNoticeAction::class, 'updateImap']);
         $app->post   ('/api/settings/bank-email-notices/imap/test',   [BankEmailNoticeAction::class, 'testImap']);

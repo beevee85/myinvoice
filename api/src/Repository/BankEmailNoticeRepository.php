@@ -498,6 +498,9 @@ final class BankEmailNoticeRepository
         ?float $tolerance,
         \MyInvoice\Service\Bank\StatementMatcher $matcher,
         ?string $accountCurrency = null,
+        // FORK 0921: bez reconcileru se avízo spáruje i tehdy, když tentýž pohyb
+        // už přišel z výpisu nebo z Fio API → dvojí úhrada faktury.
+        ?\MyInvoice\Service\Bank\EmailNoticeReconciler $reconciler = null,
     ): array {
         [$account, $bankCode] = $this->splitAccount($notice->recipientAccount);
         $pdo = $this->db->pdo();
@@ -594,7 +597,12 @@ final class BankEmailNoticeRepository
             $tolerance,
         ]);
         $transactionId = (int) $pdo->lastInsertId();
-        $match = $matcher->match($transactionId);
+        // Nejdřív zjisti, jestli tentýž pohyb nemáme z důvěryhodnějšího zdroje
+        // (nahraný výpis nebo Fio API) — pak se avízo jen označí a NEpáruje.
+        $ignored = $reconciler?->ignoreSecondaryWhenAuthoritativeTwinExists($transactionId);
+        $match = $ignored !== null
+            ? ['status' => 'ignored', 'authoritative_tx_id' => $ignored]
+            : $matcher->match($transactionId);
         $matched = in_array($match['status'] ?? '', ['auto_exact', 'auto_partial'], true);
         // Naakumuluj počty do měsíčního výpisu.
         $pdo->prepare(

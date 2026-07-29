@@ -239,3 +239,50 @@ cmd/cron-bank-email-notices.sh   # každých 30 minut
 Skript spustí `php api/bin/cron-bank-email-notices.php`, projde aktivní IMAP
 účty dodavatele, načte nejnovější zprávy podle limitu a zapíše heartbeat do
 plánovaných úloh.
+
+## 37.8 Přímé napojení na Fio banku (API)
+
+Nejrychlejší cesta, jak dostat platby do systému bez ručního nahrávání výpisu:
+Fio nabízí API, ze kterého si aplikace pohyby stáhne sama a rovnou je spáruje
+s fakturami.
+
+Nastavení je v **Banka → Bankovní účty**, v sekci *Automatické stahování
+z banky* pod seznamem účtů. U každého účtu s vyplněným číslem účtu zadáš token
+a zapneš stahování.
+
+### Kde vzít token
+
+V internetovém bankovnictví Fio: **Nastavení → API**. Vytvoř token s právem
+**pouze pro čtení** — aplikace přes něj nic neplatí, jen čte pohyby. Token má
+platnost nejvýše 180 dní, po vypršení ho ve Fio vygeneruj znovu a v aplikaci
+přepiš.
+
+Token se ukládá zašifrovaně a zpět se už nikdy nezobrazí. Pole tedy necháváš
+prázdné, dokud token neměníš.
+
+### Jak stahování probíhá
+
+- Tlačítko **Stáhnout teď** provede stažení okamžitě; jinak běží cron
+  (`cmd/cron-fio-bank.sh`, doporučeně každých 30 minut).
+- Stahuje se **posledních 90 dní** (dál historie přes API nesahá), při dalších
+  bězích pak od posledního staženého pohybu s týdenním překryvem — kvůli
+  zpětným doúčtováním a stornům.
+- Opakované stažení téhož období **nic nezduplikuje**: každý pohyb má u Fio
+  unikátní ID a aplikace podle něj pozná, co už má.
+- Po uložení se pohyb rovnou nabídne párování stejně jako u nahraného výpisu.
+- **Otestovat** ověří token jedním dotazem za posledních 7 dní; nic neukládá.
+
+### Když máš zapnuté i výpisy nebo avíza
+
+Tentýž pohyb může dorazit víc cestami. Aplikace to hlídá a fakturu nezaplatí
+dvakrát — pořadí důvěryhodnosti je: nahraný výpis (GPC/PDF) → Fio API →
+e-mailové avízo. Slabší zdroj se u už zpracovaného pohybu označí jako
+ignorovaný.
+
+### Časté chyby
+
+| Hláška | Co s tím |
+|---|---|
+| Token je neplatný, nebo mu skončila platnost | Vygeneruj nový token ve Fio (platnost max. 180 dní). |
+| Mezi dvěma staženími musí být alespoň 30 sekund | Fio pouští jeden dotaz za 30 s na token — počkej a zkus znovu. |
+| Historie přes API sahá jen 90 dní zpět | Starší pohyby doplň nahráním GPC výpisu. |

@@ -16,6 +16,9 @@ final class BankEmailNoticeScanner
         private readonly BankEmailNoticeParserRepository $parsers,
         private readonly ImapMailboxClientInterface $imap,
         private readonly StatementMatcher $matcher,
+        // FORK 0921: povinný parametr — PHP-DI volitelné parametry NEinjektuje,
+        // nullable s defaultem by zůstal null a dedup by mlčel.
+        private readonly \MyInvoice\Service\Bank\EmailNoticeReconciler $reconciler,
         private readonly EmailAuthenticationVerifier $authVerifier = new EmailAuthenticationVerifier(),
     ) {}
 
@@ -226,6 +229,7 @@ final class BankEmailNoticeScanner
                 (float) ($mapping['amount_tolerance'] ?? 0.05),
                 $this->matcher,
                 isset($mapping['currency_code']) ? (string) $mapping['currency_code'] : null,
+                $this->reconciler,
             );
             $match = $tx['match_result'];
             $matchedInvoiceId = isset($match['invoice_id']) ? (int) $match['invoice_id'] : null;

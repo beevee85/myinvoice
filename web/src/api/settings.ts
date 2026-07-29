@@ -157,6 +157,30 @@ export interface BrandingProfile {
   is_default: boolean
 }
 
+/** FORK 0921: stav napojení bankovního účtu na Fio API. */
+export interface BankApiAccount {
+  id: number | null
+  currency_id: number
+  currency: string
+  account_number: string
+  bank_code: string | null
+  enabled: boolean
+  has_token: boolean
+  last_fetched_on: string | null
+  last_external_id: string | null
+  last_fetch_at: string | null
+  last_fetch_status: 'ok' | 'error' | null
+  last_fetch_message: string | null
+}
+
+export interface BankApiFetchResult {
+  created: number
+  skipped: number
+  matched: number
+  accounts: number
+  errors: string[]
+}
+
 export interface CurrencyAccount {
   id: number
   code: string
@@ -641,6 +665,19 @@ export const settingsApi = {
   updateCurrency: (id: number, payload: Partial<CurrencyAccount>) =>
     api.put<CurrencyAccount>(`/settings/currencies/${id}`, payload).then(r => r.data),
   deleteCurrency: (id: number) => api.delete(`/settings/currencies/${id}`).then(r => r.data),
+
+  // FORK 0921: přímé napojení na banku (Fio API). Token se z backendu nikdy
+  // nevrací — UI zná jen příznak has_token.
+  listBankApiAccounts: () =>
+    api.get<{ accounts: BankApiAccount[] }>('/settings/bank-api').then(r => r.data.accounts),
+  saveBankApiAccount: (currencyId: number, payload: { enabled: boolean; token?: string }) =>
+    api.put<{ accounts: BankApiAccount[] }>(`/settings/bank-api/${currencyId}`, payload).then(r => r.data.accounts),
+  deleteBankApiAccount: (id: number) =>
+    api.delete<{ accounts: BankApiAccount[] }>(`/settings/bank-api/${id}`).then(r => r.data.accounts),
+  testBankApiAccount: (id: number) =>
+    api.post<{ ok: boolean; message: string }>(`/settings/bank-api/${id}/test`, {}).then(r => r.data),
+  fetchBankApiNow: () =>
+    api.post<{ result: BankApiFetchResult; accounts: BankApiAccount[] }>('/settings/bank-api/fetch', {}).then(r => r.data),
 
   getBankEmailOverview: () =>
     api.get<BankEmailOverview>('/settings/bank-email-notices').then(r => r.data),

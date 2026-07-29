@@ -2608,6 +2608,20 @@
     "unpaid_upcoming": "Unpaid (before due)",
     "unpaid_none": "No unpaid invoices"
   },
+  "bank_api": {
+    "title": "Automatic bank download",
+    "subtitle": "Transactions are downloaded straight from the Fio API and matched to invoices — no manual statement upload.",
+    "enabled": "Download automatically",
+    "token_placeholder": "Token from Fio internet banking",
+    "token_saved": "Token is stored — fill in only to change it",
+    "test": "Test",
+    "fetch_now": "Download now",
+    "saved": "Connection saved.",
+    "fetched": "Downloaded {created} new transactions, matched {matched}.",
+    "never_fetched": "Not downloaded yet.",
+    "no_accounts": "First fill in an account number for one of the currencies above.",
+    "hint": "Create the token in Fio internet banking (Settings → API). Read-only rights are enough; it is valid for at most 180 days and then needs renewing. The last 90 days are downloaded with an overlap, so repeated downloads never create duplicates."
+  },
   "bank_accounts": {
     "title": "Bank accounts",
     "subtitle": "Bank statements, supplier currencies and accounts, account balances and e-mail notices (IMAP).",
