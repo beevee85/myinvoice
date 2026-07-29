@@ -19,6 +19,42 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## 2026-07-29 — výchozí číselník kategorií nákladu (migrace 0912)
+
+**Charakter: FORK FEATURE — kandidát pro upstream.** Obecná funkce, žádná vazba na
+konkrétní firmu ani obor.
+
+**Proč:** kategorie nákladu (`expense_categories`) pohánějí rozpad nákladů na dashboardu
+a v CRM, ale číselník se nikde nepředvyplňoval — každý tenant startoval s PRÁZDNÝM
+seznamem. Uživatel proto `expense_category_id` v praxi nevyplňoval a rozpad nákladů
+zůstal nepoužitelný („nezařazeno" = 100 %). Aplikace přitom předvyplňuje ostatní
+číselníky (měny, sazby DPH, země, jednotky) — tenhle jediný chyběl.
+
+**Co se změnilo:**
+1. Nová třída `Service\Codebook\DefaultExpenseCategories` s obecnou výchozí sadou
+   (zboží k dalšímu prodeji, materiál, služby, nájem a energie, doprava a PHM, marketing,
+   software a IT, poradenství, dlouhodobý majetek, ostatní). Idempotentní `seed()` —
+   tenantovi, který už kategorie má, nesahá.
+2. Migrace **0912** doplní sadu VŠEM stávajícím tenantům, kteří nemají ani jednu kategorii.
+3. Seed se volá i při zakládání firmy — `SettingsAction` (přidání firmy) a `SetupAction`
+   (první firma při instalaci), vedle stávajícího seedu měn.
+
+Sada je záměrně obecná, ne oborová; uživatel si ji může přejmenovat, doplnit i archivovat.
+Rozlišení „zboží k dalšímu prodeji" vs. „dlouhodobý majetek" má i daňový smysl —
+§ 72 odst. 3 ZDPH (limit odpočtu 420 000 Kč u vybraného osobního automobilu) se podle
+Informace GFŘ č. j. 2032/24/7100-30116-010207 vztahuje POUZE na vůz pořízený jako
+dlouhodobý majetek, ne na vůz pořízený jako zboží k dalšímu prodeji.
+
+**Testy:** nový `tests/Integration/Codebook/DefaultExpenseCategoriesTest.php` (4 testy,
+79 asercí) — migrace doplní sadu a je idempotentní, seeder naplní prázdného tenanta,
+NEPŘEPÍŠE vlastní číselník, a sada sedí na sloupcové limity. Suita **2026 zelených**.
+
+**Jak ověřit po merge:** `vendor/bin/phpunit --filter 'DefaultExpenseCategories'`;
+v Nastavení → Kategorie nákladu je po migraci vidět 10 položek, u přijaté faktury
+jde kategorii vybrat a dashboard ukáže rozpad.
+
+---
+
 ## 2026-07-29 — očista verzovaných souborů od reálných dat
 
 **Charakter: HYGIENA REPA.** Fork veřejného repa je na GitHubu vždy veřejný, takže cokoli

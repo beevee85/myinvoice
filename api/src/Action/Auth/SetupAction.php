@@ -286,6 +286,10 @@ final class SetupAction
             if ($code === $defaultCurrencyCode) $defaultCurrencyId = $newCurId;
         }
 
+        // Výchozí číselník kategorií nákladu (stejná sada jako migrace 0912) — bez něj
+        // startuje instalace s prázdným seznamem a rozpad nákladů je nepoužitelný.
+        \MyInvoice\Service\Codebook\DefaultExpenseCategories::seed($pdo, $supplierId);
+
         if ($defaultCurrencyId === 0) {
             // Fallback: prvni currency
             $stmtCur = $pdo->prepare('SELECT id FROM currencies WHERE supplier_id = ? LIMIT 1');
