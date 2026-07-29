@@ -585,3 +585,102 @@ chování ruční cesty a zaslouží si vlastní commit a charakterizaci.
 Do té doby platí: **analytický** skener (`HistoricalValidationScanner`) už podle V43b
 klasifikuje, aby baseline ukazoval realitu podle dohodnutého pravidla; **enforcement**
 se nemění.
+
+### 13.1 Motivující doklad (anonymizovaně)
+
+Aby bylo za rok dohledatelné, **proč** se pravidlo rozvolnilo, a aby to nešlo zopakovat
+bez důvodu — rozvolnění pravidla je totiž vždycky nejsnazší způsob, jak „vyzelenit"
+baseline:
+
+| | |
+|---|---|
+| typ dokladu | `credit_note` (dobropis), stav `paid` |
+| počet řádků | 5 |
+| z toho popisných | 4 — `quantity = 0` **i** `unit_price_without_vat = 0`, popis 35–49 znaků |
+| peněžní řádek | 1, nese celou částku dokladu |
+| součty | **v pořádku** — hlavička sedí na součet řádků |
+| pole, které nález vyvolalo | `items.*.quantity` („Množství nesmí být 0.") |
+| ověřeno, že NEJDE o systémové řádky | `is_settlement_rounding = 0`, `settlement_source_purchase_invoice_id IS NULL` — tedy ani odpočet § 37a, ani zaokrouhlovací řádek |
+
+Doklad byl tedy účetně bezvadný a vynucení původní V43 by ho odmítlo. Chyba nebyla
+v datech, ale v pravidle.
+
+### 13.2 Důkaz, že se pravidlo rozvolnilo jen tam, kde mělo
+
+Rozvolnění se smí týkat **výhradně** řádku, který netvrdí žádnou cenu. Ověřeno mutací —
+pravidlo bylo dočasně rozbité a testy musely spadnout:
+
+| mutace | očekávání | výsledek |
+|---|---|---|
+| V43b rozšířeno na *každé* nulové množství (tj. i řádek s cenou) | musí spadnout test na řádek `quantity = 0`, `cena ≠ 0` | **spadly 3 testy**, mezi nimi `testZeroQuantityWithPriceStaysAFinding` |
+| V43d vypnuto (`if (false)`) | musí spadnout test na doklad složený jen z popisů | **spadl** `testDocumentMadeOnlyOfTextLinesIsAFinding` |
+
+Řádek, který **tvrdí cenu bez množství**, tedy dál neprojde — a doklad bez jediného
+peněžního řádku taky ne. Testy nejsou prázdné.
+
+---
+
+## 14. ZNÁMÉ DIVERGENCE — analytická klasifikace vs. produkční vynucení
+
+Skener nad historií a produkční validátor se **záměrně** liší: analýza už pracuje podle
+rozhodnutých pravidel, vynucení se mění až s doménovým validátorem, protože každá taková
+změna je změna chování ruční cesty a zaslouží si vlastní commit a charakterizaci.
+
+Tabulka je **checklist pro commit s doménovým validátorem** — ne archeologie.
+
+| pravidlo | analytický skener (`HistoricalValidationScanner`) | produkční vynucení (`InvoiceAmountPolicy` / `PurchaseInvoiceValidation`) | srovnat v |
+|---|---|---|---|
+| **V43b** popisný řádek (`qty = 0` ∧ cena `= 0` ∧ popis ≠ '') | legitimní, nález se zahodí, počítá se jako `text_line` | **odmítá** („Množství nesmí být 0.") | commit s doménovým validátorem |
+| **V43b** nulový řádek s prázdným popisem | nález zůstává (`items.*.description`) | odmítá (obojí: popis i množství) | tamtéž — sjednotit hlášku |
+| **V43c** `qty = 0` ∧ cena ≠ 0 | nález zůstává, kategorie `real_mismatch` | odmítá (shodou okolností správně, ale z jiného důvodu) | tamtéž — explicitní pravidlo |
+| **V43d** doklad bez peněžního řádku | vlastní nález `items.no_money_line` | **nekontroluje se vůbec** | tamtéž — nové pravidlo |
+| **V43e** konzistence znamének u dobropisu | nekontroluje se | jen WARN (`credit_note_mixed_sign_items`) | tamtéž — povýšit na FAIL |
+
+**Pravidlo pro budoucí změny:** každé další rozvolnění nebo zpřísnění v analytické vrstvě
+musí přibýt do téhle tabulky **spolu s mutačním důkazem** (sekce 13.2), že se pravidlo
+nezměnilo šířeji, než bylo zamýšleno.
+
+---
+
+## 15. A3 — DOLOŽENÉ ZJIŠTĚNÍ k `purchase_invoices.import_batch_id`
+
+**Rozhodnutí: sloupec NESDÍLET, přidat vlastní `purchase_import_batch_id` s cizím klíčem.**
+
+Zjištěno (vše doložené, ne odhad):
+
+* **Definice:** `VARCHAR(32) NULL DEFAULT NULL`, jediný index `idx_pi_import_batch
+  (supplier_id, import_batch_id)`, **žádný FK, žádný UNIQUE** — `db/migrations/0141_purchase_invoice_import_batch.sql:8,11`.
+* **Tabulka dávek v DB neexistuje.** Grep `batch` přes celé `db/migrations/` vrací jen
+  tři řádky, všechny uvnitř 0141. Jediná „importní" tabulka `import_jobs` má
+  `BIGINT AUTO_INCREMENT` PK — nekompatibilní typ, žádná vazba.
+* **Původ: čistý upstream.** Commit `9120ffe1` (Radek Hulan, 23. 7. 2026, „#232"),
+  `git diff upstream/master HEAD -- <migrace>` je **prázdný**. Upstream do toho sáhl
+  před šesti dny — je to živý kód, ne mrtvý sloupec.
+* **Kdo plní:** výhradně `PurchaseInvoiceRepository::setImportBatchId()` (`:2273`) přes
+  `UPDATE`, nikdy `INSERT`. Volá ho jen `AiPdfExtractor::tagImportBatch()`.
+  **Hodnotu generuje frontend** — `crypto.randomUUID()` bez pomlček, 32 hex znaků
+  (`web/src/pages/admin/Integrations.vue:384-390`).
+* **Kdo čte:** filtr v seznamu (přesná rovnost), `recentImportBatches()` (GROUP BY nad
+  syrovým sloupcem) a **náš vlastní `HistoricalValidationScanner::classifySource()`**,
+  který neprázdnou hodnotu mapuje na zdroj `ai_pdf`.
+* **UI:** dropdown „dohledat import" zobrazuje jen **datum a počet dokladů** — žádné id,
+  žádný typ dávky. Limit je 20 posledních.
+
+**Proč nesdílet** (tři důvody, každý sám o sobě dostačující):
+
+1. **Má jinou sémantiku.** Migrace i commit upstreamu ho definují jako „označení dávky
+   hromadného **AI** importu". To je přesně případ, na který mířila podmínka ze zadání
+   („pokud má jinou sémantiku, přidej vlastní sloupec").
+2. **Rozbil by naše vlastní měření.** `classifySource()` by každý doklad z dávkového
+   importu ohlásil jako `ai_pdf` — a to je právě ten report, podle kterého se rozhoduje
+   o vynucení validace.
+3. **Poškodil by upstreamovou funkci uživateli.** Do jednoho dropdownu bez rozlišovače
+   by se promíchaly dva druhy dávek a naše dávky by kvůli `limit = 20` **vytlačovaly**
+   uživatelovy AI dávky z jeho vlastního seznamu.
+
+Navíc: `setImportBatchId()` dělá `substr(trim($id), 0, 32)` — **tiché oříznutí** bez chyby,
+a kolace `utf8mb4_unicode_ci` je case-insensitive. Obojí je latentní zdroj kolizí.
+
+**Cena rozhodnutí:** vlastní filtr „dohledat dávku" si musíme napsat sami (patří k UI
+commitu). Za to dostáváme referenční integritu (FK), nulové riziko smíchání entit
+a nulový zásah do upstream kódu.

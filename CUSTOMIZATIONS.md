@@ -19,6 +19,60 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## 2026-07-29 — Dávkový import: evidence k V43, tabulka divergencí, A3 doloženo
+
+**Charakter: FORK DOKUMENTACE** — bez zásahu do kódu i testů.
+
+**1. Evidence k deltě V43** (`docs/batch-import/PLAN.md`, sekce 13.1–13.2). Rozvolnění
+pravidla je nejsnazší způsob, jak „vyzelenit" baseline, takže u něj musí být doložený
+motivující doklad i důkaz, že se rozvolnilo jen tam, kde mělo:
+* anonymizovaný popis dokladu (dobropis, 5 řádků, 4 popisné, součty v pořádku, ověřeno
+  že nejde o řádky § 37a ani zaokrouhlovací),
+* **mutační důkaz**: rozšíření V43b na každé nulové množství shodí 3 testy (mimo jiné
+  `testZeroQuantityWithPriceStaysAFinding`), vypnutí V43d shodí
+  `testDocumentMadeOnlyOfTextLinesIsAFinding`. Řádek, který tvrdí cenu bez množství,
+  dál neprojde.
+
+**2. Tabulka známých divergencí** (sekce 14) — analytický skener vs. produkční vynucení,
+řádek za řádkem, s uvedením commitu, kde se má srovnat. Slouží jako checklist pro commit
+s doménovým validátorem. Pravidlo: každá další změna v analytické vrstvě musí do tabulky
+přibýt spolu s mutačním důkazem.
+
+**3. A3 DOLOŽENO** (sekce 15) — `purchase_invoices.import_batch_id`:
+`VARCHAR(32) NULL`, **bez FK a bez UNIQUE**, tabulka dávek v DB neexistuje. Původ **čistý
+upstream** (commit `9120ffe1`, 23. 7. 2026, `git diff upstream/master HEAD` prázdný).
+Hodnotu generuje **frontend** (UUIDv4 bez pomlček), plní ji výhradně `setImportBatchId()`
+UPDATEm, nikdy INSERT.
+
+**ROZHODNUTÍ: nesdílet, přidat vlastní `purchase_import_batch_id` s cizím klíčem.**
+Tři důvody: (a) sloupec má jinou sémantiku — upstream ho definuje jako označení dávky
+**AI** importu; (b) sdílení by rozbilo náš vlastní `classifySource()`, který neprázdnou
+hodnotu mapuje na zdroj `ai_pdf` — a to je právě report, podle kterého se rozhoduje
+o vynucení validace; (c) poškodilo by to upstreamovou funkci uživateli — dropdown
+„dohledat import" ukazuje jen datum a počet, takže dva druhy dávek by v něm byly
+nerozlišitelné, a limit 20 by naše dávky vytlačovaly jeho AI dávky.
+
+**Bezpečnostní úklid:** ověřeno, že žádná záloha není dosažitelná přes web — nginx
+blokuje `/storage`, `/private`, `/db`, `/log` i `*.sql` (`docker/nginx.conf:104,107`)
+a z webrootu nevede symlink do `/data`.
+
+**⚠️ INCIDENT:** při aplikaci retence na nahromaděné zálohy v `/root` (39 souborů,
+228 MB, čtyři týdny kompletních kopií účetnictví) selhalo v shellu porovnání jmen —
+seznam k ponechání obsahoval nové řádky, takže se `case` nikdy netrefil a **shred smazal
+všech 39 souborů včetně čtyř, které měly zůstat**. Nevratné. Produkční databáze i datové
+volume jsou nedotčené (ověřeno: 62 přijatých faktur, 13 vydaných, 14 klientů, `/data`
+56,8 MB, aplikace HTTP 200) — ztratily se body obnovy z předchozích session, ne data.
+Okamžitě vytvořena nová záloha
+`/root/backup-myinvoice-db-2026-07-29-1905-pred-commit7.sql` (1,6 MB, 93 tabulek,
+33 INSERTů, `chmod 600`, integrita ověřena).
+
+**Poučení:** hromadné nevratné operace nad soubory nedělat porovnáváním řetězců
+v shellu. Použít `find -newer` / explicitní seznam po jednom, nebo napřed `--dry-run`
+výpis a teprve po kontrole mazat.
+
+
+---
+
 ## 2026-07-29 — Dávkový import: opravy telemetrie + delta katalogu V43
 
 **Charakter: FORK — oprava bezpečnosti telemetrie, uzavření mezery v měření
