@@ -8,6 +8,42 @@ dodavatelích ani částky.
 
 ---
 
+> ## ⚠️ METODICKÁ POZNÁMKA 30. 7. 2026 — ROZSAH TOHOTO MĚŘENÍ
+>
+> **Tento běh proběhl přes VŠECHNY TENANTY.** Čísla níže se nepřepisují, ale bez tohoto
+> jmenovatele se nemají citovat.
+>
+> ```
+> supplier_id 1 (BEKRON):  10 faktur
+> supplier_id 2:           52 faktur      ← jiná právnická osoba
+>                          62 celkem      ← to je ono „dokladů prověřeno 62"
+> ```
+>
+> Příčina: `api/bin/shadow-validate-existing.php:49` má `$supplierId = null` jako **default**
+> a `--supplier=` je opt-in; `HistoricalValidationScanner::scan(?int $supplierId = null)` má
+> u parametru komentář „null = všichni". Běh tedy scope neuvedl a dokument ho nezaznamenal.
+>
+> **Co to dělá s čísly:** podíl **96,8 %** je nad populací, která je **84 % (52/62) cizí firma**.
+> Jako baseline pro BEKRON tedy neplatí. Všechny tři motivující artefakty delty V43 patří
+> `supplier_id 2`: dobropis `credit_note` (jediný `real_mismatch`), doklad s popisnými řádky
+> (`qty = 0 ∧ cena = 0 ∧ popis ≠ ''`) a oba nálezy `legacy_gap`.
+>
+> **Co to nedělá:** delta V43 tím není zneplatněná — ten účetní vzor je legitimní nezávisle
+> na tom, čí doklad ho ukázal. Mění se jen tvrzení o populaci, ne pravidlo. Rozhodnutí
+> o vynucení validace ale stojí nad **deseti** doklady jednoho tenanta, ne nad 62.
+>
+> **Stav:** přeměření s `--supplier=1` je **blokované**. Skener má guard V83 a `cfg.php` míří
+> na `myinvoice_ci`, což je sdílené jméno, které guard odmítá (exit 78); vlastní klon potřebuje
+> `GRANT`, tedy zásah do práv mimo mandát agenta. Až se přeměří, doplní se sem baseline
+> pro `supplier_id = 1` **s explicitně napsaným jmenovatelem**, a tento běh zůstane
+> jako datovaná metodická poznámka, ne jako platná hodnota.
+>
+> **Náprava v kódu:** scope se má zpovinnit — parametr bez hodnoty má být chyba, ne „všichni".
+> To je zároveň v souladu s konvencí repa (§6.2 PLAN.md: repozitáře berou `supplier_id` jako
+> povinný parametr každé metody), od které se tato analytická vrstva odchýlila.
+
+---
+
 ## Souhrn
 
 | | |

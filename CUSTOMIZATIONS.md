@@ -143,6 +143,39 @@ Okamžitě vytvořena nová záloha
 `/root/backup-myinvoice-db-2026-07-29-1905-pred-commit7.sql` (1,6 MB, 93 tabulek,
 33 INSERTů, `chmod 600`, integrita ověřena).
 
+> **KOREKCE 30. 7. 2026 (aditivní, původní text výše se nepřepisuje):**
+> To „**62 přijatých faktur**" je součet **napříč dvěma tenanty**, tedy dvěma různými
+> právnickými osobami — jako doklad, že produkce je nedotčená, to platí, ale jako údaj
+> o BEKRONu ne. Doložený rozpad:
+>
+> ```
+> supplier_id 1 (BEKRON):  10 faktur, 0 smazaných
+> supplier_id 2:           52 faktur, 0 smazaných
+>                          62 celkem
+> ```
+>
+> Táž konflace je i v `docs/batch-import/SHADOW-BASELINE.md`, který uvádí „dokladů prověřeno
+> 62" bez jmenovatele: `api/bin/shadow-validate-existing.php:49` má `$supplierId = null`
+> jako **default** a `--supplier=` je opt-in, přičemž
+> `HistoricalValidationScanner::scan(?int $supplierId = null)` má u parametru komentář
+> „null = všichni". Baseline tedy běžel **přes oba tenanty**.
+>
+> Důsledky: podíl 96,8 % je nad populací, která je **84 % (52/62) cizí firma**. A všechny tři
+> motivující artefakty delty V43 patří `supplier_id 2`, ani jeden BEKRONu — dobropis
+> `credit_note` (jediný `real_mismatch`, §13.1 PLAN.md), doklad s popisnými řádky
+> (`qty = 0 ∧ cena = 0 ∧ popis ≠ ''`) a oba nálezy `legacy_gap` (prázdný popis, 2 doklady).
+>
+> **Delta V43 zůstává v platnosti** — ten účetní vzor je legitimní nezávisle na tom, čí doklad
+> ho ukázal, a otáčet pravidlo podle vlastnictví dokladu by byla chyba. Ale rozhodnutí
+> o vynucení validace stojí nad **deseti** doklady jednoho tenanta, ne nad 62; odklad
+> za Commit 11 je tedy jediná obhajitelná volba, ne opatrnost.
+>
+> **Co z toho ještě není hotové:** přeměření baseline s `--supplier=1` a napsaným jmenovatelem
+> je **blokované** — skener má guard V83 a `cfg.php` míří na `myinvoice_ci`, což je sdílené
+> jméno, které guard odmítá (exit 78). Vlastní klon potřebuje `GRANT`, tedy zásah do práv.
+> Do té doby je i `SHADOW-BASELINE.md` platný jen s tímto jmenovatelem: **62 = 10 + 52**.
+> Skeneru se zároveň má zpovinnit scope — parametr bez hodnoty má být chyba, ne „všichni".
+
 **Poučení:** hromadné nevratné operace nad soubory nedělat porovnáváním řetězců
 v shellu. Použít `find -newer` / explicitní seznam po jednom, nebo napřed `--dry-run`
 výpis a teprve po kontrole mazat.
