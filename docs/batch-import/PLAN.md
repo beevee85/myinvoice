@@ -462,8 +462,10 @@ V51 V52 V53 V54 V55 V56 V57 V58 V59 V60 V61 V62 V63 V64 V65 V66 V67 V68 V69 V70
 V71 V72 V73 V74 V75 V76 V77 V78 V79 V79b V80 V81a V81b V81c V82 V83 V83b V84 V85 V86
 ```
 
-**`V81` samotné neexistuje** — rozděleno na `V81a`/`V81b`/`V81c`. Pojistka musí holé `V81`
-odmítnout jako neznámé ID; je to test obou směrů, ne jen kontrola úplnosti.
+**Samotné `{{noref:V81}}` neexistuje** — rozděleno na `V81a`/`V81b`/`V81c`. Pojistka musí holé
+ID bez markeru odmítnout jako neznámé; je to test obou směrů, ne jen kontrola úplnosti.
+Marker `{{noref:…}}` označuje **záměrnou zmínku neexistujícího ID** — parser ho do směru 2
+nezapočítá, ale vypíše zvlášť, aby nešel přehlédnout.
 
 ### 8.8 V75–V86
 

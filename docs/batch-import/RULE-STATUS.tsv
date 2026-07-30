@@ -17,28 +17,41 @@
 #   - ID odkazované v kódu, které není v kanonickém seznamu (PLAN.md §8.7)
 #   - ID v kanonickém seznamu, které tady nemá záznam
 #   - chybějící povinný klíč pro daný stav
-#   - holé V81 (neexistuje, rozděleno na V81a/V81b/V81c)
+#   - holé {{noref:V81}} (neexistuje, rozděleno na V81a/V81b/V81c)
 # Parser na nerozpoznaném řádku PADÁ, nikdy ho nepřeskočí — přeskakující parser je
 # umlčení kontroly o patro níž.
 #
 # Počty a poměry se sem NEPÍŠOU. Odkazuje se na RULE-PATH-MATRIX.md.
 # (Totéž pravidlo jako u čísel řádků a u "62 dokladů" — přepsané číslo přežije svou pravdivost.)
 #
-# ROZSAH SKENU ODKAZŮ (směr 2) — api/src/, api/bin/, api/tests/
-# NIKOLI api/vendor/ a NIKOLI docs/. Doloženo měřením 30. 7. 2026, které našlo tři
-# falešně pozitivní ještě před tím, než pojistka vznikla:
+# VZOR ID (směr 2) — kanonická forma, ne volný regex:
+#     \bV(?:[1-9][0-9]*)(?:[a-e])?\b
+# Číslo ≥ 1 (proto V0 ani V0z nematchne), písmeno z UZAVŘENÉ množiny a–e, hranice slova
+# na obou stranách. Doloženo měřením 30. 7. 2026: volný vzor \bV\d+[a-z]?\b propouštěl
 #   V0z  api/vendor/webklex/php-imap/tests/messages/issue-544.eml:193  (base64 v cizí fixtuře)
 #   V0   api/vendor/respect/validation/data/domain/public-suffix/BUILD.php:8  (cizí kód)
-#   V81  PLAN.md:465 a tento soubor  (PRÓZA, KTERÁ ŘÍKÁ, ŽE V81 NEEXISTUJE)
-# Ten třetí je poučný: bez omezení rozsahu by pojistka byla trvale červená kvůli větě,
-# která tvrdí přesně to, co pojistka hlídá — tedy zase předem prohlášená červená,
-# o patro níž. Docs se neskenují proto, že se v nich ID DEFINUJÍ, ne odkazují.
+# Obojí padá už na vzoru, nezávisle na rozsahu — to byla chyba vzoru, ne cesty.
+#
+# ROZSAH SKENU ODKAZŮ (směr 2) — api/src/, api/bin/, api/tests/ A CELÉ docs/.
+# Vyloučeno je JEN api/vendor/ (cizí kód, který o našem katalogu nic netvrdí).
+#
+# docs/ se skenuje ZÁMĚRNĚ, přestože právě odtud přišel jediný zbylý falešně pozitivní
+# (holé V81 v próze, která říká, že V81 neexistuje — PLAN.md §8.7 a tento soubor).
+# Drift V78–V85 vznikl přesně tím, že dokumentace citovala ID, které nikde neexistovalo;
+# vyjmout docs/ z kontroly by znamenalo allow-all na tom nejrizikovějším místě, tři dny
+# po tom, co jsme u V82 zavedli default-deny jako princip. Jedna věta v próze si zaslouží
+# jeden marker, ne výjimku pro celý adresář.
+#
+# MARKER pro záměrnou zmínku neexistujícího ID:  {{noref:V81}}
+# Parser marker zná, do směru 2 ho nezapočítá, a vypíše ho zvlášť jako "záměrné zmínky",
+# aby nešly přehlédnout. Holé V81 bez markeru je nález, jak má být.
 #
 # OČEKÁVANÝ VÝSTUP PRVNÍHO BĚHU (změřeno 30. 7. 2026, PLAN.md sha256 viz commit):
 #   [1] v kanonickém seznamu, chybí záznam ve stavu ......... 0
 #   [2] odkazováno v kódu, není v kanonickém seznamu ........ 0
 #   [3] záznam ve stavu mimo kanonický seznam .............. 0
 #   [4] tvrdí vynuceno-a-otestovano → test musí projít ...... 3  (V75, V76, V83)
+#   [záměrné zmínky s markerem, vypisují se zvlášť] ......... 1  (V81)
 # Kdo nezná očekávaný výstup kontroly, nerozezná skutečné selhání od ohlášeného.
 # Struktura je tedy ZELENÁ. U směru 4 je ověřena EXISTENCE všech šesti jmenovaných
 # souborů; jejich PRŮCHOD ověřit nelze, dokud není účet myinvoice_test (guard V83
