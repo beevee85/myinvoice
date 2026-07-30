@@ -4,6 +4,10 @@
 > subagenta **celý a doslovně**. Zároveň si do svého záznamu o dispatchi zapíše SHA-256 souboru
 > a ten samý hash vloží agentovi do promptu jako literál (viz §7).
 >
+> **Hash se mění s každou úpravou tohoto souboru.** Dispatcher ho proto počítá vždy znovu
+> těsně před dispatchem a **nikdy si ho nekešuje** — zapamatovaná hodnota z dřívějšího kola
+> je právě ta porucha, kterou má §7 odhalit.
+>
 > **Důvod existence:** 29.–30. 7. 2026 byl vypraven workflow se sedmi subagenty, jehož omezení
 > neobsahovala zákaz ověřovat cizí službu pokusem o autentizaci — přestože to pravidlo bylo
 > téhož dne formulováno v `CUSTOMIZATIONS.md`. Dva agenti následně provedli ~5 pokusů
@@ -176,6 +180,40 @@ Jsi read-only, ale read-only dotaz umí produkci položit.
   o kterém nevíš, jak dlouho poběží — v takovém případě si nejdřív pusť `EXPLAIN`.
 - Totéž platí pro filesystem: negrepuješ rekurzivně celý repozitář, když znáš adresář.
 
+### 4.3 Jak se k databázi vůbec dostaneš — a kdy vůbec ne
+
+> **STAV K 30. 7. 2026: vyhrazený read-only účet NEEXISTUJE.**
+> **Do jeho vzniku nemají subagenti přístup k databázi vůbec.** §4, §4.1 a §4.2 jsou do té doby
+> bez účinku. Když tvůj úkol databázi potřebuje, **zastav se a řekni to** — je to platný
+> výsledek, ne selhání.
+
+Proč to tady stojí takhle natvrdo: §2.1 ti zakazuje číst `cfg*.php`, `.env`, `docker inspect`
+i `docker exec … env`; §2.3 ti zakazuje vytvořit credential soubor; §3 ti zakazuje dát heslo
+na příkazovou řádku. **Nemáš tedy žádnou dovolenou cestu, jak heslo získat** — a pravomoc
+bez dovolené cesty k jejímu využití je past, ne pravomoc. Kdyby tu tenhle odstavec nebyl,
+nejpravděpodobnějším výsledkem by byla improvizace, ne poslušnost.
+
+Až ten účet vznikne, platí tohle a nic jiného:
+
+1. **Pověření ti předá dispatcher proměnnou prostředí.** Ty si ho **nikde nesháníš**:
+   ne z konfigurace, ne z historie, ne z transkriptů, ne ze záloh, ne od jiného agenta.
+2. **Nikam ho nezapisuješ** — ani do souboru, ani na příkazovou řádku, ani do reportu (§3).
+3. **Když proměnnou nedostaneš, databázi nemáš.** Nehledáš náhradní cestu, nezkoušíš
+   se přihlásit naslepo (§1.1) — zastavíš se a ohlásíš, co bys potřeboval.
+4. Účet je **jen pro čtení** (`SELECT`, `SHOW VIEW`) nad `myinvoice` a `myinvoice_ci`.
+   Když ti nějaký dotaz vrátí „access denied", je to **správné chování**, ne překážka
+   k obejití — nahlásíš to a jdeš dál.
+
+Účet pro zálohy je **jiný účet s jinými právy** a subagentovi se nepředává nikdy.
+
+### 4.4 Scratchpad nemáš a nepotřebuješ
+
+**Nedostáváš pracovní adresář a žádný si nevytváříš.** §2.2 ti zápis nikam nedovoluje, takže
+mezivýsledky nikam neodkládáš — **všechno vracíš v reportu**. Když je výstup příliš velký na
+report, je úkol příliš velký: rozděl ho v reportu na návrh (§0.2) a nech dispatchera rozhodnout.
+
+Že ti nějaká cesta zápis technicky umožní, není povolení. Zákaz je v §2.2, ne v právech na disku.
+
 ---
 
 ## 5. GIT
@@ -197,6 +235,12 @@ Jsi read-only, ale read-only dotaz umí produkci položit.
 ### 6.1 Testová suita
 
 Spuštění suity je povolené **jen když to úkol dá výslovně**, a **právě jednou**.
+
+**Pozor: suita potřebuje testovou databázi, takže spadá pod §4.3.** Dokud vyhrazený read-only
+účet neexistuje, je spuštění suity pro subagenta **mimo dosah** — i když ti to úkol dovolí,
+nemáš čím se k DB přihlásit. Zastav se a řekni to; neobjevuj to uprostřed práce.
+(Integration testy navíc jedou proti reálné DB a `myinvoice_ci` potřebuje zápis, takže
+read-only účet na ně nemusí stačit — dispatcher to musí vyřešit, ne ty.)
 
 **26 testů je přeskočených, protože závisí na cizí službě `dev.myinvoice.cz`.**
 Musí zůstat přeskočené. **Nesmíš je zapnout, odblokovat ani „dočasně" povolit síť** —
