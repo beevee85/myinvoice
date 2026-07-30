@@ -512,19 +512,31 @@ Testy: `testBatchOverFiftyDocumentsIsRejected`, `testFileOverSizeLimitIsRejected
 **V79b — Retence.** FAIL. Pojmenované konstanty **s jednotkou** na jednom místě:
 `RAW_JSON_RETENTION_DAYS = 0`, `NORMALIZED_JSON_RETENTION_DAYS = 90`. Nikdy literál v dotazu.
 
-Spouštěč je **stav dávky, ne noční úloha** — nula dní přes noční úlohu je až 24 hodin
-expozice. A protože dávka nemusí dokončit, jsou spouštěče **dva**:
-1. každý **terminální stav** — dokončeno, **selhalo**, **zrušeno**;
-2. **stropní stáří** pro dávky, které v terminálním stavu neskončí — viset zůstane právě ta
-   dávka, která nejspíš obsahuje něco pokřiveného.
+**Dvě cesty, dva spouštěče, dva testy** — a nesmí se zaměnit:
+
+| cesta | spouštěč | kdo ji vykoná |
+|---|---|---|
+| **A — terminální stav** (dokončeno, **selhalo**, **zrušeno**) | přechod stavu dávky | **in-process**, z cronu se nespouští; nula dní přes noční úlohu je až 24 h expozice |
+| **B — stropní stáří** pro dávky, které terminálního stavu **nedosáhnou** | uplynulé stáří | **`cron-cleanup`** (denně 03:00) — jediný sweeper, který v aplikaci je |
+
+Cesta B **nemůže být řízená stavem dávky, definičně**: ke změně stavu nedojde, právě proto
+je ta dávka opuštěná. Musí ji vysbírat sweeper. Sweep je **tenantně omezený** (§4.1 —
+`supplier_id` explicitně, žádný neomezený agregát) a **logovaný**.
+
+Že opuštěné dávky reálně vznikají, není teorie: `BackgroundProcess::spawnPhp()` je
+fire-and-forget přes `nohup … &`, takže worker, který zemře uprostřed, nechá dávku
+v neterminálním stavu. To je zároveň ta dávka, která nejspíš obsahuje něco pokřiveného.
 
 Purge je **idempotentní**, ve **vlastní transakci**, a jeho selhání nesmí vzít s sebou nic
 cizího. Jeho log podléhá V82: **rozsah a počet, nikdy obsah.** Čtení `raw_json` jen role
 účetní a výš.
-Testy: `testRawJsonPurgedAtBatchCompletion`, `testRawJsonPurgedOnFailedBatch`,
-`testRawJsonPurgedForAbandonedBatch`, `testNormalizedJsonPurgedAfterNinetyDays`,
-`testPurgeTouchesOnlyItsOwnBatch` (dvě dávky, druhá musí zůstat nedotčená),
-`testPurgeTriggerIsBatchStateNotCron`, `testPurgeIsIdempotent`,
+
+Testy — cesta A: `testRawJsonPurgedAtBatchCompletion`, `testRawJsonPurgedOnFailedBatch`,
+`testRawJsonPurgedOnCancelledBatch`, **`testTerminalPurgeRunsInProcessNotFromCron`**.
+Cesta B: **`testAbandonedBatchIsPurgedByCleanupSweep`**, **`testSweepIsTenantScoped`**,
+`testSweepLogsScopeAndCount`.
+Společné: `testNormalizedJsonPurgedAfterNinetyDays`, `testPurgeTouchesOnlyItsOwnBatch`
+(dvě dávky, druhá musí zůstat nedotčená), `testPurgeIsIdempotent`,
 `testPurgeLogsScopeAndCountNeverContent`, `testPurgeNeverRunsInShadowMode`,
 `testRetentionValuesComeFromNamedConstants`, `testRawJsonNotReadableBelowAccountantRole`.
 

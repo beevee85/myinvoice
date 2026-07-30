@@ -24,9 +24,26 @@
 # Počty a poměry se sem NEPÍŠOU. Odkazuje se na RULE-PATH-MATRIX.md.
 # (Totéž pravidlo jako u čísel řádků a u "62 dokladů" — přepsané číslo přežije svou pravdivost.)
 #
-# NEÚPLNÉ: V1–V74 zatím záznam nemají. Pojistka je proto při prvním běhu červená
-# v obou směrech — to je její platný první výsledek, ne porucha. Doplnění V1–V74
-# patří do kódové fáze, po zřízení testovacího účtu (bez něj nelze ověřit test:).
+# ROZSAH SKENU ODKAZŮ (směr 2) — api/src/, api/bin/, api/tests/
+# NIKOLI api/vendor/ a NIKOLI docs/. Doloženo měřením 30. 7. 2026, které našlo tři
+# falešně pozitivní ještě před tím, než pojistka vznikla:
+#   V0z  api/vendor/webklex/php-imap/tests/messages/issue-544.eml:193  (base64 v cizí fixtuře)
+#   V0   api/vendor/respect/validation/data/domain/public-suffix/BUILD.php:8  (cizí kód)
+#   V81  PLAN.md:465 a tento soubor  (PRÓZA, KTERÁ ŘÍKÁ, ŽE V81 NEEXISTUJE)
+# Ten třetí je poučný: bez omezení rozsahu by pojistka byla trvale červená kvůli větě,
+# která tvrdí přesně to, co pojistka hlídá — tedy zase předem prohlášená červená,
+# o patro níž. Docs se neskenují proto, že se v nich ID DEFINUJÍ, ne odkazují.
+#
+# OČEKÁVANÝ VÝSTUP PRVNÍHO BĚHU (změřeno 30. 7. 2026, PLAN.md sha256 viz commit):
+#   [1] v kanonickém seznamu, chybí záznam ve stavu ......... 0
+#   [2] odkazováno v kódu, není v kanonickém seznamu ........ 0
+#   [3] záznam ve stavu mimo kanonický seznam .............. 0
+#   [4] tvrdí vynuceno-a-otestovano → test musí projít ...... 3  (V75, V76, V83)
+# Kdo nezná očekávaný výstup kontroly, nerozezná skutečné selhání od ohlášeného.
+# Struktura je tedy ZELENÁ. U směru 4 je ověřena EXISTENCE všech šesti jmenovaných
+# souborů; jejich PRŮCHOD ověřit nelze, dokud není účet myinvoice_test (guard V83
+# odmítá myinvoice_ci jako sdílené jméno, exit 78). To je zaznamenaný blokátor,
+# ne porucha katalogu, a počítá se stářím jako každý jiný.
 
 V75	vynuceno-a-otestovano	test:Integration/PurchaseInvoice/PurchaseInvoiceWriteServiceTransactionTest	test:Integration/PurchaseInvoice/Characterization/PartialWriteCharacterizationTest
 V76	vynuceno-a-otestovano	test:Integration/PurchaseInvoice/ShadowValidationTest	test:Integration/PurchaseInvoice/HistoricalValidationScannerTest
@@ -44,3 +61,89 @@ V83b	definovano-nevynuceno	vynuceni:rozšíření guardu na host+port a srovnán
 V84	definovano-nevynuceno	vynuceni:statická kontrola jmenného prostoru jádra	blokuje:jádro neexistuje	od:2026-07-30
 V85	definovano-nevynuceno	vynuceni:testy determinismu, Commit 9	blokuje:kód neexistuje	od:2026-07-30
 V86	definovano-nevynuceno	vynuceni:runtime offline guard včetně ext-curl, Commit 12	blokuje:jediný výskyt v repu je komentář v HistoricalValidationScanner.php, bez testu	od:2026-07-30
+
+# --- V1–V74 + V43b–e: stav odvozený z tabulky §8.5 PLAN.md ---------------------
+# Žádné z nich není vynucené na DÁVKOVÉ cestě, protože ta zatím neexistuje.
+# `dnes:` nese stav ze §8.5 (ANO = mechanismus v aplikaci je, ČÁST = jiná varianta
+# nebo jiný práh, NE = nutno napsat). Není to stav vynucení, je to zdroj.
+# `test:` u nich chybí záměrně — ověřit ho nelze bez účtu myinvoice_test, a tvrdit
+# vynuceno-a-otestovano bez ověřeného testu je přesně to, co má pojistka chytat.
+
+V1	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V2	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V3	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V4	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V5	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V6	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V7	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V8	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V9	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V10	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V11	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V12	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V13	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V14	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V15	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V16	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V17	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V18	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V19	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V20	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V21	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V22	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V23	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V24	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V25	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V26	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V27	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V28	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V29	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V30	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V31	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V32	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V33	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V34	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V35	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V36	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V37	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V38	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V39	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V40	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V41	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V42	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V43	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V43b	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V43c	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V43d	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V43e	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V44	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V45	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V46	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V47	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V48	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V49	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V50	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V51	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V52	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V53	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V54	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V55	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V56	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V57	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V58	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V59	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:POZOR
+V60	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V61	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V62	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V63	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V64	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V65	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V66	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V67	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V68	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V69	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V70	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V71	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V72	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ČÁST
+V73	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
+V74	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty; test: nelze ověřit bez účtu myinvoice_test	od:2026-07-30	dnes:ANO
