@@ -8,6 +8,30 @@ je to výslovně označeno jako **ODCHYLKA** a doplněno návrhem řešení (sek
 
 ---
 
+> ## STAV K 30. 7. 2026 — čtěte první
+>
+> Původní text níže je **recon z Commitu 0** a nechává se čitelný jako to, co platilo tehdy.
+> Tato hlavička je **aditivní korekce**, ne přepis. Kde si původní text a tato hlavička
+> odporují, **platí hlavička**.
+>
+> | co v původním textu | stav k 30. 7. 2026 |
+> |---|---|
+> | „závazný podklad pro Commity **1–9**" (úvod) | plán běží do **Commitu 16** |
+> | větev `custom` na commitu `ed2c08e9` (úvod) | merge-base je **`313b5776`** |
+> | „~1 950 testů, ~34 skipped" (§5.1) | ověřuje se; z 31 skipů je 26 závislých na cizí službě `dev.myinvoice.cz` |
+> | §12: „čeká se na rozhodnutí O-2, O-6, O-8, O-9, O-10, O-11, O-13 … **nepokračuji na Commit 1**" | **Commit 1 je hotový**; rozhodnutí padla jako **A1–A7** |
+> | O-6 (§9): „**čekám na tvoje rozhodnutí; sám závislost nepřidávám**" | rozhodnuto (A2): lokální PHP dekodér QR, ale jako **volitelná** závislost — když v systému není, kód ho neimportuje a stav ověření je `unavailable`. Featura musí být plně funkční bez ní. Nová běhová závislost se nepřidává bez výslovného souhlasu vlastníka a předkládá se s licencí, verzí, počtem tranzitivních závislostí a datem posledního release. |
+> | **O-3** (§9) — „nový sloupec nepřidávat, naplnit stávající `import_batch_id`" | **ODVOLÁNO.** Platí **A3** a **sekce 15**. Podrobně u O-3. |
+> | „Nové tabulky dostanou čísla `0912+`" (§3 a §11) | `0912` je **obsazené**; platí rezervované pásmo **0913–0919** |
+> | katalog „V1–V74" (§8, §8.5) | doplněno o **V43b–V43e** (§13) a **V75–V86** (§8.5) |
+>
+> **Parita mezi vstupními cestami neexistuje** a v tomto dokumentu se o ní nikde netvrdí, že
+> je splněná. Aktuální stav konvergence je **3 ze 7 cest** (rohatka `NOT_YET_CONVERGED`).
+> Které pravidlo je na které cestě vynucené, se nečte z prózy, ale z **matice pravidlo × cesta
+> generované z kódu** — próza o cílech zestárne, matice ne.
+
+---
+
 ## 1. Stack a runtime
 
 | vrstva | co to je |
@@ -81,7 +105,11 @@ Slim 4 je LIFO, takže reálné pořadí zvenku dovnitř je:
 * Migrace se pouští automaticky při startu kontejneru; ručně
   `docker compose exec app php api/bin/migrate.php`.
 
-→ **Nové tabulky dostanou čísla `0912+`.** Požadavek „migrace up/down idempotentně“
+→ ~~**Nové tabulky dostanou čísla `0912+`.**~~ **OPRAVENO 30. 7. 2026: `0912` je obsazené**
+(`0912_default_expense_categories.sql`, vzala si ho souběžná session). Pro dávkový import je
+rezervované pásmo **`0913–0919`** (dohoda v `CUSTOMIZATIONS.md`, commit `7b9bd581`).
+**Číslo se přiděluje až v okamžiku commitu**, ne dopředu, a vždy s ověřením, že je pořád volné.
+Požadavek „migrace up/down idempotentně”
 z Commitu 2 je splnitelný jen v části „up idempotentně“ (viz O-4).
 
 ---
@@ -422,11 +450,40 @@ funguje sám (V64). Token dál splní svoji roli: jednorázový, expirující, s
 hash v DB, 403 na cizí dávku.
 
 **O-3 — kolize pojmenování s existující dávkou (#232) a s `import_jobs`.**
-`purchase_invoices.import_batch_id` už znamená něco jiného. **Doporučení:** tabulky pojmenovat
+
+> ### ⛔ ČÁST TÉTO ODCHYLKY BYLA ODVOLÁNA 30. 7. 2026 — NEŘIĎTE SE JÍ
+>
+> **Platí pojmenování tabulek** (`purchase_import_batches`, `purchase_import_batch_files`,
+> `purchase_import_batch_results`) — ta část je v pořádku.
+>
+> **NEPLATÍ doporučení „nový sloupec nepřidávat, naplnit stávající `import_batch_id`”.**
+> Platí **A3** a **sekce 15**: přidat vlastní `purchase_import_batch_id` **s cizím klíčem**
+> a upstreamový `import_batch_id` **nechat být**.
+>
+> Důvod odvolání (vše doložené v §15): upstreamový sloupec je `VARCHAR(32) NULL`, **bez FK
+> a bez UNIQUE**, plní ho **frontend** hodnotou `crypto.randomUUID()` bez pomlček
+> (`Integrations.vue:384-390`), zapisuje se přes `setImportBatchId()`, který dělá tiché
+> `substr(trim($id), 0, 32)` **bez chyby**, a to nad **case-insensitive** kolací
+> `utf8mb4_unicode_ci`. Sémanticky znamená „označení dávky hromadného **AI** importu”,
+> patří upstreamu (commit `9120ffe1`, 23. 7. 2026, #232) a je to živý kód.
+>
+> Sdílení by navíc (a) zkreslilo náš vlastní report, protože `classifySource()` mapuje
+> neprázdnou hodnotu na zdroj `ai_pdf`, a (b) poškodilo upstreamovou funkci uživateli —
+> do dropdownu „dohledat import” bez rozlišovače by se promíchaly dva druhy dávek a naše
+> dávky by kvůli `limit = 20` vytlačovaly jeho AI dávky.
+>
+> **Cena rozhodnutí:** vlastní filtr „dohledat dávku” si napíšeme sami (patří k UI commitu).
+> Za to dostáváme referenční integritu, nulové riziko smíchání entit a nulový zásah
+> do upstream kódu.
+>
+> Ten původní text zůstává níže **přeškrtnutý**, ne smazaný — kdo hledá, proč se rozhodnutí
+> otočilo, má vidět obojí. Implementující sezení se jím řídit nesmí.
+
+`purchase_invoices.import_batch_id` už znamená něco jiného. ~~**Doporučení:** tabulky pojmenovat
 `purchase_import_batches`, `purchase_import_batch_files`, `purchase_import_batch_results`
 a nový sloupec na fakturu nepřidávat — místo toho **naplnit stávající `import_batch_id`**
 hodnotou nové dávky, čímž zdarma získáme filtr v seznamu přijatých faktur a dropdown
-„dohledat import“, který už existuje.
+„dohledat import”, který už existuje.~~ ← **ODVOLÁNO, viz rámec výše.**
 
 **O-4 — down migrace neexistují.** Runner umí jen dopředu. Test „migrace up/down idempotentně“
 z Commitu 2 zúžím na „up je idempotentní (dvojí běh = no-op)“ + ověření schématu; rollback
@@ -532,7 +589,8 @@ Cíl: co nejméně editovaných upstream souborů, protože fork se pravidelně 
 
 **Vše ostatní jsou nové soubory** v `api/src/Service/PurchaseBatchImport/**`,
 `api/src/Action/PurchaseInvoice/ImportBatch/**`, `api/prompt_templates/`,
-`web/src/pages/purchase-invoices/BatchImport*.vue`, `db/migrations/0912+`.
+`web/src/pages/purchase-invoices/BatchImport*.vue`, `db/migrations/` v rezervovaném pásmu
+**`0913–0919`** (ne `0912+`, to je obsazené — viz korekce v §3 a hlavička „Stav k 30. 7. 2026").
 
 **Feature flag:** `purchase_invoice.batch_import.enabled`, default `false`, čtený přes
 `Config::get()`. Vypnutý flag: routy se **neregistrují vůbec** (podmínka v `Routes.php`),
