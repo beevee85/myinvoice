@@ -633,7 +633,44 @@ Testy: `testSameInputProducesIdenticalOutputTwice`, `testOutputIndependentOfLoca
 ⚠️ **NEVYNUCENO — nemá implementaci ani test.** Jediný výskyt v repu je **komentář**
 v `HistoricalValidationScanner.php`. Dnes platí jen proto, že to tak někdo napsal; příští
 úprava může přidat volání ARESu a nikdo si toho nevšimne. Vynucení patří k runtime offline
-guardu v Commitu 12 (včetně `ext-curl`).
+guardu v Commitu 12 (včetně `ext-curl`). **Platí i ve workeru** — ten je jiný proces
+s jiným prostředím, takže guard v HTTP akci ho nekryje.
+
+### 8.9 Provozní předpoklady, na které se návrh NESMÍ spolehnout
+
+Zjištěno při pátrání po mezeře v cronu 29. 7. 2026. Každý bod doložený, ne odhadnutý.
+
+**Kontejner je efemérní a jeho výměna ničí důkazy.** `StartedAt 2026-07-29T08:00:13Z`,
+`RestartCount: 0` — nešlo o restart, ale o **nový kontejner**; image má
+`Created: 2026-07-29T09:59:48+02:00`, tedy lokální rebuild v 09:59 a `up` v 10:00.
+`/etc/cron.d/myinvoice` se generuje při startu a s kontejnerem zaniká, takže **změna
+rozvrhu nezanechá stopu** — právě proto zůstala mezera 29. 7. neověřitelná.
+
+→ **Auditní stopa dávkového importu** (kdo co nahrál, co se zamítlo a proč) patří **do DB
+nebo na trvalý svazek**, nikdy do cesty, která zmizí s rekreací.
+→ **Evidence pod pojistkou musí být regenerovatelná ze samotného repa**, ne z běžícího
+kontejneru — jinak se pojistka po výměně kontejneru rozsype na artefaktu, ne na pravidlu.
+
+**Volání cronu nezanechá stopu.** Cronie v tomto obrazu nemá vlastní log: syslog neběží,
+do `docker logs` jde jen `[entrypoint] vestavěný cron spuštěn`, a `/data/log/cron/*.log`
+jsou logy **wrapperu**, tedy až toho, co napsal spuštěný skript. Úloha, která selže dřív,
+než něco zapíše, je **neviditelná** — a `cron_runs` má tutéž slepou skvrnu o patro níž,
+protože `CronRun::start()` je ve všech jedenácti skriptech až za `Bootstrap::buildApp()`.
+
+→ Cron dávkového importu **zapisuje heartbeat u obou výsledků** a výsledek si nese s sebou.
+→ **Generovaný crontab se po generování ověřuje** — ukázalo se, že jeho selhání je tiché.
+
+**Rebuild z pracovního stromu nasadí, co je právě odbavené.** `docker-compose.yml:28` má
+`build:`, `:31` `image: myinvoice:latest` — image se **nestahuje, staví lokálně** z obsahu
+`/opt/myinvoice`, a migrace se pouštějí automaticky při startu kontejneru. `docker compose
+up --build` v tomto adresáři tedy nasadí **aktuální větev** a spustí její migrace.
+(`docker-compose.production.yml:28` má plovoucí `ghcr.io/radekhulan/myinvoice:latest`,
+ale ten soubor v provozu není.)
+
+**`/data` je mimo document root.** `root /var/www/html`, svazek `myinvoice_app-data` je
+namountovaný na `/data` — logy tedy nejsou dosažitelné z webu **strukturálně**, ne díky
+`location` bloku. Pravidlo v nginxu je mitigace, umístění mimo docroot je vlastnost;
+u cizího nasazení (Apache, Caddy) zůstává vlastnost, mitigace ne.
 
 ---
 
