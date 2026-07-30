@@ -1,0 +1,46 @@
+# Stav pravidel katalogu — JEDNA GRAMATIKA, jeden záznam na řádek.
+#
+# Formát:  ID <TAB> stav <TAB> klíč:hodnota [<TAB> klíč:hodnota ...]
+# Řádky začínající # jsou komentáře. Prázdné řádky se ignorují.
+# ŽÁDNÝ VOLNÝ TEXT — každá hodnota za stavem je klíč:hodnota, jinak parser padá.
+#
+# Uzavřená množina stavů a jejich POVINNÉ klíče:
+#   vynuceno-a-otestovano   test:            (aspoň jeden; víc testů = víc klíčů test:)
+#   definovano-nevynuceno   vynuceni: blokuje: od:
+#   nepouzitelne            duvod:
+#
+# `od:YYYY-MM-DD` je povinné u definovano-nevynuceno proto, aby "dočasně nevynuceno"
+# tiše nezestárlo na trvalý stav. Stáří je měřitelné a pojistka ho hlásí.
+#
+# ČERVENÁ POJISTKA ZNAMENÁ JEDINOU VĚC: skutečnost neodpovídá deklarovanému stavu.
+#   - vynuceno-a-otestovano, jehož jmenovaný test v repu neexistuje nebo neprojde
+#   - ID odkazované v kódu, které není v kanonickém seznamu (PLAN.md §8.7)
+#   - ID v kanonickém seznamu, které tady nemá záznam
+#   - chybějící povinný klíč pro daný stav
+#   - holé V81 (neexistuje, rozděleno na V81a/V81b/V81c)
+# Parser na nerozpoznaném řádku PADÁ, nikdy ho nepřeskočí — přeskakující parser je
+# umlčení kontroly o patro níž.
+#
+# Počty a poměry se sem NEPÍŠOU. Odkazuje se na RULE-PATH-MATRIX.md.
+# (Totéž pravidlo jako u čísel řádků a u "62 dokladů" — přepsané číslo přežije svou pravdivost.)
+#
+# NEÚPLNÉ: V1–V74 zatím záznam nemají. Pojistka je proto při prvním běhu červená
+# v obou směrech — to je její platný první výsledek, ne porucha. Doplnění V1–V74
+# patří do kódové fáze, po zřízení testovacího účtu (bez něj nelze ověřit test:).
+
+V75	vynuceno-a-otestovano	test:Integration/PurchaseInvoice/PurchaseInvoiceWriteServiceTransactionTest	test:Integration/PurchaseInvoice/Characterization/PartialWriteCharacterizationTest
+V76	vynuceno-a-otestovano	test:Integration/PurchaseInvoice/ShadowValidationTest	test:Integration/PurchaseInvoice/HistoricalValidationScannerTest
+V77	definovano-nevynuceno	vynuceni:Architecture/PurchaseInvoiceCreationPathsTest	blokuje:RULE-PATH-MATRIX.md	od:2026-07-29
+V78	definovano-nevynuceno	vynuceni:doménový validátor, Commit 11	blokuje:kód neexistuje	od:2026-07-30
+V79	definovano-nevynuceno	vynuceni:JSON Schema validátor, Commit 9	blokuje:kód neexistuje	od:2026-07-30
+V79b	definovano-nevynuceno	vynuceni:retence raw_json/normalized_json, Commit 7	blokuje:tabulky neexistují	od:2026-07-30
+V80	definovano-nevynuceno	vynuceni:JSON Schema validátor, Commit 9	blokuje:kód neexistuje	od:2026-07-30
+V81a	definovano-nevynuceno	vynuceni:statická kontrola nad naším jmenným prostorem	blokuje:kód neexistuje	od:2026-07-30
+V81b	definovano-nevynuceno	vynuceni:doménový validátor, Commit 11	blokuje:kód neexistuje	od:2026-07-30
+V81c	definovano-nevynuceno	vynuceni:charakterizační test zaokrouhlování upstreamu	blokuje:test neexistuje	od:2026-07-30
+V82	definovano-nevynuceno	vynuceni:serializace nálezů, Commit 11	blokuje:kód neexistuje	od:2026-07-30
+V83	vynuceno-a-otestovano	test:Unit/Support/TestDatabaseGuardTest	test:Architecture/TestDatabaseGuardWiringTest
+V83b	definovano-nevynuceno	vynuceni:rozšíření guardu na host+port a srovnání se schématem aplikace	blokuje:není implementace; api/bin/reset.php, migrate.php a sample.php guard nemají	od:2026-07-30
+V84	definovano-nevynuceno	vynuceni:statická kontrola jmenného prostoru jádra	blokuje:jádro neexistuje	od:2026-07-30
+V85	definovano-nevynuceno	vynuceni:testy determinismu, Commit 9	blokuje:kód neexistuje	od:2026-07-30
+V86	definovano-nevynuceno	vynuceni:runtime offline guard včetně ext-curl, Commit 12	blokuje:jediný výskyt v repu je komentář v HistoricalValidationScanner.php, bez testu	od:2026-07-30

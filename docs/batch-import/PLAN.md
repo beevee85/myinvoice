@@ -429,6 +429,200 @@ prostředí/architekturu — viz odchylky.
 
 ---
 
+### 8.6 Jak se tento katalog čte (platí pro celý dokument)
+
+**Vynucení pravidla je vlastnost cesty, ne dokladu.** Kdo čte „zápis je atomický" nebo
+„duplicita se odmítne", čte to o **té cestě, kterou matice označuje jako konvergovanou** —
+ne o každém dokladu v databázi.
+
+**Poměr konvergence se nikde neuvádí jako literál.** Odkazuje se na `RULE-PATH-MATRIX.md`,
+která **nejdřív kanonicky vyjmenuje cesty** (bez definice „cesty" nevyjde poměr ani jedním
+způsobem počítání) a číslo je z ní odvozené. Ručně přepsané číslo přežije svou pravdivost —
+týž vzor jako čísla řádků a jako „62 dokladů".
+
+**Stav každého pravidla je v `RULE-STATUS.tsv`**, ne v próze. Uzavřená množina stavů:
+`vynuceno-a-otestovano` (povinné `test:`), `definovano-nevynuceno` (povinné `vynuceni:`,
+`blokuje:`, `od:`), `nepouzitelne` (povinné `duvod:`). **Jedna gramatika pro všechny řádky** —
+`klíč:hodnota`, tabulátor jako oddělovač, žádný volný text.
+
+**Červená pojistka znamená jedinou věc: skutečnost neodpovídá deklarovanému stavu.**
+Ne „ještě to není hotové". Parser na nerozpoznaném řádku **padá, nikdy ho nepřeskočí** —
+přeskakující parser je umlčení kontroly o patro níž. A `od:` je povinné proto, aby
+„dočasně nevynuceno" tiše nezestárlo na trvalý stav: stáří je měřitelné a hlásí se.
+
+### 8.7 Kanonický seznam ID — jediný zdroj pro pojistku
+
+Tvar: `V<číslo><volitelné písmeno>`. Pojistka čte odsud a odnikud jinud.
+
+```
+V1 V2 V3 V4 V5 V6 V7 V8 V9 V10 V11 V12 V13 V14 V15 V16 V17 V18 V19 V20
+V21 V22 V23 V24 V25 V26 V27 V28 V29 V30 V31 V32 V33 V34 V35 V36 V37 V38 V39 V40
+V41 V42 V43 V43b V43c V43d V43e V44 V45 V46 V47 V48 V49 V50
+V51 V52 V53 V54 V55 V56 V57 V58 V59 V60 V61 V62 V63 V64 V65 V66 V67 V68 V69 V70
+V71 V72 V73 V74 V75 V76 V77 V78 V79 V79b V80 V81a V81b V81c V82 V83 V83b V84 V85 V86
+```
+
+**`V81` samotné neexistuje** — rozděleno na `V81a`/`V81b`/`V81c`. Pojistka musí holé `V81`
+odmítnout jako neznámé ID; je to test obou směrů, ne jen kontrola úplnosti.
+
+### 8.8 V75–V86
+
+Rekonstruované popisují, co kód **dělá**, ne co by pravidlo mělo říkat. Rozchody jsou nálezy.
+
+**V75 — Atomicita zápisu.** FAIL. `PurchaseInvoiceWriteService`: validace → `createDraft` →
+`replaceItems` → `vat_overrides` → `recompute` v jedné transakci; pád kdekoli nesmí nechat
+v DB nic. Testy: `PurchaseInvoiceWriteServiceTransactionTest`, charakterizace předchozího
+stavu `PartialWriteCharacterizationTest`.
+⚠️ **Vlastnost jedné cesty, ne dokladu** — cesty z rohatky V77 zapisují mimo write service.
+
+**V76 — Stínová validace: zaznamenat, ne vynutit.** INFO. `PurchaseInvoiceWriteService`, nad
+historií `HistoricalValidationScanner` + `api/bin/shadow-validate-existing.php`.
+Testy: `ShadowValidationTest`, `HistoricalValidationScannerTest`, pomůcka `CollectingLogger`.
+⚠️ Rozchody: analytická vrstva klasifikuje podle dohodnutých pravidel včetně V43b, produkční
+`InvoiceAmountPolicy` nulové množství odmítá (§14). Skener měl **default „všichni tenanti"** —
+scope se zpovinňuje, parametr bez hodnoty je chyba.
+
+**V77 — Přijatou fakturu zakládá jen `PurchaseInvoiceWriteService`.** FAIL, statický test nad
+zdrojáky. Testy: `PurchaseInvoiceCreationPathsTest` (rohatka `NOT_YET_CONVERGED`, smí se **jen
+zkracovat**), `PurchaseInvoiceWritePathTest`.
+⚠️ **Pravidlo dnes neplatí.** Nekonvergované cesty a jejich doložené překážky jsou
+v `RULE-PATH-MATRIX.md`; počet se sem nepřepisuje.
+
+**V78 — Dvojí odpočet v zálohovém řetězci (§ 37a).** FAIL: `advance_paid_amount` nenulové na
+konečné faktuře (patří výhradně na DDKPZ); součet zápočtových řádků přesáhne součet záloh
+doložených v dávce; táž záloha odečtena dvakrát (párování číslo DDKPZ / VS / trojice
+dodavatel+částka+datum, překryv absolutních hodnot); zápočet slévající více sazeb do jednoho
+řádku — zápočet musí být po sazbách a součet v každé sazbě se rovná doloženým zálohám v téže
+sazbě. WARN (ne FAIL): konečná faktura na nulu bez řetězce v dávce — legitimní, když zálohy
+přišly dřív, ale musí být v reportu vidět.
+Testy: `testAdvancePaidOnFinalInvoiceIsFail`, `testNettingExceedingDocumentedAdvancesIsFail`,
+`testSameAdvanceDeductedTwiceAcrossChainIsFail`, `testNettingCollapsingVatRatesIsFail`,
+`testZeroTotalWithoutChainInBatchIsWarnNotFail`. Zlatá fixtura **syntetická a anonymizovaná**.
+
+**V79 — Limity payloadu.** FAIL, konstanty na jednom místě, každý překročený limit hlásí název
+limitu + JSON pointer (V82): max 50 dokladů v dávce, 20 MB soubor, 200 MB dávka, 2 MB
+`raw_json`/doklad, 512 KB `normalized_json`, 500 položek/doklad, 4 096 znaků textové pole,
+64 KB poznámkové, hloubka zanoření 20, 1 000 prvků pole, 200 klíčů v objektu. FAIL i na
+binárku dokladu nebo base64 nad 1 KB v `raw_json`.
+Testy: `testBatchOverFiftyDocumentsIsRejected`, `testFileOverSizeLimitIsRejected`,
+`testRawJsonOverSizeLimitIsRejected`, `testItemCountOverLimitIsRejected`,
+`testNestingDepthOverLimitIsRejected`, `testBase64BlobInRawJsonIsRejected`,
+`testLimitsAreEnforcedNotOnlyDeclared`.
+
+**V79b — Retence.** FAIL. Pojmenované konstanty **s jednotkou** na jednom místě:
+`RAW_JSON_RETENTION_DAYS = 0`, `NORMALIZED_JSON_RETENTION_DAYS = 90`. Nikdy literál v dotazu.
+
+Spouštěč je **stav dávky, ne noční úloha** — nula dní přes noční úlohu je až 24 hodin
+expozice. A protože dávka nemusí dokončit, jsou spouštěče **dva**:
+1. každý **terminální stav** — dokončeno, **selhalo**, **zrušeno**;
+2. **stropní stáří** pro dávky, které v terminálním stavu neskončí — viset zůstane právě ta
+   dávka, která nejspíš obsahuje něco pokřiveného.
+
+Purge je **idempotentní**, ve **vlastní transakci**, a jeho selhání nesmí vzít s sebou nic
+cizího. Jeho log podléhá V82: **rozsah a počet, nikdy obsah.** Čtení `raw_json` jen role
+účetní a výš.
+Testy: `testRawJsonPurgedAtBatchCompletion`, `testRawJsonPurgedOnFailedBatch`,
+`testRawJsonPurgedForAbandonedBatch`, `testNormalizedJsonPurgedAfterNinetyDays`,
+`testPurgeTouchesOnlyItsOwnBatch` (dvě dávky, druhá musí zůstat nedotčená),
+`testPurgeTriggerIsBatchStateNotCron`, `testPurgeIsIdempotent`,
+`testPurgeLogsScopeAndCountNeverContent`, `testPurgeNeverRunsInShadowMode`,
+`testRetentionValuesComeFromNamedConstants`, `testRawJsonNotReadableBelowAccountantRole`.
+
+**V80 — Nepřátelský JSON.** FAIL, odmítnout (ne tolerovat): duplicitní klíče (tiché „poslední
+vyhrává" mění význam dokladu), `NaN`, `Infinity`, vedoucí nuly, `+1`, hex literály, jednoduché
+uvozovky, koncové čárky, komentáře, neescapované řídicí znaky, neplatné UTF-8, osamocené
+surrogáty, BOM, `NUL`, klíče `__proto__`/`constructor`/`prototype`, čísla mimo bezpečný
+celočíselný rozsah, číselné literály nad 32 znaků, vědecká notace v peněžních polích,
+neobjektový typ na nejvyšší úrovni, neznámé klíče (strict).
+Testy: data-provider `testHostileJsonIsRejected` s pojmenovanými případy,
+`testDuplicateKeysAreRejectedNotLastWins`, `testUnknownKeysAreRejectedInStrictMode`,
+`testPrototypePollutionKeysAreRejected`, `testInvalidUtf8IsRejected`.
+
+**V81a — Žádný `float` v našem kódu.** FAIL. Peníze jako string, drženo jako celočíselné
+minimální jednotky nebo desítkový string. FAIL na více než dvě desetinná místa a na hodnotu,
+u které round-trip string → interní → string není znak po znaku identický. Statická kontrola
+nad **naším** jmenným prostorem (deny-list sdílený s V84).
+Testy: `testMoneyNeverTouchesFloat`, `testThreeDecimalMoneyIsRejected`,
+`testFloatBasedImplementationFailsTheSuite` (mutační důkaz, jen náš kód).
+
+**V81b — Hraniční kontrola výstupu upstreamu.** FAIL dokladu. `InvoiceMath` ani
+`PurchaseInvoiceCalculator` **nepředěláváme** — ale co z nich vyjde, ověřujeme proti přesným
+identitám po sazbách: základ + DPH = celková částka přesně, součet položkových řádků = základ
+v dané sazbě s tolerancí **nula**. Rozdíl ze zaokrouhlení smí projít **jen** jako řádek
+s `is_settlement_rounding`.
+Testy: `testPerRateTotalsMustMatchExactly`, `testRoundingDifferenceOnlyViaSettlementLine`.
+
+**V81c — Charakterizace zaokrouhlování upstreamu.** Připne dnešní chování, aby budoucí změna
+byla vidět jako změna, ne jako záhada. Test: `testUpstreamRoundingBehaviourIsCharacterized`.
+Kdyby V81b ukázala drift z floatů v upstreamu, je to **nález a kandidát na upstream issue**,
+ne práce v této featuře.
+
+**V82 — Lokalizace chyb, redakce default-deny.** FAIL. Každý nález nese RFC 6901 JSON pointer,
+ID pravidla, závažnost a lidskou zprávu.
+
+**Redakce je výchozí stav** a děje se na **jednom serializačním místě**, ne u volajících.
+Existuje explicitní **allow-list polí**, jejichž hodnota smí ve zprávě být (`vat_rate_id`, kód
+měny, číslo řádku, `document_kind`, název limitu). Cokoli mimo allow-list se hlásí jen typem
+a délkou — implementace nerozhoduje, co je osobní údaj, rozhoduje, co je na seznamu.
+
+**Pointer prosakuje taky:** musí být **indexový, nikdy klíčovaný obsahem**.
+`/lines/3/description` ano, `/parties/<jméno firmy>/…` ne.
+Testy: `testEveryFindingHasResolvablePointer`, `testEveryFindingCarriesRuleId`,
+`testFindingOrderIsDeterministic`, `testUnknownFieldIsRedactedWithoutCodeChange` (syntetický
+nález s neznámým polem musí vyjít zredigovaný, aniž kdokoli přidal řádek kódu),
+`testPointersAreIndexedNeverKeyedByContent`, `testEchoAllowListIsExactlyAsDocumented`.
+
+**V83 — Testy neběží proti ostré ani sdílené databázi.** FAIL, zastaví běh s **`exit 78`**
+(`EX_CONFIG`). Vzor: `/(^|[_\-])(tests?|testing|ci|qa|sandbox|clone)\d*([_\-]|$)/i`.
+Testy: `TestDatabaseGuardTest`, `TestDatabaseGuardWiringTest`,
+`testDisallowedDatabaseNameExitsWithSeventyEight` — tvrdí **konkrétní 78**, ne „nenula",
+a **čte návratový kód přímo, ne přes rouru** (jinak se zámek měří přístrojem, který už jednou
+ukázal nulu; `set -o pipefail` nebo `${PIPESTATUS[0]}`).
+
+**V83b — Ověřuje se instance, ne jen jméno schématu.** FAIL. *Nové.* Guard podle vlastní hlášky
+hlídá **jen jméno schématu, ne host** — schéma `neco_test` na ostrém serveru projde. V83b
+vyžaduje: host a port musí být naše dockerová instance, a cílové schéma **nesmí být totožné**
+s tím, které má nakonfigurovaná aplikace.
+🔴 **NÁLEZ:** `api/bin/reset.php`, `migrate.php` a `sample.php` guardem chráněné **nejsou**.
+`reset.php` umí smazat ostrá data a nic ho nezastaví. Z webu dosažitelný **není** — ověřeno
+zvenčí přes 443 na neexistujících jménech včetně normalizačních variant (`%62in`, `%2f`,
+traversal, dvojité lomítko, `/./`): vždy 403, identická odpověď 548 B.
+**Ale ta ochrana je vlastnost nasazení, ne kódu** — kdo provozuje za Apachem nebo Caddy, ten
+`location` blok nemá. Guard patří do skriptu; je to nejzávažnější z kandidátů na upstream issue.
+
+**V84 — Jádro je čistá knihovna.** FAIL. Bez I/O, DB, filesystemu, náhody, globálů,
+superglobálů, `getenv` a mutovatelného statického stavu; závislosti injektované.
+
+**Zakázané je čtení hodin, ne datová aritmetika.** Zakázané: `time()`, `microtime()`,
+`hrtime()`, `date()` bez explicitního timestampu, `new DateTimeImmutable()`/`new DateTime()`
+bez argumentu **i s relativním klíčovým slovem** (`'now'`, `'today'`, `'tomorrow'`, `'+1 day'`,
+`'midnight'`), `strtotime()` bez báze, `mt_rand`, `random_*`, `uniqid`.
+Povolené: `new DateTimeImmutable('2026-07-15')` a operace nad hodnotami, které přišly zvenčí.
+**`createFromFormat` musí mít kotvu `!` nebo `|`** — bez ní doplní nespecifikované složky
+z aktuálních hodin, což je tichá chyba, která se projeví jednou za čas a vypadá jako náhoda.
+**Aktuální čas se do jádra vždy injektuje** přes `ClockInterface`, nikdy nečte.
+Testy: `testCoreLibraryHasNoForbiddenCalls`, `testCoreLibraryImportsNothingFromFramework`,
+`testAllowListIsExactlyAsDocumented`, `testRelativeDateKeywordsAreForbidden`,
+`testCreateFromFormatRequiresAnchor`, `testDateArithmeticOnPassedValuesIsAllowed` (doloží,
+že pravidlo nezakazuje víc, než má).
+
+**V85 — Determinismus.** FAIL. Shodný vstup → bajtově shodný výstup: dvakrát v témž procesu,
+jednou v podprocesu, nezávisle na `LC_ALL`, `TZ`, pořadí klíčů, PHP hash seedu a PCRE JIT.
+V normalizovaném výstupu není časová značka, `uniqid`, `spl_object_hash` ani nic odvozeného
+od běhu — metadata dávky žijí mimo normalizované DTO. Řazení podle stabilního dokumentovaného
+klíče, nikdy podle pořadí v hashmapě.
+Testy: `testSameInputProducesIdenticalOutputTwice`, `testOutputIndependentOfLocaleAndTimezone`,
+`testOutputIndependentOfInputKeyOrder`, `testNoTimeOrRandomInNormalizedOutput`,
+`testSubprocessRunMatchesInProcessRun`.
+
+**V86 — Žádná síť v analytické vrstvě.** Měla by být FAIL.
+⚠️ **NEVYNUCENO — nemá implementaci ani test.** Jediný výskyt v repu je **komentář**
+v `HistoricalValidationScanner.php`. Dnes platí jen proto, že to tak někdo napsal; příští
+úprava může přidat volání ARESu a nikdo si toho nevšimne. Vynucení patří k runtime offline
+guardu v Commitu 12 (včetně `ext-curl`).
+
+---
+
 ## 9. Odchylky proti zadání (co jsem odhadl zvenčí špatně)
 
 **O-1 — BYOK endpoint má jinou cestu.**
