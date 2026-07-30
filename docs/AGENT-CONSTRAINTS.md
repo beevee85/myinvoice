@@ -182,6 +182,11 @@ Jsi read-only, ale read-only dotaz umí produkci položit.
 
 ### 4.3 Jak se k databázi vůbec dostaneš — a kdy vůbec ne
 
+> **Pravomoc bez dovolené cesty k jejímu využití není pravomoc, je to past.**
+> Proto tento odstavec existuje: §4 výše ti databázi dovoluje, ale §2.1, §2.3 a §3 ti zavírají
+> všechny cesty k pověření. Bez §4.3 by nejpravděpodobnějším výsledkem byla improvizace,
+> ne poslušnost — a přesně tak vznikl incident 30. 7. 2026.
+
 > **STAV K 30. 7. 2026: vyhrazený read-only účet NEEXISTUJE.**
 > **Do jeho vzniku nemají subagenti přístup k databázi vůbec.** §4, §4.1 a §4.2 jsou do té doby
 > bez účinku. Když tvůj úkol databázi potřebuje, **zastav se a řekni to** — je to platný
