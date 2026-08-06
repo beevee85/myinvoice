@@ -363,6 +363,31 @@ return [
         'allowed_exts'      => ['pdf', 'isdoc', 'xml'],  // jen tyto přípony se zpracují (.xml = ISDOC payload bez wrapping PDF)
         'move_processed_to' => '',                   // volitelný podadresář (např. 'processed'); prázdné = soubory zůstanou na místě a budou skipnuté při dalším scanu díky pdf_hash dedup
         'archive_storage'   => __DIR__ . '/storage/purchase-invoices', // kam přesouvat originální PDF po importu (mimo webroot)
+
+        // FORK — dávkový import přijatých dokladů (migrace 0913).
+        // Nahraješ dávku dokladů → aplikace vygeneruje balíček a prompt → extrakci
+        // udělá lokální nástroj → results.json se vrátí → server ho NEZÁVISLE
+        // zvaliduje → vzniknou jen DRAFTY ke schválení člověkem. results.json je
+        // nedůvěryhodný vstup; serveru se nevěří ani jedno číslo.
+        //
+        // enabled = false → routy se NEREGISTRUJÍ, položka menu se nevykreslí,
+        // tabulky existují prázdné a nikdo do nich nesahá. Aplikace se chová
+        // bit-pro-bit jako bez této featury.
+        'batch_import' => [
+            'enabled'             => false,          // hlavní příznak featury
+            'max_files'           => 50,             // V79: max dokladů v dávce
+            'max_file_bytes'      => 20 * 1024 * 1024,   // V79: 20 MB na soubor
+            'max_batch_bytes'     => 200 * 1024 * 1024,  // V79: 200 MB na dávku
+            'max_raw_json_bytes'  => 2 * 1024 * 1024,    // V79: 2 MB raw_json na doklad
+            'max_norm_json_bytes' => 512 * 1024,         // V79: 512 KB normalized_json
+            'token_ttl_minutes'   => 120,            // A1/V63: platnost jednorázového tokenu dávky
+            // V79b — retence úložiště osobních údajů. Obsah cizích dokladů se
+            // nedrží déle, než je nutné. Spouštěč je STAV dávky, ne noční úloha.
+            'raw_json_retention_days'        => 0,   // maže se při dosažení terminálního stavu
+            'normalized_json_retention_days' => 90,  // dohledatelnost, pak pryč
+            'abandoned_batch_hours'          => 24,  // strop pro dávky bez známky života (sweep z cron-cleanup)
+            'storage_dir'         => __DIR__ . '/storage/purchase-import-batches', // mimo webroot
+        ],
     ],
 
     // Cron retention (api/bin/cron-cleanup.php + cron-backup.php)

@@ -15,7 +15,7 @@ databáze MariaDB 10.6+ (doporučeno 11.x).
 
 - `api/` — PHP backend (Slim, autowired actions, services, repositories); `api/bin/` = CLI skripty, `api/tests/` = PHPUnit
 - `web/` — Vue 3 + TS frontend; zdrojáky ve `web/src/`, lokalizace ve `web/src/i18n/`
-- `dist/` — produkční build frontendu (commitovaný — uživatelé testují přes něj)
+- `web/dist/` — produkční build frontendu; **NENÍ v gitu** (`.gitignore:16,19`, v historii nikdy nebyl). Vzniká až na cílovém stroji.
 - `db/migrations/` — SQL migrace (číslované, idempotentní)
 - `manual/` — uživatelský manuál (Markdown, česky); `manual/generated/` = vyrenderované HTML
 - `source/` — vývojářská spec a plány
@@ -25,13 +25,33 @@ databáze MariaDB 10.6+ (doporučeno 11.x).
 ## Příkazy
 
 ```bash
-# Frontend — build (NUTNÉ po každé změně web/src, dist/ se commituje)
+# Frontend — build (NUTNÉ po každé změně web/src; výstup se NEcommituje)
 cd web && pnpm build            # = vue-tsc --noEmit && vite build (npm run build funguje též)
 cd web && pnpm type-check       # jen typová kontrola
+
+# Build MIMO produkční strom (worktree nemá node_modules):
+#   nativní binding rolldownu je stavěný pro musl → na glibc hostiteli spadne
+#   na MODULE_NOT_FOUND. Proto v Alpine. node_modules připojit READ-ONLY,
+#   ať se do produkčního stromu nezapíše; `--configLoader runner` obchází to,
+#   že si vite bundluje config do node_modules/.vite-temp (jinak EROFS).
+docker run --rm -v /root/mi-batch:/work \
+  -v /opt/myinvoice/web/node_modules:/work/web/node_modules:ro \
+  -w /work/web node:20-alpine npx vite build --configLoader runner
+# POZOR: symlink web/node_modules .gitignore NEZACHYTÍ (vzor má lomítko,
+# symlink není adresář). Po type-checku ho smaž, ať neskončí v commitu.
 
 # PHP testy (PHPUnit 13)
 cd api && php vendor/bin/phpunit                  # vše
 cd api && php vendor/bin/phpunit --filter Xyz     # podmnožina
+
+# Testy z WORKTREE (nemá vendor/ ani přístup k DB):
+#   --network host je NUTNÝ — integrační testy jdou na 127.0.0.1:3307, což je
+#   z kontejneru jinak on sám. Bez toho spadne ~537 testů na "Connection refused",
+#   což vypadá jako regrese a není.
+docker run --rm --network host --entrypoint php \
+  -v /root/mi-batch:/var/www/html \
+  -v /opt/myinvoice/api/vendor:/var/www/html/api/vendor:ro \
+  -w /var/www/html/api myinvoice:latest vendor/bin/phpunit
 
 # Migrace — VŽDY přes migrate.php, NIKDY mysql klientem přímo
 php api/bin/migrate.php
@@ -43,6 +63,23 @@ php tools/exportManualToPdf.php
 ```
 
 ## Tvrdá pravidla
+
+### Subagenti a nevratné operace
+- **Subagenta nevypravuj bez kanonických omezení.** [`docs/AGENT-CONSTRAINTS.md`](docs/AGENT-CONSTRAINTS.md)
+  se vkládá do promptu **celý a doslovně**, nikdy parafrází; subagent vrací jeho SHA-256 v hlavičce
+  reportu. Přidáno po incidentu 30. 7. 2026, kdy dva subagenti testovali pověření proti cizí
+  databázové službě — zákaz existoval, ale jen v próze v dokumentu, který subagenti nečtou.
+  Jakákoli změna toho souboru je samostatný commit se schválením.
+- **Nevratné operace nad soubory dělá výhradně uživatel.** Agent nikdy sám `rm`, `shred`,
+  `truncate` ani `mv` přes existující cíl — připraví příkaz, vypíše jeho úplný text i počet cílů,
+  a předá ke schválení. Schvaluje se jen to, co je vidět jako text. Co agent nevytvořil, nemaže
+  nikdy, ani po schválení. Přidáno po incidentu 29. 7. 2026 (smazáno 39 cizích záloh).
+- **`app.pepper` se NEROTUJE NIKDY** — vstupuje jako suffix do `password_hash()`
+  (`api/src/Service/Auth/PasswordHasher.php:26,66`), takže jeho změna nevratně odřízne všechny
+  uživatele; bcrypt hash se bez plaintextu nepřepočítá. `app.secret_encryption_key` je jiná
+  hodnota a rotovatelná je, ale jen po ověření, že v DB není žádná nenulová šifrovaná hodnota
+  (`users.totp_secret` a `supplier.*_enc`). Pozor: `LoginAction.php:274` volá `decrypt()`
+  **bez try/catch**, takže nedešifrovatelný TOTP secret = 500 a uzamčení účtu.
 
 ### Migrace
 - Nová migrace = nový číslovaný soubor v `db/migrations/`, spouští se **výhradně** přes `php api/bin/migrate.php`.
@@ -79,7 +116,7 @@ php tools/exportManualToPdf.php
 - Citlivé údaje (hesla, API klíče, connection stringy) nikdy do kódu, testů ani dokumentace.
 
 ### Frontend
-- Po každé změně ve `web/src` spusť `pnpm build` — `dist/` je to, co se nasazuje a testuje; samotný `vue-tsc` nestačí.
+- Po každé změně ve `web/src` spusť build — `dist/` je to, co se nasazuje a testuje; samotný `vue-tsc` nestačí. Výstup se ale **necommituje**, viz recept v Příkazech.
 - Drž se existujícího design language (sjednocené boxy, status badges, mobile cards) — před vymýšlením nového vzoru se podívej, jak to dělají sousední stránky.
 
 ## Testy
@@ -88,6 +125,7 @@ php tools/exportManualToPdf.php
 - **Pouze syntetická testovací data** — repo je veřejné. Žádné reálné doklady, výpisy, IBANy, čísla dokladů ani identifikátory skutečných protistran.
 - České bankovní účty v testech musí projít mod-11 validací; ověřený placeholder: `1000000005 / 0100`.
 - ISDOC export se validuje proti oficiálnímu XSD (`api/xsd/isdoc-invoice-6.0.2.xsd`).
+- **`file_get_contents()` v testech NEVRACÍ obsah disku.** `tests/bootstrap.php` volá `\DG\BypassFinals::enable()`, což registruje stream wrapper na `file://` a přepisuje PHP zdrojáky za běhu. Změřeno na `ResultsValidator.php`: 7830 B na disku → 7801 B v testu, `final` 1→0, `readonly` 3→0. Architekturní test (je jich 7, které čtou zdrojáky) se proto **nesmí opírat o `final` ani `readonly`** — vzor je nenajde, množina vyjde prázdná a test projde NAPRÁZDNO. Ke každé takové kontrole patří aserce na neprázdnost vstupu: prázdná množina musí být červená, ne tichý souhlas.
 
 ## Manuál
 
@@ -101,4 +139,4 @@ php tools/exportManualToPdf.php
 - Drž se stylu okolního kódu (pojmenování, idiomy, hustota komentářů). Nepřidávej komentáře, které kód jen opakují.
 - Commit messages česky, conventional-commits styl: `feat(scope): …`, `fix(scope): …`, `release: X.Y.Z — …` (viz `git log`).
 - Změny v `CHANGELOG.md` a `VERSION` dělá maintainer při release — v běžném PR na ně nesahej.
-- Necommituj vygenerované artefakty mimo zavedené výjimky (`dist/`, `manual/generated/` jsou commitované záměrně).
+- Necommituj vygenerované artefakty. `manual/generated/` je jediná zavedená výjimka — `dist/` výjimka **není** (je v `.gitignore`).

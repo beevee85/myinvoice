@@ -212,7 +212,14 @@ final class TripImportService
     /** @return list<list<string>> */
     private function readSpreadsheet(string $content, string $ext): array
     {
-        $tmp = tempnam(sys_get_temp_dir(), 'logimp_') . '.' . $ext;
+        // tempnam() vytvoří placeholder BEZ přípony, soubor s příponou vzniká
+        // až vedle něj — mazat se musí obojí, jinak po každém importu zůstane
+        // v temp adresáři nulový sirotek.
+        $tmpBase = tempnam(sys_get_temp_dir(), 'logimp_');
+        if ($tmpBase === false) {
+            throw new \RuntimeException('Nelze vytvořit dočasný soubor.');
+        }
+        $tmp = $tmpBase . '.' . $ext;
         file_put_contents($tmp, $content);
         try {
             $reader = IOFactory::createReaderForFile($tmp);
@@ -242,7 +249,8 @@ final class TripImportService
             }
             return $out;
         } finally {
-            @unlink($tmp);
+            if (is_file($tmp)) @unlink($tmp);
+            if (is_file($tmpBase)) @unlink($tmpBase);
         }
     }
 

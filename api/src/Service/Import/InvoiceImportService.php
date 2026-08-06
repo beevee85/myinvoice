@@ -718,6 +718,9 @@ final class InvoiceImportService
     private function unzip(string $content): array
     {
         $tmp = tempnam(sys_get_temp_dir(), 'imp-zip-');
+        if ($tmp === false) {
+            throw new \RuntimeException('Nelze vytvořit dočasný soubor pro ZIP import.');
+        }
         file_put_contents($tmp, $content);
         $zip = new ZipArchive();
         if ($zip->open($tmp) !== true) {

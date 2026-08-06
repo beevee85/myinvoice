@@ -390,6 +390,38 @@ final class Routes
         // Přijaté faktury (purchase invoices) — fáze 1 integrace forku.
         // Všechny chráněné AuthMiddleware + SupplierScopeMiddleware (skrz globální group).
         // scan-inbox je admin/accountant only (check v Action).
+        // --- FORK: dávkový import přijatých dokladů (Commit 14) ------------
+        // Za příznakem `purchase_invoice.batch_import.enabled` (default false).
+        // Vypnutý příznak = routy se NEREGISTRUJÍ VŮBEC, takže endpoint vrátí
+        // 404 jako každá neexistující cesta — ne 403, které by prozradilo, že
+        // featura existuje a je jen vypnutá.
+        //
+        // Prefix je `batch-import`, NE `import-batches`: to druhé už upstream
+        // používá pro jiný koncept (dohledání dávky AI importu, #232) a míchat
+        // je by byla táž chyba, kterou A3 zamítlo na úrovni databáze.
+        // Zůstáváme přitom pod `/api/purchase-invoices/`, takže RoleMiddleware,
+        // SupplierScopeMiddleware i ApiScopeMiddleware fungují beze změny —
+        // neupravuje se ani jeden middleware (A1, O-2).
+        $container = $app->getContainer();
+        $batchImportEnabled = $container !== null
+            && (bool) $container->get(\MyInvoice\Infrastructure\Config\Config::class)
+                ->get('purchase_invoice.batch_import.enabled', false);
+
+        if ($batchImportEnabled) {
+            $app->get ('/api/purchase-invoices/batch-import',
+                \MyInvoice\Action\PurchaseInvoice\BatchImport\ListBatchesAction::class);
+            $app->post('/api/purchase-invoices/batch-import',
+                \MyInvoice\Action\PurchaseInvoice\BatchImport\CreateBatchAction::class);
+            $app->get ('/api/purchase-invoices/batch-import/{id:[0-9]+}',
+                \MyInvoice\Action\PurchaseInvoice\BatchImport\GetBatchAction::class);
+            $app->get ('/api/purchase-invoices/batch-import/{id:[0-9]+}/package',
+                \MyInvoice\Action\PurchaseInvoice\BatchImport\GetBatchPackageAction::class);
+            $app->post('/api/purchase-invoices/batch-import/{id:[0-9]+}/results',
+                \MyInvoice\Action\PurchaseInvoice\BatchImport\SubmitResultsAction::class);
+            $app->post('/api/purchase-invoices/batch-import/{id:[0-9]+}/results/{resultId:[0-9]+}/apply',
+                \MyInvoice\Action\PurchaseInvoice\BatchImport\ApplyResultAction::class);
+        }
+
         $app->post   ('/api/purchase-invoices/scan-inbox',                ScanInboxAction::class);
         $app->get    ('/api/purchase-invoices/export',                     ExportPurchaseInvoicesAction::class);
         $app->get    ('/api/purchase-invoices/import-batches',             PurchaseInvoiceImportBatchesAction::class);

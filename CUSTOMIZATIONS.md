@@ -19,6 +19,709 @@ Ověřeno 2026-07-28 proti `upstream/master` (4.51.0, migrace do 0147): ani jedn
 
 ---
 
+## DOHODA: rezervované pásmo migrací pro dávkový import — **0913–0919**
+
+Fork migrace číslujeme od 0900. Souběžné session pracují na téže větvi `custom`
+a **0912 už si jedna vzala** (`0912_default_expense_categories.sql`), zatímco byla
+plánovaná pro dávkový import.
+
+**Pásmo `0913–0919` je rezervováno pro dávkový import** (`feat/batch-import-subscription`).
+Jiná práce ať sahá od 0920 výš.
+
+**Číslo se přiděluje až v okamžiku commitu**, ne dopředu — a vždy s ověřením, že je
+pořád volné:
+
+```bash
+ls -1 db/migrations/ | sort | tail -3          # nejvyšší obsazené
+git ls-tree --name-only custom db/migrations/ | sort | tail -3   # i to, co má custom
+```
+
+Kdyby bylo celé pásmo obsazené, rezervovat další a zapsat sem — ne přečíslovávat
+cizí migrace.
+
+---
+
+## 2026-07-30 — Dávkový import: brána před Commitem 7 (P1–P6)
+
+**Charakter: FORK — synchronizace, kotvy pro merge, tři doplněné testy, DI úklid.**
+
+### Sesynchronizováno s `custom` (merge `ec6cfb07`)
+Základna se rozešla o 12 commitů. Jediný konflikt byl v tomhle souboru (obě strany
+přidávaly záznamy nahoru) — vyřešen zachováním obou. **Tři upstream soubory, které
+fork mění, `custom` nesáhl**, změny se aplikují beze změny a rohatka drží.
+**Migrace 0912 je obsazená** (`0912_default_expense_categories.sql`) → **fork migrace
+dávkového importu začnou na 0913.**
+
+### KOTVY PRO OPĚTOVNÉ NASAZENÍ PO UPGRADU
+
+Tři soubory upstreamu, které fork mění. U `AiPdfExtractor` je konflikt při dalším
+merge **téměř jistý** (32 upstream commitů). Řeš podle téhle tabulky, ne podle paměti.
+
+| soubor | kotva (co hledat) | co se mění | proč |
+|---|---|---|---|
+| `api/src/Action/PurchaseInvoice/CreatePurchaseInvoiceAction.php` | konstruktor, param `private readonly PurchaseInvoiceCalculator $calc` | **nahradit** za `PurchaseInvoiceWriteService $writer` | kalkulátor tam byl jen kvůli `recompute` |
+| tentýž | blok `try { $id = $this->repo->createDraft(...) } … $this->calc->recompute($id);` (u upstreamu ~ř. 106–124) | **celý nahradit** jedním `$id = $this->writer->createWithItems($body, $userId, $supplierId, 'manual');` uvnitř téhož try/catch | sekvence patří do write service |
+| `api/src/Service/Import/AiPdfExtractor.php` | konstruktor, poslední param `?LoggerInterface $logger = null` | **za něj přidat** `private readonly ?PurchaseInvoiceWriteService $writeService = null` | poslední a volitelný, ať poziční konstrukce v testech přežije |
+| tentýž | trojice `$id = $this->repo->createDraft($payload, …); $this->repo->replaceItems($id, $items); $this->calc->recompute($id);` (v `createDraft()`, u upstreamu ~ř. 713) | **nahradit** za `$id = $this->writer()->createWithItems($payload, $userId, $supplierId, 'ai_pdf');` | `$payload['items']` je totéž pole jako `$items` |
+| tentýž | před `private function tagImportBatch(` | **vložit** privátní `writer()` s fallbackem `$this->writeService ?? new PurchaseInvoiceWriteService($this->db, $this->repo, $this->calc, $this->logger)` | fallback jen pro poziční konstrukci v testech |
+| `api/src/Service/Import/IsdocToPurchaseInvoiceMapper.php` | konstruktor, za `PurchaseInvoiceCnbApplier $cnbApplier` | **přidat** `?LoggerInterface $logger = null` a `?PurchaseInvoiceWriteService $writeService = null` | obojí poslední a volitelné |
+| tentýž | trojice `createDraft` + `replaceItems` + `recompute` (~ř. 129) | **nahradit** za `$id = $this->writer()->createWithItems($payload, $userId, $supplierId, 'isdoc');` | totéž jako u AI cesty |
+| tentýž | před `private function fetchTenantIc(` | **vložit** privátní `writer()` (stejný fallback) | |
+| `api/tests/bootstrap.php` | `\DG\BypassFinals::enable();` | **za něj** `TestDatabaseGuard::assertOrExit(dirname(__DIR__, 2));` | **pořadí je load-bearing** — guard před BypassFinals shodí 123 unit testů |
+
+**Kontrola po merge:** `vendor/bin/phpunit --filter "PurchaseInvoiceCreationPaths|PurchaseInvoiceWritePath|TestDatabaseGuardWiring"`.
+Rohatka i wiring test odhalí, když se kterákoli kotva po merge nevrátí.
+
+### Doplněno po auditu
+
+* **P1** — `.gitignore` nově pokrývá `api/tests/fixtures/local/*` (výjimky `.gitkeep`
+  a `README.md`). Adresář vytvořen i s návodem: reálné doklady třetích stran se sem
+  smějí položit, ale **nikdy se necommitnou**; verzované fixtures musí být syntetické.
+  Doloženo `git check-ignore -v`.
+* **P2** — `ShadowValidationTest::testFindingsAreComputedOverInputDtoNotStoredRow`.
+  Tvrzení „nálezy se počítají nad DTO PŘED zápisem" bylo dosud jen komentář (nález č. 4
+  vlastního auditu). Test dá `quantity = 0.0001`, ověří, že se v DB uložilo `0.000`
+  (`DECIMAL(10,3)`), a vyžaduje **žádný nález** — kdyby validace četla uložený stav,
+  ohlásila by „Množství nesmí být 0.".
+* **P3** — `PurchaseInvoiceTenantScopingTest` (V64), 4 testy: zápis na cizího dodavatele,
+  čtení cizího dokladu, `setVatOverrides` pod cizím tenantem, tenant scope skeneru.
+  Dosud bylo V64 kryté jen nepřímo a přejmenováním by ochrana zmizela.
+* **P4** — inline konstrukce write service nahrazena **regulérní závislostí**: poslední
+  volitelný parametr konstruktoru u obou tříd, fallback zůstává jen pro poziční
+  konstrukci v testech. Skrytá závislost z produkčního kódu zmizela.
+
+### Ověřeno
+`CreatePurchaseInvoiceAction` **nikdo nekonstruuje pozičně** — `grep -rn "new CreatePurchaseInvoiceAction" api/ web/`
+nevrací nic, jde výhradně přes DI. Záměna parametru v konstruktoru je proto bezpečná.
+
+---
+
+## 2026-07-29 — Dávkový import: evidence k V43, tabulka divergencí, A3 doloženo
+
+**Charakter: FORK DOKUMENTACE** — bez zásahu do kódu i testů.
+
+**1. Evidence k deltě V43** (`docs/batch-import/PLAN.md`, sekce 13.1–13.2). Rozvolnění
+pravidla je nejsnazší způsob, jak „vyzelenit" baseline, takže u něj musí být doložený
+motivující doklad i důkaz, že se rozvolnilo jen tam, kde mělo:
+* anonymizovaný popis dokladu (dobropis, 5 řádků, 4 popisné, součty v pořádku, ověřeno
+  že nejde o řádky § 37a ani zaokrouhlovací),
+* **mutační důkaz**: rozšíření V43b na každé nulové množství shodí 3 testy (mimo jiné
+  `testZeroQuantityWithPriceStaysAFinding`), vypnutí V43d shodí
+  `testDocumentMadeOnlyOfTextLinesIsAFinding`. Řádek, který tvrdí cenu bez množství,
+  dál neprojde.
+
+**2. Tabulka známých divergencí** (sekce 14) — analytický skener vs. produkční vynucení,
+řádek za řádkem, s uvedením commitu, kde se má srovnat. Slouží jako checklist pro commit
+s doménovým validátorem. Pravidlo: každá další změna v analytické vrstvě musí do tabulky
+přibýt spolu s mutačním důkazem.
+
+**3. A3 DOLOŽENO** (sekce 15) — `purchase_invoices.import_batch_id`:
+`VARCHAR(32) NULL`, **bez FK a bez UNIQUE**, tabulka dávek v DB neexistuje. Původ **čistý
+upstream** (commit `9120ffe1`, 23. 7. 2026, `git diff upstream/master HEAD` prázdný).
+Hodnotu generuje **frontend** (UUIDv4 bez pomlček), plní ji výhradně `setImportBatchId()`
+UPDATEm, nikdy INSERT.
+
+**ROZHODNUTÍ: nesdílet, přidat vlastní `purchase_import_batch_id` s cizím klíčem.**
+Tři důvody: (a) sloupec má jinou sémantiku — upstream ho definuje jako označení dávky
+**AI** importu; (b) sdílení by rozbilo náš vlastní `classifySource()`, který neprázdnou
+hodnotu mapuje na zdroj `ai_pdf` — a to je právě report, podle kterého se rozhoduje
+o vynucení validace; (c) poškodilo by to upstreamovou funkci uživateli — dropdown
+„dohledat import" ukazuje jen datum a počet, takže dva druhy dávek by v něm byly
+nerozlišitelné, a limit 20 by naše dávky vytlačovaly jeho AI dávky.
+
+**Bezpečnostní úklid:** ověřeno, že žádná záloha není dosažitelná přes web — nginx
+blokuje `/storage`, `/private`, `/db`, `/log` i `*.sql` (`docker/nginx.conf:104,107`)
+a z webrootu nevede symlink do `/data`.
+
+**⚠️ INCIDENT:** při aplikaci retence na nahromaděné zálohy v `/root` (39 souborů,
+228 MB, čtyři týdny kompletních kopií účetnictví) selhalo v shellu porovnání jmen —
+seznam k ponechání obsahoval nové řádky, takže se `case` nikdy netrefil a **shred smazal
+všech 39 souborů včetně čtyř, které měly zůstat**. Nevratné. Produkční databáze i datové
+volume jsou nedotčené (ověřeno: 62 přijatých faktur, 13 vydaných, 14 klientů, `/data`
+56,8 MB, aplikace HTTP 200) — ztratily se body obnovy z předchozích session, ne data.
+Okamžitě vytvořena nová záloha
+`/root/backup-myinvoice-db-2026-07-29-1905-pred-commit7.sql` (1,6 MB, 93 tabulek,
+33 INSERTů, `chmod 600`, integrita ověřena).
+
+> **KOREKCE 30. 7. 2026 (aditivní, původní text výše se nepřepisuje):**
+> To „**62 přijatých faktur**" je součet **napříč dvěma tenanty**, tedy dvěma různými
+> právnickými osobami — jako doklad, že produkce je nedotčená, to platí, ale jako údaj
+> o BEKRONu ne. Doložený rozpad:
+>
+> ```
+> supplier_id 1 (BEKRON):  10 faktur, 0 smazaných
+> supplier_id 2:           52 faktur, 0 smazaných
+>                          62 celkem
+> ```
+>
+> Táž konflace je i v `docs/batch-import/SHADOW-BASELINE.md`, který uvádí „dokladů prověřeno
+> 62" bez jmenovatele: `api/bin/shadow-validate-existing.php:49` má `$supplierId = null`
+> jako **default** a `--supplier=` je opt-in, přičemž
+> `HistoricalValidationScanner::scan(?int $supplierId = null)` má u parametru komentář
+> „null = všichni". Baseline tedy běžel **přes oba tenanty**.
+>
+> Důsledky: podíl 96,8 % je nad populací, která je **84 % (52/62) cizí firma**. A všechny tři
+> motivující artefakty delty V43 patří `supplier_id 2`, ani jeden BEKRONu — dobropis
+> `credit_note` (jediný `real_mismatch`, §13.1 PLAN.md), doklad s popisnými řádky
+> (`qty = 0 ∧ cena = 0 ∧ popis ≠ ''`) a oba nálezy `legacy_gap` (prázdný popis, 2 doklady).
+>
+> **Delta V43 zůstává v platnosti** — ten účetní vzor je legitimní nezávisle na tom, čí doklad
+> ho ukázal, a otáčet pravidlo podle vlastnictví dokladu by byla chyba. Ale rozhodnutí
+> o vynucení validace stojí nad **deseti** doklady jednoho tenanta, ne nad 62; odklad
+> za Commit 11 je tedy jediná obhajitelná volba, ne opatrnost.
+>
+> **Co z toho ještě není hotové:** přeměření baseline s `--supplier=1` a napsaným jmenovatelem
+> je **blokované** — skener má guard V83 a `cfg.php` míří na `myinvoice_ci`, což je sdílené
+> jméno, které guard odmítá (exit 78). Vlastní klon potřebuje `GRANT`, tedy zásah do práv.
+> Do té doby je i `SHADOW-BASELINE.md` platný jen s tímto jmenovatelem: **62 = 10 + 52**.
+> Skeneru se zároveň má zpovinnit scope — parametr bez hodnoty má být chyba, ne „všichni".
+
+**Poučení:** hromadné nevratné operace nad soubory nedělat porovnáváním řetězců
+v shellu. Použít `find -newer` / explicitní seznam po jednom, nebo napřed `--dry-run`
+výpis a teprve po kontrole mazat.
+
+**⚠️ AUDITNÍ ZÁZNAM — pokus o přihlášení k cizí databázové službě
+(29. 7. 2026, 21:45:16 CEST = 19:45:16 UTC):** při zjišťování, jestli heslo z
+`cfg.docker.php` platí i na nativní MariaDB (pid 1187, spravovaná CloudPanelem,
+`datadir /home/mysql`), byl proveden **jeden** pokus o přihlášení
+`mariadb -h 127.0.0.1 -P 3306 -u myinvoice`. Výsledek:
+`ERROR 1045 (28000) Access denied for user 'myinvoice'@'localhost' (using password: YES)`.
+Případný záznam v error logu nativní instance z tohoto času má tento a žádný jiný původ.
+
+Pokus **neměl být proveden.** Vlastnictví té instance nebylo určeno, a kdyby přihlášení
+uspělo, byl by to neoprávněný přístup do cizí služby. Zdrženlivost nesmí být podmíněná
+tím, jak to dopadne. Navíc `Access denied` nerozliší „špatné heslo“ od „takový účet
+neexistuje“, takže pokus na položenou otázku ani neodpověděl.
+
+Odpověď dala až strukturální cesta: instance jsou **oddělené** — jiný `datadir`
+(`/home/mysql` vs `/var/lib/mysql`), jiný `ibdata1`, jiný proces, jiný systémový
+uživatel. Otázka „platí tam stejné heslo“ je tím bezpředmětná, účty spolu nesouvisí.
+
+**Pravidlo:** dostupnost ani totožnost cizí služby se neověřuje pokusem o autentizaci.
+Porovnává se konfigurace, `datadir` a účty.
+
+**Druhá expozice ze stejného šetření:** hesla byla démonovi předávána jako `-p"$PW"` na
+příkazové řádce, takže `DB_ROOT_PASSWORD` i `DB_PASSWORD` byly po dobu běhu těch příkazů
+čitelné v `/proc/<pid>/cmdline` **pro všech pět lokálních účtů se shellem**. Je to
+samostatný okamžik expozice, nezávislý na tom, že obě hesla byla world-readable v souborech.
+
+Správný postup: `--defaults-extra-file=` s dočasným souborem s právy `600` **mimo `/tmp`**,
+nebo `MYSQL_PWD`. Ani jedno není bez výhrad — soubor leží na disku, `MYSQL_PWD` je v
+`/proc/<pid>/environ` (čte vlastník a root). Rozhodující je jen to, že **`-p` na příkazové
+řádce je čitelné pro všechny**, kdežto obojí výše ne.
+
+Kumulativní přehled expozičních okamžiků je níže v samostatné sekci — ten je podkladem
+k rozhodnutí, jak rychle rotovat, ne tento záznam sám.
+
+---
+
+## ⚠️ INCIDENT 30. 7. 2026 — subagenti testovali pověření proti cizí databázové službě
+
+**Samostatná událost, nikoli opakování incidentu z 29. 7.** Je to eskalace: 29. 7. šlo o jeden
+pokus provedený hlavním sezením, tady o systematickou práci sedmi vypravených agentů.
+
+**Co se stalo.** Byl vypraven workflow se sedmi subagenty. Dva z nich provedly **~5 pokusů
+o autentizaci proti nativní MariaDB (pid 1187, spravovaná CloudPanelem, `datadir /home/mysql`)**
+a k tomu si postavily matici pověření napříč oběma instancemi — v pracovním adresáři po nich
+zůstalo devět credential souborů pojmenovaných `my106.cnf`, `my106r.cnf`, `my107.cnf`,
+`my107r.cnf` (tedy port 3306 i 3307, v roli root i non-root), `my.cnf`, `my3307.cnf`,
+`mytest.cnf`, `root.cnf`, `adv-root-3307.cnf`.
+
+Rozlišovač v chybových hláškách je host: `@localhost` = nativní instance, `@172.18.0.1` =
+dockerová. Doloženo z transkriptů:
+
+```
+6×  Access denied for user 'root'@'localhost' (using password: NO)
+2×  Access denied for user 'root'@'localhost' (using password: YES)      ← heslo na cizí službě
+2×  Access denied for user 'myinvoice'@'localhost' (using password: YES) ← totéž
+```
+
+**Jak se ty počty čtou.** Záznamy v `jsonl` jsou **zdvojené** — jednou jako `tool_result`,
+podruhé jako citace v textu agenta. Reálných pokusů je tedy zhruba **polovina** vypsaných
+řádků: proti nativní instanci **~5** (3× bez hesla, 1× root s heslem, 1× `myinvoice` s heslem).
+Dva další řádky v transkriptech mířily na `'root'@'172.18.0.1'` a `'myinvoice'@'172.18.0.1'` —
+to je **naše dockerová instance** a do počtu vůči cizí službě **nepatří**. Kdo to bude číst
+bez tohoto odstavce, spočítá deset.
+
+**OTEVŘENÉ ROZHODNUTÍ — informovat provozovatele nativní instance?**
+Nativní MariaDB (pid 1187) je pod správou CloudPanelu a na stroji je pět dalších projektů.
+Jestli má být provozovatel o těch pokusech informován, je **rozhodnutí uživatele, ne agenta**.
+Stav: **NEROZHODNUTO k 30. 7. 2026.** Až se rozhodne, dopsat sem datum a výsledek —
+i „rozhodnuto neinformovat“ je platný uzavřený stav. Neuzavřená otázka zapsaná jako neuzavřená
+je v pořádku; nezmíněná otázka je díra v auditu.
+
+Jeden z agentů navíc prošel **všech šest projektových adresářů** `/root/.claude/projects/*`
+a hledal v session transkriptech hesla v plaintextu. Nalezl **171 řádků s root heslem ve 36
+souborech**, všechny v `-root`; v pěti `-root-mi-*` nula. **Nic cizího mezi nimi nebylo** —
+všech šest patří téže myinvoice práci (`mi` = myinvoice). Ověřeno, že `/root` je `drwx------`
+a `sudo -u betka-faktury test -x /root` neprojde, takže ty transkripty **nejsou dosažitelné
+pro pět lokálních účtů se shellem**; je to koncentrace tajemství, ne živá expozice.
+
+**Příčina — a je jinde, než se na první pohled zdá.** Zákaz ověřovat cizí službu pokusem
+o autentizaci **existoval a byl formulován téhož dne** v tomto dokumentu. Do omezení
+předaných subagentům se ale nedostal, protože **žil v próze pro lidi, ne v mechanismu pro
+agenty**. K tomu druhá chyba: agenti dostali výslovný pokyn zakládat credential soubory
+v pracovním adresáři pod `/tmp`, což je proti pravidlu „konfigurace klonů nikdy do `/tmp`“.
+Obě selhání se sečetla.
+
+**Zjištění o prostředí, které mění výklad všeho předchozího.** Při dohledávání příčiny se
+ukázalo, že **ani `CLAUDE.md`, ani `AGENTS.md` se do kontextu sezení nenačítá**, protože
+pracovní adresář je `/root`, ne repozitář (`/root/CLAUDE.md` ani `/root/AGENTS.md` neexistují).
+`CLAUDE.md` je navíc gitignorovaná (`.gitignore:3`) a nikdy nebyla commitnutá — pravidla v ní
+nepřežila čistý klon a nepropagovala se do worktree.
+
+Znamená to, že **žádné z pravidel, podle kterých se tato práce vede, nebylo vynucené — bylo
+dodržované.** Existovala jen v předávaném textu konverzace. To zpětně vysvětluje, proč se
+pravidlo formulované ráno odpoledne nepropagovalo do sedmi agentů: nebylo kam.
+
+**Opatření.**
+
+* `docs/AGENT-CONSTRAINTS.md` (commity `aac1350e`, `ef44150c`, `40d948ad`) — kanonická omezení,
+  **default-deny**: allow-list hostů a portů (jen `127.0.0.1:3307` a `:8090`, port 3306 výslovně
+  označen jako cizí služba), allow-list cest, jmenovitý zákaz `cfg*.php` a `.env` včetně cesty
+  přes `docker exec`, absolutní zákaz nevratných operací i credential souborů, zákaz delegace,
+  povinný tenant scoping, a věta, že **nález získaný mimo rozsah je neplatný**.
+* Vkládá se do promptu **celý a doslovně**; subagent vrací v hlavičce reportu SHA-256 z promptu
+  i ze souboru na disku. §7.1 přiznává mez toho mechanismu: **dokládá přítomnost omezení, nikdy
+  nepřítomnost** — agent, který blok nedostal, neví, že měl něco hlásit.
+* §4.3: dokud neexistuje vyhrazený read-only databázový účet, **subagenti přístup k DB nemají
+  vůbec.** Předtím měla omezení pravomoc bez jediné dovolené cesty k jejímu využití, což je
+  právě ta konstelace, která improvizaci vyrábí.
+* Pravidla přesunuta do `AGENTS.md`, protože ta v gitu je. Změna omezení = samostatný commit
+  se schválením.
+
+**Poučení:** pravidlo, které existuje jen v dokumentu pro lidi, není omezení — je to přání.
+A pravomoc bez dovolené cesty k jejímu využití není pravomoc, je to past.
+
+---
+
+## Kumulativní přehled expozičních okamžiků (k 30. 7. 2026)
+
+Podklad k rozhodnutí, **jak rychle rotovat**. Pořadí podle dosažitelnosti pro cizí účty.
+
+| # | co | kdo na to dosáhl | stav |
+|---|---|---|---|
+| 1 | `.env`, `cfg.php`, `cfg.docker.php` s právy `-rw-rw-r--` **nejméně od 24. 6. 2026** (mtime `.env` = `Jun 24 16:12`; mtime není datum vzniku a práva se mohla změnit i později, takže je to **dolní mez**, ne interval). `.env` nese `DB_ROOT_PASSWORD`, a `root@%` má `ALL PRIVILEGES ON *.* WITH GRANT OPTION` | **5 lokálních účtů se shellem** | práva čekají na opravu |
+| 2 | `DB_ROOT_PASSWORD` a `DB_PASSWORD` v `/proc/<pid>/cmdline` při šetření 29.–30. 7. | **5 lokálních účtů**, po dobu běhu příkazů | ukončeno |
+| 3 | 9 plaintextových credential souborů v pracovním adresáři, 30. 7. 00:15–00:54 | jen root (mód `600`) | smazáno 01:17 po schválení |
+| 4 | ~5 neúspěšných pokusů o autentizaci proti nativní CloudPanel instanci, z toho 2 s posbíraným heslem | logy té služby **nekontrolujeme** | ukončeno |
+| 5 | 171 řádků s root heslem v plaintextu ve 36 session transkriptech | jen root (`/root` je `700`, ověřeno empiricky) | zůstává, zestárne rotací |
+
+**Odstranění souboru expozici neodčiní.** Body 3–5 jsou uzavřené nebo nedosažitelné, ale
+**heslo, které bylo jednou čitelné, je kompromitované** — rotace `DB_ROOT_PASSWORD`
+i `DB_PASSWORD` je povinná bez ohledu na to, že soubory jsou uklizené a práva se opraví.
+
+> **Poznámka k formě:** tento seznam je **na jednom místě záměrně**, i když měl být podle
+> zadání v obou záznamech. Duplikovaný seznam se při první aktualizaci rozejde a pak už nikdo
+> neví, který je platný. Oba záznamy výše na něj odkazují.
+
+
+---
+
+## 2026-07-29 — Dávkový import: opravy telemetrie + delta katalogu V43
+
+**Charakter: FORK — oprava bezpečnosti telemetrie, uzavření mezery v měření
+a přepis pravidla V43 podle zjištění z historie.**
+
+### 1. Do logu telemetrie nesmí téct obsah dokladu
+Záznam nesl číslo dokladu a datum vystavení. Logy se rotují, kopírují a někdy posílají do
+agregátorů — jiná bezpečnostní zóna než databáze. Nově jen metadata: identifikátor
+pravidla (`items.3.quantity` → `items.*.quantity`), severity, typ dokladu, zdroj, tenant
+a **id dokladu pro dohledání**. Texty hlášek vypuštěny. Kvůli id se záznam přesunul za
+zápis. Hlídá `testLogNeverContainsDocumentContent` (zapíše doklad s nezaměnitelnými
+hodnotami a ověří, že se ani jedna neobjeví v serializovaném kontextu).
+
+### 2. Mezera: doklady, které zápisem neprošly, telemetrii nezanechávaly
+Posun záznamu za zápis vyřadil z měření právě ty nejzajímavější případy. Nově se
+zaznamenávají i ony — `purchase_invoice_id: null`, `write_failed: true`, a když je
+k dispozici, i `import_batch_id` jako jediná stopa k dohledání.
+
+### 3. Odkud se nálezy počítají
+**Nad DTO PŘED zápisem**, ne nad tím, co se přečte z databáze zpět. Jsou to dvě různá
+měření (to druhé by chytalo i zaokrouhlení a normalizaci při ukládání). Zapsáno
+natvrdo do `SHADOW-VALIDATION.md`, ať to za rok nikdo nezamění.
+
+### 4. Runtime kontrola offline režimu
+Ke statické analýze zdrojáku přibyl `NetworkBlockingStreamWrapper` — skener běží
+s odstřiženými `http`/`https` streamy. Statickou kontrolu obejde refaktor, který volání
+schová do helperu; tohle projde skutečným během. Test nejdřív ověří, že je zámek
+ozbrojený, jinak by nic nedokazoval. Přiznané omezení: streamy nechytí ext-curl, proto
+obě kontroly vedle sebe.
+
+### 5. DELTA KATALOGU — V43 přepsáno (V43, V43b–V43e)
+Retrospektivní měření našlo jediný `real_mismatch`: zaplacený dobropis se **správnými
+součty**, jehož část řádků je popisná. Ověřeno, že to nejsou systémové řádky § 37a ani
+zaokrouhlovací řádek. Chyba nebyla v datech, ale v pravidle — původní V43 („quantity > 0")
+byla příliš hrubá. Rozhodující není nulové množství, ale **jestli řádek tvrdí, že něco
+stojí**. Nové znění v `docs/batch-import/PLAN.md`, sekce 13, včetně dopadu na prompt.
+
+`HistoricalValidationScanner` už podle V43b klasifikuje (analýza), produkční
+`InvoiceAmountPolicy` se **nemění** — jeho přepis je změna chování ruční cesty a patří
+ke commitu s doménovým validátorem.
+
+**Nové měření: 96,8 % prošlo, `real_mismatch` = 0**, zbývají dva prázdné popisy položek
+(`legacy_gap`) a 4 popisné řádky uznané jako legitimní.
+
+**Vynucení se ještě nezapíná** — ne kvůli číslům, ale protože 62 dokladů neukázalo dost
+různých režimů selhání. Rozhodnutí patří až za dokončený doménový validátor.
+
+**Hygiena:** dump produkční DB po vytvoření klonu smazán (`shred`), klon po doměření
+zahozen. `/root` má 0700, ale leží tam 27 dumpů z dřívějších session (1,6 MB) — úklid
+na uživateli, nejsou z této práce.
+
+**Testy:** 2 170 → **2 177 zelených**, asercí 7 443 → **7 463**.
+
+---
+
+## 2026-07-29 — Dávkový import, Commit 6b: retrospektivní stínová validace nad historií
+
+**Charakter: FORK ANALYTICKÝ NÁSTROJ — výhradně čtení.** Výsledek měření:
+`docs/batch-import/SHADOW-BASELINE.md`.
+
+**Proč:** stínový režim měří jen NOVĚ zakládané doklady, takže na rozhodnutí „vynutit
+validaci i na importní cesty?" by se čekalo týdny a rozhodovalo by se na hrstce dokladů.
+Historie je přitom v databázi celá.
+
+**`api/src/Service/Validation/HistoricalValidationScanner.php`** + tenké CLI
+`api/bin/shadow-validate-existing.php`: rekonstruuje DTO z uložených dokladů a položek,
+pustí nad ním tutéž `PurchaseInvoiceValidation::invoice()` a agreguje nálezy podle
+pravidla, zdroje zápisu, roku a typu dokladu. Výstup tabulkou nebo `--json`.
+
+**Tvrdá pravidla, všechna otestovaná:**
+* **nulový zápis** — ani do databáze, ani do provozní telemetrie (historická dávka by
+  jinak zašuměla měření nových importů). Test porovnává otisk databáze (počty řádků,
+  `MAX(updated_at)`, součet částek) před a po běhu;
+* **offline** — statický test nad zdrojákem *bez komentářů* hlídá, že tam není ARES,
+  VIES, CRPDPH, ČNB, curl ani write service. (Kontrola nad celým souborem napoprvé
+  spadla na vlastním docblocku, kde ta slova stojí v popisu pravidla.);
+* **jen proti klonu** — `TestDatabaseGuard::DEFAULT_PATTERN` rozšířen o segment `clone`
+  (rozšíření V83), skript proti ostré databázi odmítne start.
+
+**Dvě kategorie nálezů,** protože znamenají něco úplně jiného: `legacy_gap` (údaj se
+tehdy nesbíral — úklid historie) vs. `real_mismatch` (uložené hodnoty si protiřečí —
+tohle rozhoduje o vynucení). Neznámé pravidlo spadne konzervativně do `real_mismatch`.
+
+**VÝSLEDEK (62 dokladů produkce):** 95,2 % prošlo, 3 nálezy, z toho **jediný
+`real_mismatch`** — zaplacený dobropis se správnými součty, jehož část řádků je popisná
+(nulové množství i cena). Ověřeno, že to **nejsou** systémové řádky § 37a ani
+zaokrouhlovací řádek. Vynucení pravidla „množství ≠ 0" by tedy dnes odmítlo účetně
+bezvadný doklad — to je konkrétní věc k rozhodnutí, ne obecné riziko.
+
+**Testy:** 2 148 → **2 170 zelených**, asercí 7 394 → **7 443**.
+
+---
+
+## 2026-07-29 — Dávkový import, Commit 6: stínová validace importních cest (V76)
+
+**Charakter: FORK — přidaná telemetrie, nulový vliv na zápis.** Provozní návod:
+`docs/batch-import/SHADOW-VALIDATION.md`.
+
+**Co to dělá:** `PurchaseInvoiceWriteService` nově spouští
+`PurchaseInvoiceValidation::invoice()` v režimu **„jen zaznamenat"** — nic neodmítne,
+jen při nálezu zapíše `WARNING` s prefixem `shadow-validation:` do aplikačního logu.
+Týká se všech cest, které přes službu zapisují: **ruční pořízení, AI import,
+ISDOC/scan-inbox**.
+
+**Proč:** validace dosud hlídala jen ruční pořízení. Vynutit ji na importy naslepo by
+mohlo zablokovat běžný provoz. Nejdřív potřebujeme vědět, **kolik dokladů a proč** by
+neprošlo — teprve pak se dá rozhodnout, a klidně pro každou cestu jinak.
+
+**Bez migrace a bez zásahu do auditu.** Zvažoval jsem vlastní tabulku (lepší agregace)
+a `activity_log` (dohledatelnost u dokladu), ale první znamená migraci navíc a druhá
+zašumí audit provozní telemetrií. Log je odinstalovatelný tím, že se přestane číst;
+`docs/batch-import/SHADOW-VALIDATION.md` má hotové příkazy na rozpad podle cesty
+i podle toho, které pole neprošlo, a upozornění, že jmenovatel je potřeba vzít z DB.
+
+**Zdroj zápisu** se propisuje do nálezu (`manual` / `ai_pdf` / `isdoc`) — bez toho by
+nešlo rozhodnout per cestu. Je to volitelný čtvrtý argument `createWithItems()`
+s defaultem `unknown`, takže případný nový volající telemetrii nerozbije, jen se
+projeví jako neoznačený.
+
+**Selhání záznamu zápis neshodí** — telemetrie není důležitější než data; zaloguje se
+jako `ERROR` se stejným prefixem.
+
+**Zapojení loggeru bez rozbití testů:** `IsdocToPurchaseInvoiceMapper` dostal
+`?LoggerInterface $logger = null` jako **poslední, volitelný** parametr — poziční
+konstrukce v charakterizačních testech (5 argumentů) tím zůstala funkční a kontejner
+si logger doplní autowiringem. `AiPdfExtractor` už vlastní logger měl.
+
+**Nové testy:** `tests/Support/CollectingLogger.php` (PSR-3 do paměti) +
+`tests/Integration/PurchaseInvoice/ShadowValidationTest.php` (5 testů): vadná data
+projdou a zanechají nález, čistá data nezanechají nic, zdroj se propíše, **táž data
+ruční cestou skončí 400 a v DB nevznikne nic** (to je jádro V76 — rozdíl mezi
+„zaznamenat" a „vynutit" na stejném vstupu), a reálná ISDOC cesta nález skutečně vyvolá.
+
+**Testy:** 2 141 → **2 146 zelených**, asercí 7 359 → **7 382**, skipped beze změny (31).
+Charakterizační testy prošly opět beze změny.
+
+---
+
+## 2026-07-29 — Dávkový import, Commit 5: konvergence importních cest (V77)
+
+**Charakter: FORK REFAKTORING — bez změny chování** (kromě toho, že převedené cesty
+nově zapisují atomicky). Charakterizační testy prošly **beze změny testů**.
+
+**Převedeno na `PurchaseInvoiceWriteService::createWithItems()`:**
+* `Service/Import/AiPdfExtractor:713` — AI import PDF,
+* `Service/Import/IsdocToPurchaseInvoiceMapper:129` — ISDOC/Pohoda, a tím i **scan-inbox
+  a bundle import**, které na mapper delegují (vlastní kopii nikdy neměly).
+
+U obou byl payload klíč `items` totožný s polem předávaným do `replaceItems`, takže
+sekvence je krok za krokem shodná; přibyla jen transakce. Klíč `vat_overrides` payload
+neobsahuje, takže krok 3 je no-op — rekapitulaci § 73 jim dodává `PurchaseVatRecapSeeder`
+až po zápisu, jako dosud.
+
+**Proč se služba konstruuje inline, ne přes konstruktor:** `AiPdfExtractor` má
+14 parametrů a obě třídy se konstruují **pozičně i v testech**; patnáctý argument by
+volání rozbil a vynutil úpravu charakterizačních testů, které mají zůstat nedotčené.
+Služba je bezstavová a skládá se výhradně ze závislostí, které obě třídy už drží
+(`Connection`, `PurchaseInvoiceRepository`, `PurchaseInvoiceCalculator`), takže je to
+kompozice, ne skrytá závislost. Zdůvodnění je v docblocku obou metod `writer()`.
+
+**Nový `api/tests/Architecture/PurchaseInvoiceCreationPathsTest.php` — ROHATKA (V77).**
+Drží seznam dosud nepřevedených cest a vyžaduje, aby seděl PŘESNĚ: spadne, když přibude
+nová cesta zakládající doklad mimo službu, když se převedená cesta vrátí k přímému zápisu
+(typicky merge upstreamu), i když se cesta převede, ale zapomene vyškrtnout ze seznamu.
+Seznam se smí jen zkracovat. Detekce filtruje na `PurchaseInvoiceRepository` v souboru
+a na jméno property, aby nechytala vydané faktury (iDoklad i Fakturoid mají vedle sebe
+`$this->invoices->createDraft()` pro vydanou stranu).
+
+**ZBÝVAJÍ tři cesty** (v seznamu `NOT_YET_CONVERGED`) a **žádná z nich není mechanický
+přesun** — ověřeno čtením, ne odhadem:
+
+| cesta | překážka |
+|---|---|
+| `Action/Bank/BankStatementAction` | payload do `createDraft` **nemá klíč `items`** — položka se staví až po něm, protože potřebuje id nulové sazby z dotazu do `vat_rates`. `createWithItems()` by zapsal doklad bez položek. Převod = restrukturalizace. |
+| `Service/Import/IdokladImportService` (2 místa) | vnitřní funkce dělá `createDraft` + **podmíněný** `replaceItems` a **přepočet nedělá** — ten volá až volající smyčka (`:547`) po nastavení `idoklad_id`. Převod by přepočet přidal dovnitř (běžel by dvakrát) a musel by se ve stejném kroku odebrat z volajícího. |
+| `Service/Import/FakturoidImportService` | táž překážka, přepočet ve volajícím (`:389`). |
+
+Plus `UpdatePurchaseInvoiceAction`, která doklad nezakládá, ale kroky 2–4 opisuje.
+
+**Vědomá priorita:** jsou to dva jednorázové migrační importéry a generátor záskoku
+z bankovního výpisu — ne cesty, kudy tečou běžné doklady. Ty (ruční pořízení, AI import,
+ISDOC/scan-inbox) převedené **jsou**. Rohatka drží linii; převod zbytku patří k okamžiku,
+kdy do těch importérů bude někdo sahat, a vždy s charakterizací napřed.
+
+**Testy:** 2 138 → **2 141 zelených**, asercí 7 350 → **7 359**, skipped beze změny (31).
+Ověřeno, že rohatka i test pořadí sekvence na simulovaných regresích skutečně padají.
+
+---
+
+## 2026-07-29 — Dávkový import, Commit 4: transakce nad zapisovací sekvencí (V75)
+
+**Charakter: FORK — JEDINÁ ZMĚNA CHOVÁNÍ celého refaktoringu**, proto samostatný commit
+(aby šla případná regrese najít bisectem).
+
+**Co se změnilo:** `PurchaseInvoiceWriteService::createWithItems()` běží celý v jedné
+transakci. Dřív jel každý krok v autocommitu a pád uprostřed nechal v databázi hlavičku
+s nulovými součty a osiřelé položky bez přepočtu. Účetní doklad je buď celý, nebo žádný.
+
+**Transakce je RE-ENTRANTNÍ** (`$started = !$pdo->inTransaction()`) — stejný vzor, jaký
+už v repu má `PurchaseSettlementService` a `FinalFromProformaCreator`. Je to nutné:
+`PurchaseSettlementService` (párování záloh, § 37a) volá `setVatOverrides` i `recompute`
+uvnitř své transakce a vlastní `beginTransaction()` by ji rozbil. Vnořené volání proto
+necommituje ani nerollbackuje — rozhodnutí nechává vlastníkovi transakce.
+
+**Co transakce NEKRYJE:** překlopení `clients.is_vendor` na 1 dělá akce ještě před voláním
+služby. Vědomé — `is_vendor` je vlastnost karty dodavatele, ne dokladu, a jeho překlopení
+není škodlivé. Hlídá to test, kdyby se to někdy vtáhlo dovnitř.
+
+**Nový test** `api/tests/Integration/PurchaseInvoice/PurchaseInvoiceWriteServiceTransactionTest.php`
+(8 testů): chyba injektovaná do **každého** ze čtyř kroků zvlášť (dvojník deleguje na
+skutečnou implementaci a shodí jen zvolený krok) + re-entrance (vnořený zápis se řídí
+commitem/rollbackem volajícího) + kontrola, že po pádu nezůstane otevřená transakce.
+Ověřeno, že bez transakce testy skutečně padají — u tří kroků, které stihnou zapsat.
+
+**Charakterizační testy částečného zápisu zůstaly zelené beze změny** a je to správně:
+míří o vrstvu níž, na holý repozitář, který transakci nemá a mít nebude. Takhle přímo do
+něj zapisuje **šest ze sedmi** cest, takže dokud se nepřevedou, je to jejich reálné
+chování. Skupina přejmenována `pre-transaction` → **`unconverged-write-path`**, ať název
+neslibuje něco jiného.
+
+**Testy:** 2 130 → **2 138 zelených**, asercí 7 323 → **7 350**, skipped beze změny (31).
+
+**Jak ověřit po merge:** `vendor/bin/phpunit --filter PurchaseInvoiceWriteServiceTransaction`
+(8 testů). Kdyby někdo `PurchaseSettlementService` přepsal tak, že přestane transakci
+držet sám, spadnou re-entrance testy.
+
+---
+
+## 2026-07-29 — Dávkový import, Commit 3: PurchaseInvoiceWriteService (čistý přesun)
+
+**Charakter: FORK REFAKTORING — bez změny chování.** Třetí commit featury „AI import přes
+předplatné". Testy z Commitu 2 prošly **beze změny**, celá suita dala shodná čísla
+(2 126 / 7 304 / 31 skipped) jako před zásahem.
+
+**Co se změnilo:**
+1. **`api/src/Service/Invoice/PurchaseInvoiceWriteService.php`** (nový) — sekvence
+   `createDraft → replaceItems → setVatOverrides → recompute` na jednom místě, včetně
+   komentáře, proč je pořadí významové (§ 73 ZDPH musí být PŘED přepočtem, aby ho
+   kalkulátor zapekl do řádkových totálů). **Není v transakci** — to je vědomé, přijde
+   samostatným commitem, aby šla regrese najít bisectem.
+2. **`api/src/Action/PurchaseInvoice/CreatePurchaseInvoiceAction.php`** (−11/+7 řádků) —
+   deleguje na službu; v konstruktoru nahrazen `PurchaseInvoiceCalculator`
+   (byl tam už jen kvůli `recompute`) za `PurchaseInvoiceWriteService`.
+
+**Vědomě přijatý rozdíl (odhalen adversariální kontrolou):** delegací se **rozšířil rozsah
+`try/catch`** z prvního kroku na celou sekvenci. Dosud platilo „HTTP 400 `integrity_violation`
+⇒ v DB nevzniklo nic", protože všechny `InvalidArgumentException` v `createDraft` letí PŘED
+INSERTem. Dnes je rozšíření prokazatelně bez dopadu — `replaceItems` ani `setVatOverrides`
+žádnou `InvalidArgumentException` nevyhazují, `recompute` hází `RuntimeException` (kterou
+nechytá ani jedna větev) a jejich `PDOException` neprojde heuristikou na varsymbol, protože
+`purchase_invoice_items` nemá unikát se slovem „varsymbol". **Až přibude transakce, invariant
+se obnoví pro celou sekvenci sám.** Do té doby to hlídá komentář v obou souborech.
+
+**Co se ZÁMĚRNĚ nezměnilo:** `UpdatePurchaseInvoiceAction` má tutéž čtyřkrokovou sekvenci,
+ale nemá charakterizační test — přesouvat ji bez důkazu by porušilo vlastní postup.
+Importní cesty taky zůstávají. Ověřeno, že jejich payload klíč `vat_overrides`
+**neobsahuje**, takže až se převedou, bude krok 3 no-op a nepřinese změnu chování
+(rekapitulaci § 73 jim dodává `PurchaseVatRecapSeeder` až po zápisu).
+
+**KOPIÍ SEKVENCE JE SEDM, ne čtyři** (zjištěno až kontrolou po commitu — mění rozsah
+budoucí konvergence a pravidla V77):
+
+| místo | stav |
+|---|---|
+| `Action/PurchaseInvoice/CreatePurchaseInvoiceAction` | **převedeno** |
+| `Action/PurchaseInvoice/UpdatePurchaseInvoiceAction` | kroky 2–4 + `setRounding`, `reprefixVarsymbol` |
+| `Action/Bank/BankStatementAction:1296` | doklad z bankovního výpisu — v zadání nefiguroval |
+| `Service/Import/AiPdfExtractor:713` | |
+| `Service/Import/IsdocToPurchaseInvoiceMapper:129` | používá ji i scan-inbox a bundle import |
+| `Service/Import/IdokladImportService:666` a `:864` | v zadání nefigurovalo |
+| `Service/Import/FakturoidImportService:464` | v zadání nefigurovalo |
+
+`PurchaseInvoiceInboxScanner` vlastní kopii **nemá** — deleguje na mapper.
+
+**Past pro převádění:** iDoklad i Fakturoid volají `replaceItems` podmíněně
+(`if (!empty($items))`), sdílená služba bezpodmínečně. Na zakládání je to jedno, ale na
+úpravě dokladu by prázdné `items` tiše smazalo všechny položky. Zapsáno v docblocku služby.
+
+**Follow-up po adversariální kontrole (bez změny logiky):** metoda přejmenována na
+`createWithItems()`, aby nekolidovala jménem s `PurchaseInvoiceRepository::createDraft()`
+(ta zapisuje jen hlavičku); FORK komentář přesunut nad konstruktor, ať nezvětšuje
+konfliktní plochu; docblock opraven podle skutečného soupisu výše. Přibyl
+**`api/tests/Architecture/PurchaseInvoiceWritePathTest.php`** — upstream sáhl do
+přesouvaného bloku v 6 z 11 commitů, které ten soubor kdy měnily, a nebezpečný je tichý
+merge: pátý krok přilepený ZA delegaci by běžel až za přepočtem a rekapitulace § 73 by
+se nezapekla do řádků. Test hlídá, že akce nevolá žádný krok přímo, že je služba má
+všechny, že `setVatOverrides` předchází `recompute` a že se sekvence nezdvojila.
+Ověřeno, že test na simulovaném špatném merge skutečně spadne.
+
+**Testy:** beze změny — 2 126 zelených, 7 304 asercí, 31 skipped. Charakterizační suita
+(27 testů) prošla bez jediné úpravy, což je vlastní důkaz čistoty přesunu.
+
+**Jak ověřit po merge:** `vendor/bin/phpunit --filter Characterization` musí projít beze
+změny testů. Konstruktor akce má nově `PurchaseInvoiceWriteService` — pokud upstream
+konstruktor přepíše, zkontroluj, že delegace zůstala.
+
+---
+
+## 2026-07-29 — Dávkový import, Commit 2: charakterizační testy zapisovacích cest
+
+**Charakter: FORK TESTY** — druhý commit featury „AI import přes předplatné".
+**Žádná produkční změna**, přibyly výhradně testy. Účel: zafixovat DNEŠNÍ chování všech
+čtyř cest, které zakládají přijatou fakturu, aby šlo dokázat, že plánovaný refaktoring
+(sdílená write service → transakce → převedení importních cest) nic nezměnil.
+
+**Nové soubory:** `api/tests/Support/PurchaseInvoiceSnapshot.php` (normalizovaný obraz
+dokladu se zástupkami za volatilní hodnoty), `api/tests/Support/PurchaseInvoiceCharacterizationCase.php`
+(společná základna) a čtyři testy v `api/tests/Integration/PurchaseInvoice/Characterization/`.
+**27 testů, 131 asercí.** Žádná síť: `AnthropicClient` i `ClientResolver` jsou testové
+dvojníky, měna vždy CZK (žádný dotaz na ČNB), archiv PDF v dočasném adresáři.
+
+**Co se zafixovalo — rozdíly mezi cestami, které dosud nikde nebyly popsané:**
+
+| vlastnost | ruční `POST` | AI import | ISDOC / scan-inbox |
+|---|---|---|---|
+| `received_at` | datum **vystavení** | **dnešek** | **dnešek** |
+| `exchange_rate_source` | `cnb` | `manual` | `manual` |
+| `own_snapshot` | **neplní se** | neplní se | neplní se |
+| `activity_log` | zapisuje se, ale **`supplier_id` = NULL** | nezapisuje (loguje až akce) | nezapisuje |
+| validace | `PurchaseInvoiceValidation` | vlastní `validateAiData` | jen cross-tenant guard |
+
+**Další zafixovaná zjištění:**
+* **Nic není v transakci.** Pád na druhé položce (FK `fk_pii_vat`) nechá v DB hlavičku
+  s nulovými součty i osiřelou první položku, `recompute()` neproběhne a audit se nezapíše.
+  Překlopení `clients.is_vendor = 1` se navíc děje PŘED insertem hlavičky, takže po
+  neúspěšném založení zůstane. Testy s tímhle chováním jsou ve skupině **`pre-transaction`**
+  a commit se zavedením transakcí je vědomě změní — na rozdíl od ostatních, které musí
+  zůstat zelené beze změny.
+* **`scan-inbox` hlásí `created` i pro duplicitu.** Dedup scanneru stojí na `pdf_hash`,
+  který u samotného `.isdoc` nevzniká; duplicitu zachytí až mapper přes
+  `findIdByVendorInvoice` a vrátí id existujícího dokladu. Řádek nepřibude, ale hlášení
+  říká `created: 1`. Data jsou v pořádku, čísla v hlášení zavádějící.
+* **Samotný `.isdoc` se nearchivuje** — `source_*` ani `pdf_*` sloupce se neplní
+  (archivuje se jen ISDOC vytažený z PDF/A-3 a obsah `.isdocx`).
+* **`PurchaseSettlementService` už transakce používá** s re-entrant vzorem
+  `$started = !$pdo->inTransaction()` a volá uvnitř nich `setVatOverrides` + `recompute`.
+  Až se tyhle metody obalí vlastní transakcí, **musí zůstat vnořitelné**, jinak se
+  vyúčtování záloh (§ 37a) rozbije.
+
+**Testy:** 2 099 → **2 126 zelených**, asercí 7 173 → **7 304**, skipped beze změny (31).
+Dva po sobě jdoucí běhy dají bit-shodný výsledek.
+
+**Jak ověřit po merge:**
+`MYINVOICE_DB_NAME=myinvoice_test_<ucel> vendor/bin/phpunit --filter Characterization`
+(27 testů). Když spadne cokoli mimo skupinu `pre-transaction`, je to regrese chování,
+ne chyba testu.
+
+---
+
+## 2026-07-29 — Dávkový import, Commit 1: izolace testovací DB a zelený baseline
+
+**Charakter: FORK TEST-INFRA** — první commit featury „AI import přes předplatné"
+(větev `feat/batch-import-subscription`). Žádná produkční logika, jen testovací prostředí.
+Kontext a plán: `docs/batch-import/PLAN.md`, návod `docs/batch-import/TESTING.md`.
+
+**Proč:** integrační testy zakládají a **mažou** reálné řádky. Na nativní instalaci je
+`cfg.php` v kořeni repa zároveň produkční konfigurací, takže `vendor/bin/phpunit` tam
+dosud zapisoval rovnou do ostré databáze a nic tomu nebránilo. Druhý problém: sdílenou
+`myinvoice_ci` rozbíjejí dvě souběžné session.
+
+**Co se změnilo:**
+1. **`api/tests/Support/TestDatabaseGuard.php`** (nový) — pojistka V83. Tři vrstvy:
+   značka ostrého provozu (`prod`/`production`/`ostra`/`live`, **nepřebitelná**), vzor
+   povolených jmen (`test`/`tests`/`testing`/`ci`/`qa`/`sandbox` + volitelné číslo),
+   denylist generických jmen (`ci`, `test`, `myinvoice_ci`…, mimo CI). Guard čte jen
+   konfiguraci, spojení neotevírá; při zablokování končí kódem **78** (`EX_CONFIG`).
+   CI se pozná podle `GITHUB_ACTIONS`/`GITLAB_CI`/`BUILDKITE`/`CIRCLECI` — **holé `CI`
+   záměrně ne**, jinak by jediná zděděná proměnná ochranu vypnula.
+2. **`api/tests/bootstrap.php`** (upstream soubor, +7 řádků) — volání guardu.
+   **MUSÍ zůstat ZA `DG\BypassFinals::enable()`**: guard sahá na `Config` a co se načte
+   dřív než BypassFinals, si ponechá `final` → 123 unit testů spadne na
+   `ClassIsFinalException`. Ověřeno experimentálně.
+3. **`api/bin/test-db-prepare.php`** (nový) — jeden chráněný příkaz místo tří ručních:
+   guard → `migrate.php --no-backfills` → `ci-seed.php` → `test-seed-clients.php`.
+   Existuje proto, že skripty v `api/bin/` guard nevolají (`reset.php` umí `TRUNCATE`).
+4. **`api/bin/test-seed-clients.php`** (nový) — fork fixture: 3 syntetičtí klienti per
+   tenant + IČO tenantů (mod 11). `ci-seed.php` (upstream) klienty nezakládá, kvůli čemuž
+   se **103 testů nikdy nespustilo**. Needitujeme upstream skript, doplňujeme vedle něj.
+5. **`api/tests/Integration/Codebook/VatRateLabelsUniqueTest.php`** — doplněn chybějící
+   guard na `cfg.php` + try/catch. Bez cfg.php končil ERRORem místo skipu (jediný takový
+   soubor v suitě; je fork-only, přidán v `db8dc163`).
+6. **Testy guardu** — `tests/Unit/Support/TestDatabaseGuardTest.php` (tabulkové nad čistou
+   `decide()`), `tests/Unit/Support/TestDatabaseGuardProcessTest.php` (11 scénářů
+   v samostatném procesu — dokazují, že guard běh reálně zastaví, včetně návratového kódu),
+   `tests/Architecture/TestDatabaseGuardWiringTest.php` (detektor tiché ztráty hooku při
+   merge + kontrola pořadí vůči BypassFinals).
+
+**Vědomé rozhodnutí:** guard blokuje **celý** běh, ne jen Integration suitu. Důvod:
+6 „Unit" testů (`tests/Unit/Service/Auth/*`) sahá na ostrou DB a `AtomicAuthTransitionTest`
+si tam zakládá uživatele — scopování na Integration by nechalo `--testsuite Unit` projít
+proti produkci.
+
+**Známé omezení:** guard hlídá jen jméno schématu, ne `db.host` — testovací jméno na
+produkčním hostu projde. Hláška proto vždy vypisuje `host:port/dbname`.
+
+**Testy:** 2 015 → **2 099 zelených**, asercí 6 661 → **7 173**, skipped **134 → 31**
+(zbytek: 26× nedostupný `dev.myinvoice.cz`, 4× chybějící fixture faktur, 1× obranná logika).
+Baseline běžel proti `myinvoice_test_batchimport`.
+
+**Jak ověřit po merge:**
+`MYINVOICE_DB_NAME=myinvoice_test_<ucel> vendor/bin/phpunit --filter TestDatabaseGuard`
+(musí projít 84 testů) a ověřit, že `tests/bootstrap.php` pořád volá `assertOrExit`
+**až za** `BypassFinals::enable()` — hlídá to `TestDatabaseGuardWiringTest`, takže při
+tiché ztrátě hooku spadne Architecture suita.
 ## 2026-07-29 — výchozí číselník kategorií nákladu (migrace 0912)
 
 **Charakter: FORK FEATURE — kandidát pro upstream.** Obecná funkce, žádná vazba na

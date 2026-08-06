@@ -125,24 +125,44 @@ final class IsdocExporter
         }
 
         // Multi → ZIP
-        $tmpZip = tempnam(sys_get_temp_dir(), 'isdoc-') . '.zip';
-        $zip = new \ZipArchive();
-        if ($zip->open($tmpZip, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
-            throw new \RuntimeException('Nelze vytvořit ZIP.');
+        // tempnam() vytvoří placeholder BEZ přípony, ZIP vzniká až pod jménem
+        // s příponou — mazat se musí obojí a ve všech větvích, jinak po každém
+        // exportu zůstane v temp adresáři nulový sirotek.
+        $tmpBase = tempnam(sys_get_temp_dir(), 'isdoc-');
+        if ($tmpBase === false) {
+            throw new \RuntimeException('Nelze vytvořit dočasný soubor.');
         }
-        foreach ($invoices as $inv) {
-            $vs = $inv['varsymbol'] ?? ('draft-' . $inv['id']);
-            $type = match ($inv['invoice_type']) {
-                'proforma'     => 'Proforma',
-                'credit_note'  => 'Dobropis',
-                'tax_document' => 'DanovyDoklad',
-                default        => 'Faktura',
-            };
-            $zip->addFromString("$type-{$vs}.isdoc", $this->buildXml($inv));
+        $tmpZip = $tmpBase . '.zip';
+        try {
+            $zip = new \ZipArchive();
+            if ($zip->open($tmpZip, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
+                throw new \RuntimeException('Nelze vytvořit ZIP.');
+            }
+            foreach ($invoices as $inv) {
+                $vs = $inv['varsymbol'] ?? ('draft-' . $inv['id']);
+                $type = match ($inv['invoice_type']) {
+                    'proforma'     => 'Proforma',
+                    'credit_note'  => 'Dobropis',
+                    'tax_document' => 'DanovyDoklad',
+                    default        => 'Faktura',
+                };
+                $zip->addFromString("$type-{$vs}.isdoc", $this->buildXml($inv));
+            }
+            // ZipArchive zapisuje archiv na disk až v close() — při selhání (plný
+            // temp filesystem) vrací false BEZ výjimky. Bez kontroly by následný
+            // file_get_contents vrátil false, cast na string ho zamaskoval na ''
+            // a uživatel by dostal HTTP 200 s nulovým .zip místo 500 export_failed.
+            if ($zip->close() !== true) {
+                throw new \RuntimeException('Nelze zapsat ZIP archiv.');
+            }
+            $content = file_get_contents($tmpZip);
+            if ($content === false) {
+                throw new \RuntimeException('Nelze přečíst ZIP archiv.');
+            }
+        } finally {
+            if (is_file($tmpZip)) @unlink($tmpZip);
+            if (is_file($tmpBase)) @unlink($tmpBase);
         }
-        $zip->close();
-        $content = (string) file_get_contents($tmpZip);
-        @unlink($tmpZip);
 
         $base = 'isdoc-' . ($monthLabel !== '' ? $monthLabel : date('Y-m-d'));
         return [

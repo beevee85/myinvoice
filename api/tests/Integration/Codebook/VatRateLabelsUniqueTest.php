@@ -25,7 +25,17 @@ final class VatRateLabelsUniqueTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->db = Bootstrap::buildApp()->getContainer()->get(Connection::class);
+        // Bez cfg.php hodí Config::load() výjimku a test by skončil ERRORem místo skipu
+        // (na rozdíl od zbytku Integration suity). Oba checky musí být PŘED buildApp().
+        $rootDir = dirname(__DIR__, 4);
+        if (!is_file($rootDir . '/cfg.php')) {
+            $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
+        }
+        try {
+            $this->db = Bootstrap::buildApp()->getContainer()->get(Connection::class);
+        } catch (\Throwable $e) {
+            $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
+        }
     }
 
     /** @return list<array{id:int, code:string, label_cs:string, label_en:string, country:string, valid_to:?string}> */

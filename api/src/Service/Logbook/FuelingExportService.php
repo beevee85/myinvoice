@@ -94,10 +94,21 @@ final class FuelingExportService
         foreach (range('A', 'I') as $col) $sheet->getColumnDimension($col)->setAutoSize(true);
         $sheet->getStyle("D{$headRow}:H{$r}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
 
-        $tmp = tempnam(sys_get_temp_dir(), 'fuexp_') . '.xlsx';
-        (new XlsxWriter($ss))->save($tmp);
-        $bytes = (string) file_get_contents($tmp);
-        @unlink($tmp);
+        // tempnam() vytvoří placeholder BEZ přípony, XLSX vzniká až pod jménem
+        // s příponou — mazat se musí obojí, jinak po každém exportu zůstane
+        // v temp adresáři nulový sirotek.
+        $tmpBase = tempnam(sys_get_temp_dir(), 'fuexp_');
+        if ($tmpBase === false) {
+            throw new \RuntimeException('Nelze vytvořit dočasný soubor.');
+        }
+        $tmp = $tmpBase . '.xlsx';
+        try {
+            (new XlsxWriter($ss))->save($tmp);
+            $bytes = (string) file_get_contents($tmp);
+        } finally {
+            if (is_file($tmp)) @unlink($tmp);
+            if (is_file($tmpBase)) @unlink($tmpBase);
+        }
         $ss->disconnectWorksheets();
         return $bytes;
     }

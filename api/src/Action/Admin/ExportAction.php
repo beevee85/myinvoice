@@ -184,9 +184,23 @@ final class ExportAction
      */
     private function buildPdfZip(array $ids, ExportPeriod $period, string $type, ?int $userId): array
     {
-        $tmpZip = tempnam(sys_get_temp_dir(), 'inv-zip-') . '.zip';
+        // tempnam() vytvoří placeholder BEZ přípony, ZIP vzniká až pod jménem
+        // s příponou. Kdo maže jen soubor s příponou, nechá po každém exportu
+        // v temp adresáři jeden nulový soubor navždy — proto se drží obojí
+        // a maže se ve všech větvích.
+        $tmpBase = tempnam(sys_get_temp_dir(), 'inv-zip-');
+        if ($tmpBase === false) {
+            throw new \RuntimeException('Nelze vytvořit dočasný soubor.');
+        }
+        $tmpZip = $tmpBase . '.zip';
+        $cleanup = static function () use ($tmpBase, $tmpZip): void {
+            if (is_file($tmpZip)) @unlink($tmpZip);
+            if (is_file($tmpBase)) @unlink($tmpBase);
+        };
+
         $zip = new ZipArchive();
         if ($zip->open($tmpZip, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            $cleanup();
             throw new \RuntimeException('Nelze vytvořit ZIP.');
         }
         foreach ($ids as $id) {
@@ -210,7 +224,7 @@ final class ExportAction
         $zip->close();
 
         $content = (string) file_get_contents($tmpZip);
-        @unlink($tmpZip);
+        $cleanup();
         $base = "myinvoice-{$period->label}" . ($type ? "-$type" : '');
         return ["$base.zip", $content, 'application/zip'];
     }

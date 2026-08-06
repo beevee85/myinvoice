@@ -116,6 +116,62 @@ final class IsdocExportXsdValidationTest extends TestCase
     }
 
     /**
+     * Multi-invoice větev exportu (2+ faktur → ZIP s .isdoc soubory). Jediná
+     * cesta, kterou jednofakturové testy výše neberou (early-return před ZIP
+     * smyčkou). Kryje zároveň temp hygienu z opravy tempnam úniků (isdoc-* placeholder
+     * i .zip se mažou) a kontrolu návratových hodnot zip->close() /
+     * file_get_contents (0-bajtový ZIP by dřív prošel jako úspěch).
+     */
+    public function testMultiInvoiceExportProducesZipWithValidIsdocEntries(): void
+    {
+        $rows = $this->invoiceSample();
+        if (count($rows) < 2) {
+            $this->markTestSkipped('Potřeba aspoň 2 faktury pro supplier_id=' . self::SUPPLIER_ID . '.');
+        }
+        $ids = [(int) $rows[0]['id'], (int) $rows[1]['id']];
+
+        $before = glob(sys_get_temp_dir() . '/isdoc-*') ?: [];
+        $out = $this->exporter->export($ids, '2026-01');
+        $after = glob(sys_get_temp_dir() . '/isdoc-*') ?: [];
+
+        $this->assertSame('application/zip', $out['mime']);
+        $this->assertSame('isdoc-2026-01.zip', $out['filename']);
+        $this->assertSame(
+            [],
+            array_values(array_diff($after, $before)),
+            'export nechal v temp adresáři isdoc-* soubory (placeholder nebo .zip)',
+        );
+
+        // Obsah je validní ZIP se 2 .isdoc entry, každá validní proti ISDOC XSD.
+        // Prefix schválně nekoliduje s isdoc-* globem výše.
+        $tmpZip = tempnam(sys_get_temp_dir(), 'miztest_');
+        $this->assertNotFalse($tmpZip);
+        try {
+            file_put_contents($tmpZip, $out['content']);
+            $zip = new \ZipArchive();
+            $this->assertTrue($zip->open($tmpZip), 'obsah exportu není čitelný ZIP archiv');
+            try {
+                $this->assertSame(2, $zip->numFiles);
+                for ($i = 0; $i < $zip->numFiles; $i++) {
+                    $name = (string) $zip->getNameIndex($i);
+                    $this->assertStringEndsWith('.isdoc', $name);
+                    $validation = $this->validator->validate((string) $zip->getFromIndex($i), 'isdoc');
+                    $this->assertSame(
+                        'passed',
+                        $validation['status'],
+                        sprintf("ZIP entry %s neprošla ISDOC XSD:\n  - %s",
+                            $name, implode("\n  - ", $validation['errors'] ?: ['status=' . $validation['status']])),
+                    );
+                }
+            } finally {
+                $zip->close();
+            }
+        } finally {
+            @unlink($tmpZip);
+        }
+    }
+
+    /**
      * @return list<array{id:int, varsymbol:?string, currency:?string}>
      */
     private function invoiceSample(): array

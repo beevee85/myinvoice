@@ -86,10 +86,21 @@ final class LogbookSummaryExportService
         $sheet->setCellValue("A{$note}", 'Pozn.: paušál na dopravu (5000/4000 Kč/měs) je informativní srovnání, max 3 vozidla, vzájemně vylučuje skutečné výdaje. Spotřeba (l/100km i kWh/100km) je orientační (chybí-li u tankování/nabíjení množství). Souhrny jsou počítané z jízd a tankování/nabíjení za rok.');
         $sheet->getStyle("A{$note}")->getFont()->setSize(8)->setItalic(true);
 
-        $tmp = tempnam(sys_get_temp_dir(), 'sumexp_') . '.xlsx';
-        (new XlsxWriter($ss))->save($tmp);
-        $bytes = (string) file_get_contents($tmp);
-        @unlink($tmp);
+        // tempnam() vytvoří placeholder BEZ přípony, XLSX vzniká až pod jménem
+        // s příponou — mazat se musí obojí, jinak po každém exportu zůstane
+        // v temp adresáři nulový sirotek.
+        $tmpBase = tempnam(sys_get_temp_dir(), 'sumexp_');
+        if ($tmpBase === false) {
+            throw new \RuntimeException('Nelze vytvořit dočasný soubor.');
+        }
+        $tmp = $tmpBase . '.xlsx';
+        try {
+            (new XlsxWriter($ss))->save($tmp);
+            $bytes = (string) file_get_contents($tmp);
+        } finally {
+            if (is_file($tmp)) @unlink($tmp);
+            if (is_file($tmpBase)) @unlink($tmpBase);
+        }
         $ss->disconnectWorksheets();
         return $bytes;
     }

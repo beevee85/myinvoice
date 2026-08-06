@@ -317,6 +317,27 @@ final class DocumentJobsAction
             $abs = RuntimePaths::storage('documents') . '/' . ltrim((string) $job['result_path'], '/\\');
             if (is_file($abs)) @unlink($abs);
         }
+        // Smazání jobu nesmí osiřet jeho artefakty (nález review): failed/queued
+        // job nemá result_path, ale může mít nahraný import ZIP, chunkovaný
+        // staging up-{id} nebo rozepsaný export-{id}.zip.
+        $params = is_array($job['params'] ?? null) ? $job['params'] : [];
+        $jobsDir = DocumentStorage::baseDir($sid) . '/_jobs';
+        $zipPath = (string) ($params['zip_path'] ?? '');
+        // zip_path je absolutní cesta, kterou zapsal zipImport() výše — pro
+        // jistotu ale mažeme jen soubory uvnitř _jobs tohoto tenanta.
+        if ($zipPath !== '' && is_file($zipPath)
+            && str_starts_with($zipPath, $jobsDir . '/')) {
+            @unlink($zipPath);
+        }
+        $export = $jobsDir . '/export-' . (int) $job['id'] . '.zip';
+        if (is_file($export)) @unlink($export);
+        $staging = $this->stagingDir($sid, (int) $job['id']);
+        if (is_dir($staging)) {
+            foreach (glob($staging . '/*') ?: [] as $f) {
+                if (is_file($f)) @unlink($f);
+            }
+            @rmdir($staging);
+        }
         $this->jobs->delete((int) $job['id'], $sid);
         return Json::ok($response, ['ok' => true]);
     }

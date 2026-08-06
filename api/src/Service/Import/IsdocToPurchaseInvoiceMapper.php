@@ -7,6 +7,9 @@ namespace MyInvoice\Service\Import;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
+use MyInvoice\Service\Invoice\PurchaseInvoiceWriteService;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 /**
  * Mapper z ISDOC normalized array (z IsdocParser) na purchase_invoice draft.
@@ -32,6 +35,11 @@ final class IsdocToPurchaseInvoiceMapper
         private readonly PurchaseInvoiceCalculator $calc,
         private readonly ClientResolver $clientResolver,
         private readonly PurchaseInvoiceCnbApplier $cnbApplier,
+        // FORK: obojí ZÁMĚRNĚ poslední a volitelné — třída se konstruuje pozičně
+        // i v testech a povinný argument navíc by je rozbil. Kontejner obojí doplní
+        // autowiringem, takže v provozu jde o regulérní závislost, ne o skrytou.
+        private readonly ?LoggerInterface $logger = null,
+        private readonly ?PurchaseInvoiceWriteService $writeService = null,
     ) {}
 
     /**
@@ -126,9 +134,10 @@ final class IsdocToPurchaseInvoiceMapper
             ];
         }
 
-        $id = $this->repo->createDraft($payload, $userId, $supplierId);
-        $this->repo->replaceItems($id, $items);
-        $this->calc->recompute($id);
+        // FORK: hlavička + položky + přepočet jde přes sdílenou write service, tedy
+        // v JEDNÉ transakci místo tří samostatných zápisů. `$payload['items']` je totéž
+        // pole jako `$items`, takže sekvence je krok za krokem shodná s předchozí verzí.
+        $id = $this->writer()->createWithItems($payload, $userId, $supplierId, 'isdoc');
 
         // Seed override rekapitulace DPH dle dokladu (§ 73) — z <TaxTotal> (ISDOC)
         // nebo <invoiceSummary> (Pohoda). Drobné rozdíly zapeče dle dokladu, větší
@@ -203,6 +212,23 @@ final class IsdocToPurchaseInvoiceMapper
                 // rounding je „nice to have" — faktura je vytvořená správně i bez něj.
             }
         }
+    }
+
+    /**
+     * FORK: sdílená zapisovací sekvence (hlavička → položky → § 73 → přepočet).
+     *
+     * Přednost má služba z kontejneru (regulérní závislost, poslední volitelný parametr
+     * konstruktoru). Fallback složený z vlastních závislostí je tu jen pro poziční
+     * konstrukci v testech, kde se sedmý argument nepředává — v provozu se nepoužije.
+     */
+    private function writer(): PurchaseInvoiceWriteService
+    {
+        return $this->writeService ?? new PurchaseInvoiceWriteService(
+            $this->db,
+            $this->repo,
+            $this->calc,
+            $this->logger ?? new NullLogger(),
+        );
     }
 
     private function fetchTenantIc(int $supplierId): ?string

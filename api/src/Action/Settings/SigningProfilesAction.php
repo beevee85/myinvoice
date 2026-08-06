@@ -1028,6 +1028,9 @@ final class SigningProfilesAction
         }
 
         if (@file_put_contents($path, $this->samplePdf()) === false) {
+            // Placeholder z tempnam už na disku je — bez unlinku by tu zůstal:
+            // volajícímu se $tmpPath nepřiřadí a jeho finally ho nesmaže.
+            @unlink($path);
             throw new \RuntimeException('Nelze zapsat dočasný PDF soubor.');
         }
         @chmod($path, 0600);

@@ -50,8 +50,41 @@ final class DocumentJobService
                 $this->jobs->markFailed($jobId, "Source '{$source}' není podporován.");
             }
         } catch (\Throwable $e) {
+            // Artefakty selhaného jobu (nahraný ZIP, staging, rozepsaný export)
+            // se uklízí HNED — failed job se nikdy znovu nespustí a DELETE jobu
+            // maže jen result_path, který failed job nemá (nález review). Úklid
+            // běží PŘED markFailed: když je příčinou výpadek DB, soubory se
+            // smažou i tak.
+            $this->cleanupJobArtifacts($sid, $jobId, $source, $params);
             $this->jobs->markFailed($jobId, $e->getMessage());
         }
+    }
+
+    /**
+     * Smaže diskové artefakty selhaného jobu: nahraný import ZIP, chunkovaný
+     * staging up-{jobId} i rozepsaný export ZIP. V okamžiku volání už je
+     * případný ZipArchive z runExport po destruktoru (unwinding výjimky), takže
+     * rozepsaný archiv na disku EXISTUJE — libzip ho zapisuje právě při
+     * close/destruktu — a unlink je účinný.
+     *
+     * @param array<string,mixed> $params
+     */
+    private function cleanupJobArtifacts(int $sid, int $jobId, string $source, array $params): void
+    {
+        $base = DocumentStorage::baseDir($sid);
+        if ($source === 'document_zip_import') {
+            $zipPath = (string) ($params['zip_path'] ?? '');
+            if ($zipPath !== '' && is_file($zipPath)) @unlink($zipPath);
+        } elseif ($source === 'document_folder_import') {
+            $staging = rtrim((string) ($params['staging_dir'] ?? ''), '/\\');
+            if ($staging !== '') $this->cleanupStaging($staging);
+        } elseif ($source === 'document_zip_export') {
+            $out = $base . '/_jobs/export-' . $jobId . '.zip';
+            if (is_file($out)) @unlink($out);
+        }
+        // Chunkovaný upload (bez cesty v params) žije v _jobs/up-{jobId};
+        // pro ne-chunkované joby adresář neexistuje a cleanupStaging je no-op.
+        $this->cleanupStaging($base . '/_jobs/up-' . $jobId);
     }
 
     /** @param array<string,mixed> $params */
@@ -99,6 +132,10 @@ final class DocumentJobService
         );
 
         @unlink($zipPath);
+        // Chunkovaný upload: po blobu ukliď i staging adresář up-{jobId}
+        // (jinak by po každém dokončeném chunkovaném importu zůstal prázdný
+        // adresář; pro ne-chunkovaný job neexistuje → no-op).
+        $this->cleanupStaging(DocumentStorage::baseDir($sid) . '/_jobs/up-' . $jobId);
 
         $this->jobs->updateProgress($jobId, [
             'processed'     => count($entries),

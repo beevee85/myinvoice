@@ -47,6 +47,10 @@ final class AiPdfExtractor
         private readonly \MyInvoice\Repository\TaxConstantsRepository $taxConstants,
         private readonly PurchaseInvoicePdfArchiver $pdfArchiver,
         ?LoggerInterface $logger = null,
+        // FORK: sdílená zapisovací sekvence. ZÁMĚRNĚ poslední a volitelná — třída se
+        // konstruuje pozičně i v testech a povinný patnáctý argument by je rozbil.
+        // Kontejner ji doplní autowiringem, takže v provozu je to regulérní závislost.
+        private readonly ?\MyInvoice\Service\Invoice\PurchaseInvoiceWriteService $writeService = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
     }
@@ -344,6 +348,23 @@ final class AiPdfExtractor
             'vendor_id'           => $r['vendor_id'] ?? null,
             'source'              => 'isdocx',
         ];
+    }
+
+    /**
+     * FORK: sdílená zapisovací sekvence (hlavička → položky → § 73 → přepočet).
+     *
+     * Přednost má služba z kontejneru (regulérní závislost, poslední volitelný parametr
+     * konstruktoru). Fallback složený z vlastních závislostí je tu jen pro poziční
+     * konstrukci v testech, kde se patnáctý argument nepředává — v provozu se nepoužije.
+     */
+    private function writer(): \MyInvoice\Service\Invoice\PurchaseInvoiceWriteService
+    {
+        return $this->writeService ?? new \MyInvoice\Service\Invoice\PurchaseInvoiceWriteService(
+            $this->db,
+            $this->repo,
+            $this->calc,
+            $this->logger,
+        );
     }
 
     /**
@@ -710,9 +731,10 @@ final class AiPdfExtractor
         if ($existingId !== null) {
             return $existingId;
         }
-        $id = $this->repo->createDraft($payload, $userId, $supplierId);
-        $this->repo->replaceItems($id, $items);
-        $this->calc->recompute($id);
+        // FORK: hlavička + položky + přepočet jde přes sdílenou write service, tedy
+        // v JEDNÉ transakci místo tří samostatných zápisů. `$payload['items']` je totéž
+        // pole jako `$items`, takže sekvence je krok za krokem shodná s předchozí verzí.
+        $id = $this->writer()->createWithItems($payload, $userId, $supplierId, 'ai_pdf');
         // Naseeduj ruční rekapitulaci DPH dle dokladu (§ 73) — uloží základ/DPH dle
         // dokladu dodavatele. Varování (rozdíl > tolerance) zapíšeme až na konci, ať
         // ho pozdější setExtractionWarning() (mismatch / neplátce) nepřepíše.

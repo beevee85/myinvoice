@@ -1,0 +1,213 @@
+# Stav pravidel katalogu — JEDNA GRAMATIKA, jeden záznam na řádek.
+#
+# Formát:  ID <TAB> stav <TAB> klíč:hodnota [<TAB> klíč:hodnota ...]
+# Řádky začínající # jsou komentáře. Prázdné řádky se ignorují.
+# ŽÁDNÝ VOLNÝ TEXT — každá hodnota za stavem je klíč:hodnota, jinak parser padá.
+#
+# Uzavřená množina stavů a jejich POVINNÉ klíče:
+#   vynuceno-a-otestovano   test:            (aspoň jeden; víc testů = víc klíčů test:)
+#   definovano-nevynuceno   vynuceni: blokuje: od:
+#   nepouzitelne            duvod:
+#
+# `od:YYYY-MM-DD` je povinné u definovano-nevynuceno proto, aby "dočasně nevynuceno"
+# tiše nezestárlo na trvalý stav. Stáří je měřitelné a pojistka ho hlásí.
+#
+# ČERVENÁ POJISTKA ZNAMENÁ JEDINOU VĚC: skutečnost neodpovídá deklarovanému stavu.
+#   - vynuceno-a-otestovano, jehož jmenovaný test v repu neexistuje nebo neprojde
+#   - ID odkazované v kódu, které není v kanonickém seznamu (PLAN.md §8.7)
+#   - ID v kanonickém seznamu, které tady nemá záznam
+#   - chybějící povinný klíč pro daný stav
+#   - holé {{noref:V81}} (neexistuje, rozděleno na V81a/V81b/V81c)
+# Parser na nerozpoznaném řádku PADÁ, nikdy ho nepřeskočí — přeskakující parser je
+# umlčení kontroly o patro níž.
+#
+# Počty a poměry se sem NEPÍŠOU. Odkazuje se na RULE-PATH-MATRIX.md.
+# (Totéž pravidlo jako u čísel řádků a u "62 dokladů" — přepsané číslo přežije svou pravdivost.)
+#
+# VZOR ID (směr 2) — kanonická forma, ne volný regex:
+#     \bV(?:[1-9][0-9]*)(?:[a-e])?\b
+# Číslo ≥ 1 (proto V0 ani V0z nematchne), písmeno z UZAVŘENÉ množiny a–e, hranice slova
+# na obou stranách. Doloženo měřením 30. 7. 2026: volný vzor \bV\d+[a-z]?\b propouštěl
+#   V0z  api/vendor/webklex/php-imap/tests/messages/issue-544.eml:193  (base64 v cizí fixtuře)
+#   V0   api/vendor/respect/validation/data/domain/public-suffix/BUILD.php:8  (cizí kód)
+# Obojí padá už na vzoru, nezávisle na rozsahu — to byla chyba vzoru, ne cesty.
+#
+# ROZSAH SKENU ODKAZŮ (směr 2) — api/src/, api/bin/, api/tests/ A CELÉ docs/.
+# Vyloučeno je JEN api/vendor/ (cizí kód, který o našem katalogu nic netvrdí).
+#
+# docs/ se skenuje ZÁMĚRNĚ, přestože právě odtud přišel jediný zbylý falešně pozitivní
+# (holé {{noref:V81}} v próze, která říká, že to ID neexistuje — PLAN.md §8.7 a tento soubor).
+# Drift V78–V85 vznikl přesně tím, že dokumentace citovala ID, které nikde neexistovalo;
+# vyjmout docs/ z kontroly by znamenalo allow-all na tom nejrizikovějším místě, tři dny
+# po tom, co jsme u V82 zavedli default-deny jako princip. Jedna věta v próze si zaslouží
+# jeden marker, ne výjimku pro celý adresář.
+#
+# MARKER pro záměrnou zmínku neexistujícího ID:  {{noref:V81}}
+# Parser marker zná, do směru 2 ho nezapočítá, a vypíše ho zvlášť jako "záměrné zmínky",
+# aby nešly přehlédnout. Holé ID bez markeru je nález, jak má být.
+#
+# MARKER SÁM POTŘEBUJE STROP, jinak je to nový a tichý způsob, jak umlčet skutečný drift.
+# Pojistka proto u markerů hlásí POČET i JMENNÝ SEZNAM, nikdy jen "ok". Očekávaný počet je
+# v bloku níž; jeho zvýšení je změna, která se schvaluje jako každá jiná, ne vedlejší efekt
+# úpravy prózy. Stejná logika o patro níž — a je to už potřetí, co se tahle třída chyby
+# objevila v jiné vrstvě (předem prohlášená červená, allow-all na docs/, teď marker).
+#
+# OČEKÁVANÝ VÝSTUP PRVNÍHO BĚHU (změřeno 30. 7. 2026, PLAN.md sha256 viz commit):
+#   [1] v kanonickém seznamu, chybí záznam ve stavu ......... 0
+#   [2] odkazováno v kódu, není v kanonickém seznamu ........ 0
+#   [3] záznam ve stavu mimo kanonický seznam .............. 0
+#   [4] tvrdí vynuceno-a-otestovano → test musí projít ...... 3  (V75, V76, V83)
+#   [záměrné zmínky s markerem, vypisují se zvlášť] ......... 1  ({{noref:V81}})
+# Kdo nezná očekávaný výstup kontroly, nerozezná skutečné selhání od ohlášeného.
+# Struktura je tedy ZELENÁ. U směru 4 je ověřena EXISTENCE všech šesti jmenovaných
+# souborů; jejich PRŮCHOD ověřit nelze, dokud není účet myinvoice_test (guard V83
+# odmítá myinvoice_ci jako sdílené jméno, exit 78). To je zaznamenaný blokátor,
+# ne porucha katalogu, a počítá se stářím jako každý jiný.
+#   ⤷ 6. 8. 2026: BLOKÁTOR ODPADL. Účet `myinvoice_test` i databáze
+#     `myinvoice_test_batch` existují, integrační testy proti nim běží zeleně
+#     (2414 testů, 31 přeskočeno, exit 0). Tvrzení „nelze ověřit bez účtu" viselo
+#     u 39 záznamů a bylo nepravdivé; odstraněno. Blokátor, který přestal platit,
+#     je stejný drift jako blokátor vymyšlený — jen se hůř hledá, protože kdysi
+#     pravdivý byl.
+#
+# ── 6. 8. 2026: pojistka PŘESTALA BÝT POPISEM ─────────────────────────────────
+# Do téhle chvíle tady stál popis kontroly, kterou nikdo nespustil: gramatika,
+# uzavřená množina stavů, vzor ID i očekávaný výstup — ale žádný kód. Popsaná
+# kontrola není kontrola. Implementace:
+#     api/tests/Architecture/BatchImportRuleCatalogTest.php
+#
+# CO NAŠLA PŘI PRVNÍM SKUTEČNÉM BĚHU (nic z toho nebylo vidět, dokud se nespustila):
+#   - 3× holé ID v próze TŘÍ ŘÁDKŮ TOHOTO SOUBORU, včetně věty, která to zakazuje
+#   - 23 záznamů tvrdilo, že kód neexistuje nebo není zapojený; obojí už neplatilo
+#
+# ROZŠÍŘENÍ NAD PŮVODNÍCH PĚT ČERVENÝCH PODMÍNEK — drift OPAČNÝM směrem, tedy kód
+# předběhl dokumentaci:
+#   [5] `blokuje:` mimo zařazený slovník ................... červená (default-deny)
+#   [6] tvrdí „kód neexistuje", ale pravidlo vydává nález ... červená
+#   [7] tvrdí „nezapojeno", ale třída je v ResultsValidatoru  červená
+#
+# První verze [6] hlídala DOSLOVNÝ řetězec „kód neexistuje" a zachytila 2 z 23.
+# Dvanáct záznamů říkalo „implementace neexistuje", devět „nezapojeno do dávkové
+# cesty" — táž nepravda, jiný pravopis. Proto [5]: neznámá formulace je červená,
+# ne tichý průchod. Strážce jedné formulace dává zelenou za to, že se nikdo netrefil
+# do jeho slovníku.
+#
+# PŘIZNANÝ DOSAH [7]: jde JEDEN SKOK (injektáž do ResultsValidatoru). Zapojení
+# schované hlouběji v řetězci test nenajde — chytá podmnožinu, ne všechno.
+#
+# STAV PO OPRAVĚ: 20 pravidel dávkové cesty je vynuceno a otestováno.
+# V33–V35 zůstávají nevynucené POCTIVĚ: `QrCheck` je hotový a otestovaný, ale
+# nikdo ho nevolá, takže na dávkové cestě nikdy nedoběhne. Napsaný kód není
+# vynucené pravidlo — a přesně tohle rozlišení je důvod, proč katalog existuje.
+#   ⤷ 6. 8. 2026: QrCheck ZAPOJEN do ResultsValidatoru — pojistka [7] to sama
+#     vynutila (3 červené hned po injektáži). Stav V33–V35 ale zůstává
+#     definovano-nevynuceno: v systému není dekodér QR rastru (A2 — volitelná
+#     závislost provozovatele), takže kontrola běží ve stavu `unavailable`
+#     a vydává INFO „kontrola neproběhla". Doklad s payment.iban navíc schéma
+#     results/1 vůbec nenese, takže V33 nemá doklad-stranu ani teoreticky;
+#     V34/V35 začnou porovnávat dnem, kdy dekodér vznikne. Zapojená kontrola,
+#     která přizná, že neběží, je víc než nezapojená — ale pořád to není
+#     vynucené pravidlo.
+
+V75	vynuceno-a-otestovano	test:Integration/PurchaseInvoice/PurchaseInvoiceWriteServiceTransactionTest	test:Integration/PurchaseInvoice/Characterization/PartialWriteCharacterizationTest
+V76	vynuceno-a-otestovano	test:Integration/PurchaseInvoice/ShadowValidationTest	test:Integration/PurchaseInvoice/HistoricalValidationScannerTest
+V77	definovano-nevynuceno	vynuceni:Architecture/PurchaseInvoiceCreationPathsTest	blokuje:RULE-PATH-MATRIX.md	od:2026-07-29
+V78	definovano-nevynuceno	vynuceni:doménový validátor, Commit 11	blokuje:kód neexistuje	od:2026-07-30
+V79	definovano-nevynuceno	vynuceni:JSON Schema validátor, Commit 9	blokuje:kód neexistuje	od:2026-07-30
+V79b	vynuceno-a-otestovano	test:Integration/PurchaseInvoice/ResultsIntakeTest	test:Integration/PurchaseInvoice/BatchApplyTest	cesta:davkovy-import
+V80	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/StrictJsonTest	test:Unit/PurchaseBatchImport/ResultsValidatorTest	cesta:davkovy-import
+V81a	definovano-nevynuceno	vynuceni:statická kontrola nad naším jmenným prostorem	blokuje:kód neexistuje	od:2026-07-30
+V81b	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/AmountRulesTest	cesta:davkovy-import
+V81c	definovano-nevynuceno	vynuceni:charakterizační test zaokrouhlování upstreamu	blokuje:test neexistuje	od:2026-07-30
+V82	definovano-nevynuceno	vynuceni:serializace nálezů, Commit 11	blokuje:kód neexistuje	od:2026-07-30
+V83	vynuceno-a-otestovano	test:Unit/Support/TestDatabaseGuardTest	test:Architecture/TestDatabaseGuardWiringTest
+V83b	definovano-nevynuceno	vynuceni:rozšíření guardu na host+port a srovnání se schématem aplikace	blokuje:není implementace; api/bin/reset.php, migrate.php a sample.php guard nemají	od:2026-07-30
+V84	definovano-nevynuceno	vynuceni:statická kontrola jmenného prostoru jádra	blokuje:jádro neexistuje	od:2026-07-30
+V85	definovano-nevynuceno	vynuceni:testy determinismu, Commit 9	blokuje:kód neexistuje	od:2026-07-30
+V86	definovano-nevynuceno	vynuceni:runtime offline guard včetně ext-curl, Commit 12	blokuje:jediný výskyt v repu je komentář v HistoricalValidationScanner.php, bez testu	od:2026-07-30
+
+# --- V1–V74 + V43b–e: stav odvozený z tabulky §8.5 PLAN.md ---------------------
+# Žádné z nich není vynucené na DÁVKOVÉ cestě, protože ta zatím neexistuje.
+# `dnes:` nese stav ze §8.5 (ANO = mechanismus v aplikaci je, ČÁST = jiná varianta
+# nebo jiný práh, NE = nutno napsat). Není to stav vynucení, je to zdroj.
+# `test:` u nich chybí záměrně — ověřit ho nelze bez účtu myinvoice_test, a tvrdit
+# vynuceno-a-otestovano bez ověřeného testu je přesně to, co má pojistka chytat.
+
+V1	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V2	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V3	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V4	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/ResultsValidatorTest	cesta:davkovy-import	dnes:NE
+V5	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/ResultsValidatorTest	cesta:davkovy-import	dnes:NE
+V6	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/ResultsValidatorTest	cesta:davkovy-import	dnes:NE
+V7	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V8	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V9	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/ResultsValidatorTest	cesta:davkovy-import	dnes:NE
+V10	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V11	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V12	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V13	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V14	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V15	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/IdentityRulesTest	cesta:davkovy-import	dnes:ANO
+V16	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/IdentityRulesTest	cesta:davkovy-import	dnes:ANO
+V17	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/IdentityRulesTest	cesta:davkovy-import	dnes:NE
+V18	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V19	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V20	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V21	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V22	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V23	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V24	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V25	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V26	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/IdentityRulesTest	cesta:davkovy-import	dnes:ANO
+V27	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V28	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/IdentityRulesTest	cesta:davkovy-import	dnes:ČÁST
+V29	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V30	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V31	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V32	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V33	definovano-nevynuceno	vynuceni:dekodér QR rastru (A2 — volitelná závislost provozovatele)	blokuje:chybí dekodér QR — QrCheck zapojen do ResultsValidatoru, běží ve stavu unavailable a vydává INFO	od:2026-08-06	dnes:NE
+V34	definovano-nevynuceno	vynuceni:dekodér QR rastru (A2 — volitelná závislost provozovatele)	blokuje:chybí dekodér QR — QrCheck zapojen do ResultsValidatoru, běží ve stavu unavailable a vydává INFO	od:2026-08-06	dnes:NE
+V35	definovano-nevynuceno	vynuceni:dekodér QR rastru (A2 — volitelná závislost provozovatele)	blokuje:chybí dekodér QR — QrCheck zapojen do ResultsValidatoru, běží ve stavu unavailable a vydává INFO	od:2026-08-06	dnes:NE
+V36	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/IdentityRulesTest	cesta:davkovy-import	dnes:ČÁST
+V37	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V38	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/IdentityRulesTest	cesta:davkovy-import	dnes:NE
+V39	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V40	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V41	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V42	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V43	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/AmountRulesTest	cesta:davkovy-import	dnes:ČÁST
+V43b	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/AmountRulesTest	cesta:davkovy-import	dnes:NE
+V43c	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/AmountRulesTest	cesta:davkovy-import	dnes:NE
+V43d	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/AmountRulesTest	cesta:davkovy-import	dnes:NE
+V43e	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/AmountRulesTest	cesta:davkovy-import	dnes:ČÁST
+V44	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V45	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V46	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V47	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V48	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V49	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V50	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V51	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V52	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V53	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V54	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V55	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/IdentityRulesTest	cesta:davkovy-import	dnes:ČÁST
+V56	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V57	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V58	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V59	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:POZOR
+V60	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V61	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V62	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/ResultsValidatorTest	cesta:davkovy-import	dnes:NE
+V63	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V64	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V65	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V66	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V67	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V68	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V69	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V70	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
+V71	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V72	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ČÁST
+V73	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
+V74	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO

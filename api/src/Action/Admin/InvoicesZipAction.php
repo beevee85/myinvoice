@@ -82,9 +82,23 @@ final class InvoicesZipAction
             return Json::error($response, 'no_invoices', "Za měsíc $month nejsou žádné vystavené faktury.", 404);
         }
 
-        $tmpZip = tempnam(sys_get_temp_dir(), 'inv-zip-') . '.zip';
+        // tempnam() vytvoří placeholder BEZ přípony, ZIP vzniká až pod jménem
+        // s příponou. Kdo maže jen soubor s příponou, nechá po každém stažení
+        // v temp adresáři jeden nulový soubor navždy — proto se drží obojí
+        // a maže se ve všech větvích (chyba i shutdown hook).
+        $tmpBase = tempnam(sys_get_temp_dir(), 'inv-zip-');
+        if ($tmpBase === false) {
+            return Json::error($response, 'zip_failed', 'Nelze vytvořit dočasný soubor.', 500);
+        }
+        $tmpZip = $tmpBase . '.zip';
+        $cleanup = static function () use ($tmpBase, $tmpZip): void {
+            if (is_file($tmpZip)) @unlink($tmpZip);
+            if (is_file($tmpBase)) @unlink($tmpBase);
+        };
+
         $zip = new ZipArchive();
         if ($zip->open($tmpZip, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            $cleanup();
             return Json::error($response, 'zip_failed', 'Nelze vytvořit ZIP.', 500);
         }
 
@@ -112,6 +126,10 @@ final class InvoicesZipAction
             }
         }
         $zip->close();
+        // Hook registrovat HNED po close(): logger->log níže je nechráněný DB
+        // INSERT a jeho výjimka by jinak cleanup obešla (nález review). Shutdown
+        // běží až po odeslání response; $cleanup je idempotentní (is_file guardy).
+        register_shutdown_function($cleanup);
 
         $count = count($invoices) - $errors;
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
@@ -124,12 +142,11 @@ final class InvoicesZipAction
         $filename = "myinvoice-$month" . ($type ? "-$type" : '') . ".zip";
 
         $fp = fopen($tmpZip, 'rb');
+        if ($fp === false) {
+            $cleanup();
+            return Json::error($response, 'zip_failed', 'Nelze otevřít ZIP ke streamu.', 500);
+        }
         $stream = new Stream($fp);
-
-        // Cleanup hook — when stream is consumed, remove temp file. Slim closes it after response.
-        register_shutdown_function(static function () use ($tmpZip): void {
-            if (is_file($tmpZip)) @unlink($tmpZip);
-        });
 
         return $response
             ->withHeader('Content-Type', 'application/zip')

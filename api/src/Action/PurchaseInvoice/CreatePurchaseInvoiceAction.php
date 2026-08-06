@@ -11,7 +11,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
-use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
+use MyInvoice\Service\Invoice\PurchaseInvoiceWriteService;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Report\VatClassificationDefaulter;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
@@ -28,10 +28,14 @@ final class CreatePurchaseInvoiceAction
 {
     use HandlesVarsymbolDuplicate;
 
+    // FORK: v konstruktoru je místo PurchaseInvoiceCalculator (byl tam jen kvůli
+    // recompute) sdílená PurchaseInvoiceWriteService — celá zapisovací sekvence.
+    // Komentář je nad konstruktorem záměrně: uvnitř seznamu parametrů by zvětšoval
+    // konfliktní plochu při merge upstreamu.
     public function __construct(
         private readonly PurchaseInvoiceRepository $repo,
         private readonly ClientRepository $clients,
-        private readonly PurchaseInvoiceCalculator $calc,
+        private readonly PurchaseInvoiceWriteService $writer,
         private readonly VatClassificationDefaulter $vatDefaulter,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
@@ -103,25 +107,22 @@ final class CreatePurchaseInvoiceAction
         // Auto-default VAT klasifikace pokud user nezadal (s multi-tenant scope)
         $this->applyVatClassificationDefaults($body, $supplierId);
 
+        // FORK: zapisovací sekvence (hlavička → položky → rekapitulace § 73 → přepočet)
+        // se přesunula do PurchaseInvoiceWriteService, ať ji nemá každá cesta vlastní.
         try {
-            $id = $this->repo->createDraft($body, $userId, $supplierId);
+            $id = $this->writer->createWithItems($body, $userId, $supplierId, 'manual');
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
         } catch (\PDOException $e) {
             // Ruční interní číslo koliduje s existujícím (uq_pi_supplier_varsymbol) → 409.
+            // FORK: catch nově kryje celou sekvenci, ne jen INSERT hlavičky. Chyby
+            // z položek a přepočtu heuristikou na varsymbol neprojdou a letí dál
+            // jako dosud — viz rozbor v docblocku PurchaseInvoiceWriteService.
             if ($dupMsg = self::varsymbolDuplicateMessage($e, $body['varsymbol'] ?? null)) {
                 return Json::error($response, 'varsymbol_duplicate', $dupMsg, 409);
             }
             throw $e;
         }
-
-        $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
-        // Ruční rekapitulace DPH dle dokladu (§ 73) — uložit PŘED recompute, aby ji
-        // kalkulátor zapekl do řádkových totálů.
-        if (array_key_exists('vat_overrides', $body)) {
-            $this->repo->setVatOverrides($id, $supplierId, is_array($body['vat_overrides']) ? $body['vat_overrides'] : null);
-        }
-        $this->calc->recompute($id);
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('purchase_invoice.created', $userId, 'purchase_invoice', $id, [
