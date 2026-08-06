@@ -99,6 +99,9 @@ final class GetBatchPackageAction
         $zip->addFromString('manifest.json', $contents['manifest_json']);
         $zip->addFromString('prompt.txt', (string) $prompt['prompt']);
         $zip->close();
+        // Hook hned po close() — mezi close a odesláním nesmí být okno, kde by
+        // výjimka cleanup obešla (týž vzor jako v exportních akcích).
+        register_shutdown_function($cleanup);
 
         $size = filesize($tmpZip);
         $fp = fopen($tmpZip, 'rb');
@@ -109,7 +112,6 @@ final class GetBatchPackageAction
         }
         // Streamem z disku, ne přes paměť — dávka smí mít až 200 MiB.
         $stream = new Stream($fp);
-        register_shutdown_function($cleanup);
 
         return $response
             ->withBody($stream)

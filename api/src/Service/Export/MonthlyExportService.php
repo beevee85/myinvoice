@@ -327,6 +327,15 @@ final class MonthlyExportService
             $this->jobs->markCancelled($jobId);
             $this->logFinished($jobId, $userId, $supplierId, $month, 'cancelled', []);
         } catch (\Throwable $e) {
+            // Nejdřív zahodit rozpracované entry a ZAVŘÍT zip, teprve pak unlink:
+            // libzip zapisuje archiv až při close/destruktu, takže unlink před
+            // zavřením je no-op a destruktor $zip by po úklidu celý ZIP znovu
+            // vytvořil (nález review; cancel větev v ensureNotCancelled to má
+            // správně). $zip->filename je '' dokud archiv není otevřený.
+            if (isset($zip) && $zip->filename !== '') {
+                $zip->unchangeAll();
+                $zip->close();
+            }
             if (isset($absPath) && is_file($absPath)) @unlink($absPath);
             $this->jobs->markFailed($jobId, $e->getMessage());
             $this->logFinished($jobId, $userId, $supplierId, $month, 'failed', ['error' => $e->getMessage()]);

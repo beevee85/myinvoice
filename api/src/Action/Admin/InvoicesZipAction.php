@@ -126,6 +126,10 @@ final class InvoicesZipAction
             }
         }
         $zip->close();
+        // Hook registrovat HNED po close(): logger->log níže je nechráněný DB
+        // INSERT a jeho výjimka by jinak cleanup obešla (nález review). Shutdown
+        // běží až po odeslání response; $cleanup je idempotentní (is_file guardy).
+        register_shutdown_function($cleanup);
 
         $count = count($invoices) - $errors;
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
@@ -143,9 +147,6 @@ final class InvoicesZipAction
             return Json::error($response, 'zip_failed', 'Nelze otevřít ZIP ke streamu.', 500);
         }
         $stream = new Stream($fp);
-
-        // Cleanup hook — when stream is consumed, remove temp files. Slim closes it after response.
-        register_shutdown_function($cleanup);
 
         return $response
             ->withHeader('Content-Type', 'application/zip')

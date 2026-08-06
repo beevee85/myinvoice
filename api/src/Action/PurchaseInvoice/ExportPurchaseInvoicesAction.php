@@ -165,6 +165,10 @@ final class ExportPurchaseInvoicesAction
         }
 
         $zip->close();
+        // Hook registrovat HNED po close(): logger->log níže je nechráněný DB
+        // INSERT a jeho výjimka by jinak cleanup obešla (nález review). Shutdown
+        // běží až po odeslání response; $cleanup je idempotentní (is_file guardy).
+        register_shutdown_function($cleanup);
 
         if ($included === 0) {
             $cleanup();
@@ -197,7 +201,6 @@ final class ExportPurchaseInvoicesAction
             return Json::error($response, 'zip_failed', 'Nelze otevřít ZIP ke streamu.', 500);
         }
         $stream = new Stream($fp);
-        register_shutdown_function($cleanup);
 
         $r = $response
             ->withBody($stream)
@@ -292,6 +295,8 @@ final class ExportPurchaseInvoicesAction
             $included++;
         }
         $zip->close();
+        // Hook hned po close() — kvůli nechráněnému logger->log níže (viz pdf-zip větev).
+        register_shutdown_function($cleanup);
 
         if ($included === 0) {
             $cleanup();
@@ -318,7 +323,6 @@ final class ExportPurchaseInvoicesAction
             return Json::error($response, 'zip_failed', 'Nelze otevřít ZIP ke streamu.', 500);
         }
         $stream = new Stream($fp);
-        register_shutdown_function($cleanup);
 
         return $response
             ->withBody($stream)

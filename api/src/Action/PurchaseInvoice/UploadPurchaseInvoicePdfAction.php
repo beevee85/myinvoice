@@ -107,6 +107,13 @@ final class UploadPurchaseInvoicePdfAction
         } catch (\Throwable $e) {
             return Json::error($response, 'move_failed', 'Nepodařilo se přesunout soubor.', 500);
         }
+        // Pojistka pro nekryté výjimky (např. PDOException z dedup SELECTu níže):
+        // .tmp-* leží v trvalém archivu tenanta, ne v OS temp, a nic jiného ho
+        // neuklízí (nález review). Hook běží na konci requestu; po úspěšném
+        // rename/copy i po explicitních unlinkech v chybových větvích je no-op.
+        register_shutdown_function(static function () use ($tmpPath): void {
+            if (is_file($tmpPath)) @unlink($tmpPath);
+        });
 
         // Obrázek (fotka z telefonu, issue #75) → konvertuj na PDF a pokračuj
         // standardní cestou (magic/MIME checky pak projdou, ukládá se .pdf).

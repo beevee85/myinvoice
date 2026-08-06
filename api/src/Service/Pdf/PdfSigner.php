@@ -277,36 +277,53 @@ final class PdfSigner
     /** Detached CMS (RFC 5652) v DER. Volitelně PAdES-T timestamp. */
     private function pkcs7Sign(string $data, array $certs, SigningConfig $cfg): string
     {
-        $in  = tempnam(sys_get_temp_dir(), 'sig-in-');
+        // tempnam se KONTROLUJE na false a úklid jde přes finally: při plném tmp
+        // by TypeError uprostřed (strict_types) nechal už vytvořené sourozenecké
+        // temp soubory — včetně plných bajtů dokumentu v $in — ležet navždy
+        // (nález review).
+        $in = tempnam(sys_get_temp_dir(), 'sig-in-');
+        if ($in === false) {
+            throw new \RuntimeException('Nelze vytvořit dočasný soubor pro podpis.');
+        }
         $out = tempnam(sys_get_temp_dir(), 'sig-out-');
-        file_put_contents($in, $data);
-
-        // Řetězec certifikátů (intermediate CA) z P12 → vloží se do podpisu, aby
-        // čtečka uměla postavit cestu k důvěryhodné kořenové i bez AATL/EUTL.
+        if ($out === false) {
+            @unlink($in);
+            throw new \RuntimeException('Nelze vytvořit dočasný soubor pro podpis.');
+        }
         $chainFile = null;
-        if (!empty($certs['extracerts']) && is_array($certs['extracerts'])) {
-            $chainFile = tempnam(sys_get_temp_dir(), 'chain-');
-            file_put_contents($chainFile, implode("\n", $certs['extracerts']));
-        }
+        try {
+            file_put_contents($in, $data);
 
-        // openssl_cms_sign + OPENSSL_ENCODING_DER → moderní CMS (RFC 5652) PŘÍMO v DER
-        // (žádné S/MIME parsování). To je struktura, kterou PDF čtečky (Adobe, PDF-XChange)
-        // očekávají pro /SubFilter adbe.pkcs7.detached. Legacy openssl_pkcs7_sign produkoval
-        // strukturu, kterou Adobe odmítal jako „SigDict /Contents illegal data".
-        // DETACHED + BINARY, signed attributes ponechány (bez NOATTR).
-        $flags = OPENSSL_CMS_DETACHED | OPENSSL_CMS_BINARY;
-        $ok = openssl_cms_sign(
-            $in, $out, $certs['cert'], $certs['pkey'], [], $flags,
-            OPENSSL_ENCODING_DER, $chainFile,
-        );
-        @unlink($in);
-        if ($chainFile !== null) { @unlink($chainFile); }
-        if (!$ok) {
+            // Řetězec certifikátů (intermediate CA) z P12 → vloží se do podpisu, aby
+            // čtečka uměla postavit cestu k důvěryhodné kořenové i bez AATL/EUTL.
+            if (!empty($certs['extracerts']) && is_array($certs['extracerts'])) {
+                $cf = tempnam(sys_get_temp_dir(), 'chain-');
+                if ($cf === false) {
+                    throw new \RuntimeException('Nelze vytvořit dočasný soubor pro řetězec certifikátů.');
+                }
+                $chainFile = $cf;
+                file_put_contents($chainFile, implode("\n", $certs['extracerts']));
+            }
+
+            // openssl_cms_sign + OPENSSL_ENCODING_DER → moderní CMS (RFC 5652) PŘÍMO v DER
+            // (žádné S/MIME parsování). To je struktura, kterou PDF čtečky (Adobe, PDF-XChange)
+            // očekávají pro /SubFilter adbe.pkcs7.detached. Legacy openssl_pkcs7_sign produkoval
+            // strukturu, kterou Adobe odmítal jako „SigDict /Contents illegal data".
+            // DETACHED + BINARY, signed attributes ponechány (bez NOATTR).
+            $flags = OPENSSL_CMS_DETACHED | OPENSSL_CMS_BINARY;
+            $ok = openssl_cms_sign(
+                $in, $out, $certs['cert'], $certs['pkey'], [], $flags,
+                OPENSSL_ENCODING_DER, $chainFile,
+            );
+            if (!$ok) {
+                throw new \RuntimeException('openssl_cms_sign selhal: ' . openssl_error_string());
+            }
+            $der = (string) file_get_contents($out);   // přímo DER, bez S/MIME extrakce
+        } finally {
+            @unlink($in);
             @unlink($out);
-            throw new \RuntimeException('openssl_cms_sign selhal: ' . openssl_error_string());
+            if ($chainFile !== null) { @unlink($chainFile); }
         }
-        $der = (string) file_get_contents($out);   // přímo DER, bez S/MIME extrakce
-        @unlink($out);
 
         // PAdES-T: přidej RFC 3161 timestamp token jako unsigned attribute do SignerInfo.
         // Při jakékoli chybě TSA tiše degraduj na PAdES-B (timestamp je opt-in).

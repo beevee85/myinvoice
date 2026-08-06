@@ -87,13 +87,21 @@ final class MergedInvoicePdfExporter
             return ['path' => $outputPath, 'signed' => false];
         }
 
-        $signedPath = $this->signing->signSupplierPdfIfEnabled(
-            $outputPath,
-            $supplier,
-            'bulk_invoice_export',
-            0,
-            $userId,
-        );
+        // Podpis může vyhodit výjimku (fail_closed policy, špatná passphrase) —
+        // bez úklidu by každý pokus nechal celé sloučené PDF v cache/mpdf,
+        // kterou žádný GC nemaže (nález review).
+        try {
+            $signedPath = $this->signing->signSupplierPdfIfEnabled(
+                $outputPath,
+                $supplier,
+                'bulk_invoice_export',
+                0,
+                $userId,
+            );
+        } catch (\Throwable $e) {
+            @unlink($outputPath);
+            throw $e;
+        }
         if ($signedPath === $outputPath) {
             @unlink($outputPath);
             throw new \DomainException('Elektronický podpis výsledného PDF se nepodařilo vytvořit.');
