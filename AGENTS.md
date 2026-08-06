@@ -15,7 +15,7 @@ databáze MariaDB 10.6+ (doporučeno 11.x).
 
 - `api/` — PHP backend (Slim, autowired actions, services, repositories); `api/bin/` = CLI skripty, `api/tests/` = PHPUnit
 - `web/` — Vue 3 + TS frontend; zdrojáky ve `web/src/`, lokalizace ve `web/src/i18n/`
-- `dist/` — produkční build frontendu (commitovaný — uživatelé testují přes něj)
+- `web/dist/` — produkční build frontendu; **NENÍ v gitu** (`.gitignore:16,19`, v historii nikdy nebyl). Vzniká až na cílovém stroji.
 - `db/migrations/` — SQL migrace (číslované, idempotentní)
 - `manual/` — uživatelský manuál (Markdown, česky); `manual/generated/` = vyrenderované HTML
 - `source/` — vývojářská spec a plány
@@ -25,9 +25,20 @@ databáze MariaDB 10.6+ (doporučeno 11.x).
 ## Příkazy
 
 ```bash
-# Frontend — build (NUTNÉ po každé změně web/src, dist/ se commituje)
+# Frontend — build (NUTNÉ po každé změně web/src; výstup se NEcommituje)
 cd web && pnpm build            # = vue-tsc --noEmit && vite build (npm run build funguje též)
 cd web && pnpm type-check       # jen typová kontrola
+
+# Build MIMO produkční strom (worktree nemá node_modules):
+#   nativní binding rolldownu je stavěný pro musl → na glibc hostiteli spadne
+#   na MODULE_NOT_FOUND. Proto v Alpine. node_modules připojit READ-ONLY,
+#   ať se do produkčního stromu nezapíše; `--configLoader runner` obchází to,
+#   že si vite bundluje config do node_modules/.vite-temp (jinak EROFS).
+docker run --rm -v /root/mi-batch:/work \
+  -v /opt/myinvoice/web/node_modules:/work/web/node_modules:ro \
+  -w /work/web node:20-alpine npx vite build --configLoader runner
+# POZOR: symlink web/node_modules .gitignore NEZACHYTÍ (vzor má lomítko,
+# symlink není adresář). Po type-checku ho smaž, ať neskončí v commitu.
 
 # PHP testy (PHPUnit 13)
 cd api && php vendor/bin/phpunit                  # vše
@@ -96,7 +107,7 @@ php tools/exportManualToPdf.php
 - Citlivé údaje (hesla, API klíče, connection stringy) nikdy do kódu, testů ani dokumentace.
 
 ### Frontend
-- Po každé změně ve `web/src` spusť `pnpm build` — `dist/` je to, co se nasazuje a testuje; samotný `vue-tsc` nestačí.
+- Po každé změně ve `web/src` spusť build — `dist/` je to, co se nasazuje a testuje; samotný `vue-tsc` nestačí. Výstup se ale **necommituje**, viz recept v Příkazech.
 - Drž se existujícího design language (sjednocené boxy, status badges, mobile cards) — před vymýšlením nového vzoru se podívej, jak to dělají sousední stránky.
 
 ## Testy
@@ -118,4 +129,4 @@ php tools/exportManualToPdf.php
 - Drž se stylu okolního kódu (pojmenování, idiomy, hustota komentářů). Nepřidávej komentáře, které kód jen opakují.
 - Commit messages česky, conventional-commits styl: `feat(scope): …`, `fix(scope): …`, `release: X.Y.Z — …` (viz `git log`).
 - Změny v `CHANGELOG.md` a `VERSION` dělá maintainer při release — v běžném PR na ně nesahej.
-- Necommituj vygenerované artefakty mimo zavedené výjimky (`dist/`, `manual/generated/` jsou commitované záměrně).
+- Necommituj vygenerované artefakty. `manual/generated/` je jediná zavedená výjimka — `dist/` výjimka **není** (je v `.gitignore`).
