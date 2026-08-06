@@ -148,8 +148,17 @@ final class IsdocExporter
                 };
                 $zip->addFromString("$type-{$vs}.isdoc", $this->buildXml($inv));
             }
-            $zip->close();
-            $content = (string) file_get_contents($tmpZip);
+            // ZipArchive zapisuje archiv na disk až v close() — při selhání (plný
+            // temp filesystem) vrací false BEZ výjimky. Bez kontroly by následný
+            // file_get_contents vrátil false, cast na string ho zamaskoval na ''
+            // a uživatel by dostal HTTP 200 s nulovým .zip místo 500 export_failed.
+            if ($zip->close() !== true) {
+                throw new \RuntimeException('Nelze zapsat ZIP archiv.');
+            }
+            $content = file_get_contents($tmpZip);
+            if ($content === false) {
+                throw new \RuntimeException('Nelze přečíst ZIP archiv.');
+            }
         } finally {
             if (is_file($tmpZip)) @unlink($tmpZip);
             if (is_file($tmpBase)) @unlink($tmpBase);
