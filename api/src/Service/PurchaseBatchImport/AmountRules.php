@@ -69,6 +69,15 @@ final class AmountRules
                         'Nulový řádek musí mít neprázdný popis, jinak jde o ztracený údaj.');
                     continue;
                 }
+                // Popisný řádek s nenulovým základem si protiřečí: netvrdí ani
+                // množství, ani cenu, a přesto tvrdí částku. Kdyby se to jen
+                // přeskočilo, částka by se ztratila beze stopy — a kdyby se
+                // započítala, rozešel by se součet. Obojí tiše.
+                if (array_key_exists('line_base', $item) && !$this->isZeroNumeric((string) $item['line_base'])) {
+                    $findings[] = Finding::fail('V43b', $p . '/line_base',
+                        'Popisný řádek uvádí částku, přestože nemá množství ani cenu.');
+                    continue;
+                }
                 $findings[] = Finding::info('V43b', $p, 'Popisný řádek, do matematiky nevstupuje.');
                 continue;
             }
@@ -172,6 +181,13 @@ final class AmountRules
 
         foreach ($items as $item) {
             if (!is_array($item) || !array_key_exists('line_base', $item)) {
+                continue;
+            }
+            // Popisný řádek do matematiky nevstupuje (V43b) — a nesmí vstoupit
+            // ani tady, jinak by si tenhle soubor protiřečil sám se sebou.
+            // Popisný řádek s nenulovým základem je nahlášený výš jako FAIL.
+            if ($this->isZeroNumeric((string) ($item['quantity'] ?? ''))
+                && $this->isZeroNumeric((string) ($item['unit_price_without_vat'] ?? ''))) {
                 continue;
             }
             try {

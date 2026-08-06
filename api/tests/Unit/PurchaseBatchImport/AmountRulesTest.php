@@ -98,6 +98,38 @@ final class AmountRulesTest extends TestCase
         self::assertSame('V43b', $info[0]->ruleId);
     }
 
+    /**
+     * Popisný řádek s nenulovým základem si protiřečí: netvrdí ani množství,
+     * ani cenu, a přesto tvrdí částku.
+     *
+     * Odhaleno tím, že se rozešel test orchestrátoru: `AmountRules` u popisného
+     * řádku psalo „do matematiky nevstupuje", ale `validateTotals` jeho
+     * `line_base` do součtu započítávalo. Kdyby se jen přeskočil, částka by se
+     * ztratila beze stopy; kdyby se započítal, rozešel by se součet. Obojí tiše.
+     */
+    public function testTextLineClaimingAnAmountIsAFailure(): void
+    {
+        $f = $this->rules()->validate($this->doc([
+            ['description' => 'Poznámka', 'quantity' => '0',
+             'unit_price_without_vat' => '0', 'line_base' => '100.00'],
+            $this->moneyLine('Zboží', '1', '100.00', '100.00'),
+        ], '100.00', '21.00', '121.00'), '/documents/0');
+
+        self::assertContains('V43b', $this->failIds($f));
+    }
+
+    /** Popisný řádek s NULOVÝM základem je v pořádku a do součtu nevstupuje. */
+    public function testTextLineWithZeroBaseDoesNotDisturbTotals(): void
+    {
+        $f = $this->rules()->validate($this->doc([
+            ['description' => 'Poznámka', 'quantity' => '0',
+             'unit_price_without_vat' => '0', 'line_base' => '0.00'],
+            $this->moneyLine('Zboží', '1', '100.00', '100.00'),
+        ], '100.00', '21.00', '121.00'), '/documents/0');
+
+        self::assertSame([], $this->failIds($f));
+    }
+
     /** Nulový řádek BEZ popisu je ztracená extrakce, ne popis. */
     public function testZeroLineWithEmptyDescriptionIsAFailure(): void
     {
