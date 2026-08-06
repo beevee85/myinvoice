@@ -125,24 +125,35 @@ final class IsdocExporter
         }
 
         // Multi → ZIP
-        $tmpZip = tempnam(sys_get_temp_dir(), 'isdoc-') . '.zip';
-        $zip = new \ZipArchive();
-        if ($zip->open($tmpZip, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
-            throw new \RuntimeException('Nelze vytvořit ZIP.');
+        // tempnam() vytvoří placeholder BEZ přípony, ZIP vzniká až pod jménem
+        // s příponou — mazat se musí obojí a ve všech větvích, jinak po každém
+        // exportu zůstane v temp adresáři nulový sirotek.
+        $tmpBase = tempnam(sys_get_temp_dir(), 'isdoc-');
+        if ($tmpBase === false) {
+            throw new \RuntimeException('Nelze vytvořit dočasný soubor.');
         }
-        foreach ($invoices as $inv) {
-            $vs = $inv['varsymbol'] ?? ('draft-' . $inv['id']);
-            $type = match ($inv['invoice_type']) {
-                'proforma'     => 'Proforma',
-                'credit_note'  => 'Dobropis',
-                'tax_document' => 'DanovyDoklad',
-                default        => 'Faktura',
-            };
-            $zip->addFromString("$type-{$vs}.isdoc", $this->buildXml($inv));
+        $tmpZip = $tmpBase . '.zip';
+        try {
+            $zip = new \ZipArchive();
+            if ($zip->open($tmpZip, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
+                throw new \RuntimeException('Nelze vytvořit ZIP.');
+            }
+            foreach ($invoices as $inv) {
+                $vs = $inv['varsymbol'] ?? ('draft-' . $inv['id']);
+                $type = match ($inv['invoice_type']) {
+                    'proforma'     => 'Proforma',
+                    'credit_note'  => 'Dobropis',
+                    'tax_document' => 'DanovyDoklad',
+                    default        => 'Faktura',
+                };
+                $zip->addFromString("$type-{$vs}.isdoc", $this->buildXml($inv));
+            }
+            $zip->close();
+            $content = (string) file_get_contents($tmpZip);
+        } finally {
+            if (is_file($tmpZip)) @unlink($tmpZip);
+            if (is_file($tmpBase)) @unlink($tmpBase);
         }
-        $zip->close();
-        $content = (string) file_get_contents($tmpZip);
-        @unlink($tmpZip);
 
         $base = 'isdoc-' . ($monthLabel !== '' ? $monthLabel : date('Y-m-d'));
         return [
