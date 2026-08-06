@@ -44,6 +44,15 @@ docker run --rm -v /root/mi-batch:/work \
 cd api && php vendor/bin/phpunit                  # vše
 cd api && php vendor/bin/phpunit --filter Xyz     # podmnožina
 
+# Testy z WORKTREE (nemá vendor/ ani přístup k DB):
+#   --network host je NUTNÝ — integrační testy jdou na 127.0.0.1:3307, což je
+#   z kontejneru jinak on sám. Bez toho spadne ~537 testů na "Connection refused",
+#   což vypadá jako regrese a není.
+docker run --rm --network host --entrypoint php \
+  -v /root/mi-batch:/var/www/html \
+  -v /opt/myinvoice/api/vendor:/var/www/html/api/vendor:ro \
+  -w /var/www/html/api myinvoice:latest vendor/bin/phpunit
+
 # Migrace — VŽDY přes migrate.php, NIKDY mysql klientem přímo
 php api/bin/migrate.php
 php api/bin/migrate.php --status
@@ -116,6 +125,7 @@ php tools/exportManualToPdf.php
 - **Pouze syntetická testovací data** — repo je veřejné. Žádné reálné doklady, výpisy, IBANy, čísla dokladů ani identifikátory skutečných protistran.
 - České bankovní účty v testech musí projít mod-11 validací; ověřený placeholder: `1000000005 / 0100`.
 - ISDOC export se validuje proti oficiálnímu XSD (`api/xsd/isdoc-invoice-6.0.2.xsd`).
+- **`file_get_contents()` v testech NEVRACÍ obsah disku.** `tests/bootstrap.php` volá `\DG\BypassFinals::enable()`, což registruje stream wrapper na `file://` a přepisuje PHP zdrojáky za běhu. Změřeno na `ResultsValidator.php`: 7830 B na disku → 7801 B v testu, `final` 1→0, `readonly` 3→0. Architekturní test (je jich 7, které čtou zdrojáky) se proto **nesmí opírat o `final` ani `readonly`** — vzor je nenajde, množina vyjde prázdná a test projde NAPRÁZDNO. Ke každé takové kontrole patří aserce na neprázdnost vstupu: prázdná množina musí být červená, ne tichý souhlas.
 
 ## Manuál
 
