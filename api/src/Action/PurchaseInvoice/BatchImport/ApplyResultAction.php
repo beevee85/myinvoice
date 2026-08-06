@@ -35,6 +35,7 @@ final class ApplyResultAction
         'result_not_found' => 404,
         'no_user'          => 400,
         'unknown_vat_rate' => 422,
+        'invalid_currency' => 422,
         'raw_unreadable'   => 500,
     ];
 

@@ -288,6 +288,33 @@ final class PurchaseImportBatchRepository
     }
 
     /**
+     * Hlavička dávky SE ZÁMKEM (FOR UPDATE) — volat VÝHRADNĚ uvnitř transakce.
+     *
+     * Zámek na hlavičce serializuje souběžná apply téže dávky: druhé vlákno
+     * tu počká, dokud první necommitne, a pak vidí jeho výsledek. Bez toho
+     * mohla dvě apply posledních dvou řádků skončit stavem `applying`
+     * u plně aplikované dávky — navždy, protože nic dalšího už nepřijde.
+     *
+     * POŘADÍ ZÁMKŮ: hlavička PRVNÍ, řádky potom. Stejné pořadí drží sweeper
+     * (setStatus → purgeRawJson) — opačné by byl deadlock.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function lockForApply(int $batchId, int $supplierId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, supplier_id, status
+               FROM purchase_import_batches
+              WHERE id = ? AND supplier_id = ?
+              FOR UPDATE'
+        );
+        $stmt->execute([$batchId, $supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : $this->cast($row);
+    }
+
+    /**
      * Označí řádek jako aplikovaný. GUARD `status = validated` JE VE WHERE,
      * ne v aplikaci: dvě souběžná schválení téhož řádku se tu potkají a druhé
      * dostane rowCount 0 — bez zámku, bez race. Volající na 0 MUSÍ reagovat

@@ -7299,7 +7299,9 @@ components:
       description: "FORK (beevee85) — stav dávky. Hash tokenu se nevrací; je to tajemství, ne stav."
       properties:
         id: { type: integer, format: int64 }
-        status: { type: string, enum: [new, building, ready, submitted, validating, done, failed, cancelled] }
+        # Skutečné stavy z 0913 + PurchaseImportBatchRepository — dřívější verze
+        # tohoto řádku uváděla stavy (new/ready/submitted), které kód nikdy neměl.
+        status: { type: string, enum: [pending, building, awaiting_results, validating, applying, done, failed, cancelled] }
         file_count: { type: integer }
         total_bytes: { type: integer, format: int64 }
         manifest_sha256: { type: [string, "null"] }

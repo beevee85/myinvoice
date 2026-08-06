@@ -119,6 +119,10 @@ final class BatchApplyTest extends TestCase
             $pdo->prepare('DELETE FROM clients WHERE company_name = ? AND supplier_id IN (?, ?)')
                 ->execute([$this->vendorName, $this->supplierA, $this->supplierB]);
         }
+
+        // Fantomová měna z testu auto-založení.
+        $pdo->prepare("DELETE FROM currencies WHERE supplier_id = ? AND code = 'QQQ'")
+            ->execute([$this->supplierA]);
     }
 
     // -----------------------------------------------------------------------
@@ -217,9 +221,22 @@ final class BatchApplyTest extends TestCase
         }
     }
 
+    /**
+     * Počet konceptů NAŠEHO dodavatele — ne globální COUNT(*). Globální počet
+     * na sdílené DB rozbije souběžný zápis kohokoli jiného, a souběžný DELETE
+     * naopak zamaskuje skutečně uniklý koncept. Scope přes vendora chytí
+     * i únik bez vazby na dávku (kdyby se rollback linku nepovedl).
+     */
     private function invoiceCount(): int
     {
-        return (int) $this->db->pdo()->query('SELECT COUNT(*) FROM purchase_invoices')->fetchColumn();
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM purchase_invoices pi
+               JOIN clients c ON c.id = pi.vendor_id
+              WHERE c.company_name = ?'
+        );
+        $stmt->execute([$this->vendorName]);
+
+        return (int) $stmt->fetchColumn();
     }
 
     // -----------------------------------------------------------------------
@@ -425,6 +442,119 @@ final class BatchApplyTest extends TestCase
         self::assertTrue(
             (bool) array_filter($r['warnings'], static fn (string $w) => str_contains($w, 'confidence')),
             'low confidence musí být mezi varováními: ' . json_encode($r['warnings'], JSON_UNESCAPED_UNICODE),
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Guardy doplněné po adversariálním review (nálezy [10], [2], [6])
+    // -----------------------------------------------------------------------
+
+    /** `created_by` je NOT NULL — bez identity schvalujícího nesmí nic vzniknout. */
+    public function testMissingUserIsRefused(): void
+    {
+        [$batchId, $bySha] = $this->validatedBatch(
+            [$this->doc(self::SHA_A, 'BA-2026-090')], [self::SHA_A]);
+        $before = $this->invoiceCount();
+
+        $this->expectReason('no_user',
+            fn () => $this->apply->apply($batchId, $bySha[self::SHA_A],
+                $this->supplierA, 0, '2026-08-06'));
+
+        self::assertSame($before, $this->invoiceCount());
+    }
+
+    /** resultId z JINÉ dávky se nesmí přes cizí batchId dostat k datům. */
+    public function testResultFromAnotherBatchIsNotFound(): void
+    {
+        [$b1, $s1] = $this->validatedBatch([$this->doc(self::SHA_A, 'BA-2026-100')], [self::SHA_A]);
+        [$b2] = $this->validatedBatch([$this->doc(self::SHA_B, 'BA-2026-101')], [self::SHA_B]);
+
+        $this->expectReason('result_not_found',
+            fn () => $this->apply->apply($b2, $s1[self::SHA_A],
+                $this->supplierA, $this->userId, '2026-08-06'));
+    }
+
+    /** Po purge raw_json (retence) musí apply říct nahlas, že nemá z čeho číst. */
+    public function testPurgedRawJsonIsAdmittedNotSilent(): void
+    {
+        [$batchId, $bySha] = $this->validatedBatch(
+            [$this->doc(self::SHA_A, 'BA-2026-110')], [self::SHA_A]);
+
+        $this->repo->purgeRawJson($batchId, $this->supplierA);
+
+        $this->expectReason('raw_purged',
+            fn () => $this->apply->apply($batchId, $bySha[self::SHA_A],
+                $this->supplierA, $this->userId, '2026-08-06'));
+    }
+
+    /** Měna, která nemá ani tvar ISO kódu, je 422 — ne SQLSTATE 22001 → 500. */
+    public function testMalformedCurrencyIsRefusedBeforeInsert(): void
+    {
+        $doc = $this->doc(self::SHA_A, 'BA-2026-120');
+        $doc['totals']['currency'] = 'KORUNY';
+
+        [$batchId, $bySha] = $this->validatedBatch([$doc], [self::SHA_A]);
+        $before = $this->invoiceCount();
+
+        $this->expectReason('invalid_currency',
+            fn () => $this->apply->apply($batchId, $bySha[self::SHA_A],
+                $this->supplierA, $this->userId, '2026-08-06'));
+
+        self::assertSame($before, $this->invoiceCount(), 'transakce musí vrátit koncept');
+    }
+
+    /** Neznámý, ale tvarově platný kód měnu založí — S PŘIZNÁNÍM, ne tiše. */
+    public function testUnknownCurrencyIsCreatedWithAdmission(): void
+    {
+        $doc = $this->doc(self::SHA_A, 'BA-2026-130');
+        $doc['totals']['currency'] = 'QQQ';
+
+        [$batchId, $bySha] = $this->validatedBatch([$doc], [self::SHA_A]);
+        $r = $this->apply->apply($batchId, $bySha[self::SHA_A],
+            $this->supplierA, $this->userId, '2026-08-06');
+
+        self::assertTrue(
+            (bool) array_filter($r['warnings'], static fn (string $w) => str_contains($w, 'QQQ')),
+            'auto-založení měny musí být mezi varováními: ' . json_encode($r['warnings'], JSON_UNESCAPED_UNICODE),
+        );
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT is_active FROM currencies WHERE supplier_id = ? AND code = 'QQQ'");
+        $stmt->execute([$this->supplierA]);
+        self::assertSame(0, (int) $stmt->fetchColumn(), 'fantomová měna smí vzniknout jen neaktivní');
+    }
+
+    /**
+     * Kladně vytištěný dobropis (běžný případ, V43e ho připouští) se do
+     * evidence zakládá se ZÁPORNÝMI množstvími — táž konvence jako AI cesta.
+     * Kladný dobropis by v agregacích přičítal místo odečítal.
+     */
+    public function testPositiveCreditNoteGetsNegativeQuantities(): void
+    {
+        $doc = $this->doc(self::SHA_A, 'BA-2026-140', ['document_kind' => 'credit_note']);
+
+        [$batchId, $bySha] = $this->validatedBatch([$doc], [self::SHA_A]);
+        $r = $this->apply->apply($batchId, $bySha[self::SHA_A],
+            $this->supplierA, $this->userId, '2026-08-06');
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT i.quantity, i.total_with_vat FROM purchase_invoice_items i
+               JOIN purchase_invoices pi ON pi.id = i.purchase_invoice_id
+              WHERE pi.id = ?');
+        $stmt->execute([$r['purchase_invoice_id']]);
+        $item = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        self::assertLessThan(0, (float) $item['quantity'], 'množství dobropisu musí být záporné');
+
+        // Převod je přiznaný a POROVNÁNÍ TOTÁLŮ nefalešní: papír kladně,
+        // evidence záporně — varování o rozdílu totálů být nesmí.
+        self::assertTrue(
+            (bool) array_filter($r['warnings'], static fn (string $w) => str_contains($w, 'záporná')),
+            'převod znamének musí být přiznán',
+        );
+        self::assertFalse(
+            (bool) array_filter($r['warnings'], static fn (string $w) => str_contains($w, 'nesedí')),
+            'abs porovnání nesmí hlásit falešný rozdíl totálů: ' . json_encode($r['warnings'], JSON_UNESCAPED_UNICODE),
         );
     }
 }

@@ -55,36 +55,47 @@ final class BatchApply
             throw new BatchLimitException('no_user', 'Chybí identita schvalujícího uživatele.');
         }
 
-        $batch = $this->batches->find($batchId, $supplierId);
-        if ($batch === null) {
+        // Levná před-kontrola BEZ zámku — jen aby cizí/neexistující dávka
+        // nezakládala transakci. Rozhoduje až zamčené čtení uvnitř.
+        if ($this->batches->find($batchId, $supplierId) === null) {
             throw new BatchLimitException('batch_not_found', 'Dávka neexistuje.');
         }
-        if (!in_array((string) $batch['status'], self::APPLYING_STATUSES, true)) {
-            throw new BatchLimitException('batch_not_applicable',
-                'Dávka není ve stavu, ze kterého lze zakládat koncepty.');
-        }
-
-        $row = $this->batches->findResult($resultId, $batchId, $supplierId);
-        if ($row === null) {
-            throw new BatchLimitException('result_not_found', 'Výsledek neexistuje.');
-        }
-        if ((string) $row['status'] !== 'validated') {
-            // `rejected` (doklad s FAILem) i `applied` končí TADY. Doklad
-            // s nálezem FAIL nejde schválit vůbec — oprava patří do extrakce
-            // a nového kola, ne do ručního ohýbání na cestě do účetnictví.
-            throw new BatchLimitException('result_not_applicable',
-                'Výsledek nelze aplikovat — je odmítnutý, nebo už aplikovaný.');
-        }
-
-        $doc = $this->documentFor($row, $batchId, $supplierId);
 
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
+            // ZÁMEK HLAVIČKY PRVNÍ. Serializuje souběžná apply téže dávky:
+            // druhé vlákno tu čeká na commit prvního a pak vidí jeho stav.
+            // Řeší to obě race najednou — dvojité schválení řádku i přepis
+            // `done` zpátky na `applying` u posledních dvou dokladů.
+            $batch = $this->batches->lockForApply($batchId, $supplierId);
+            if ($batch === null) {
+                throw new BatchLimitException('batch_not_found', 'Dávka neexistuje.');
+            }
+            if (!in_array((string) $batch['status'], self::APPLYING_STATUSES, true)) {
+                throw new BatchLimitException('batch_not_applicable',
+                    'Dávka není ve stavu, ze kterého lze zakládat koncepty.');
+            }
+
+            $row = $this->batches->findResult($resultId, $batchId, $supplierId);
+            if ($row === null) {
+                throw new BatchLimitException('result_not_found', 'Výsledek neexistuje.');
+            }
+            if ((string) $row['status'] !== 'validated') {
+                // `rejected` (doklad s FAILem) i `applied` končí TADY. Doklad
+                // s nálezem FAIL nejde schválit vůbec — oprava patří do extrakce
+                // a nového kola, ne do ručního ohýbání na cestě do účetnictví.
+                throw new BatchLimitException('result_not_applicable',
+                    'Výsledek nelze aplikovat — je odmítnutý, nebo už aplikovaný.');
+            }
+
+            $doc = $this->documentFor($row, $batchId, $supplierId);
             [$data, $warnings] = $this->mapToDraft($doc, $supplierId, $today);
 
             // Duplicitní doklad: unikát (supplier, vendor, číslo, datum) by
             // jinak vybuchl jako SQLSTATE 23000 → 500. Řekneme to srozumitelně.
+            // Souběh PŘES RŮZNÉ DÁVKY tahle kontrola nechytí — ten dojede na
+            // unikátu a překládá se v catch níž.
             $dupe = $this->findDuplicate($supplierId, (int) $data['vendor_id'],
                 (string) $data['vendor_invoice_number'], (string) $data['issue_date']);
             if ($dupe !== null) {
@@ -108,8 +119,8 @@ final class BatchApply
                     implode("\n\n", $warnings), false);
             }
 
-            // Guard `status = validated` je ve WHERE — souběžné druhé schválení
-            // dostane 0 a celý jeho koncept se odvalí zpátky.
+            // Guard `status = validated` ve WHERE zůstává jako druhá vrstva
+            // pod zámkem hlavičky.
             $marked = $this->batches->markResultApplied($resultId, $supplierId,
                 $invoiceId, $this->normalizedJson($doc, $invoiceId, $warnings));
             if ($marked !== 1) {
@@ -117,26 +128,38 @@ final class BatchApply
                     'Výsledek mezitím aplikoval někdo jiný.');
             }
 
+            // Stav dávky UVNITŘ transakce — pád procesu už nemůže oddělit
+            // koncept od stavu. Dřívější verze to dělala po commitu a dávka
+            // mohla uvíznout ve `validating` s aplikovanými řádky navždy.
+            $this->batches->heartbeat($batchId, $supplierId);
+            if ($this->batches->countResultsNotApplied($batchId, $supplierId) === 0) {
+                $this->batches->setStatus($batchId, $supplierId, 'done');
+                // V79b: terminální stav → raw_json pryč. Normalizovaný payload
+                // už leží na každém aplikovaném řádku.
+                $this->batches->purgeRawJson($batchId, $supplierId);
+                $batchStatus = 'done';
+            } else {
+                $this->batches->setStatus($batchId, $supplierId, 'applying');
+                $batchStatus = 'applying';
+            }
+
             $pdo->commit();
+        } catch (\PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            // Souběžný duplikát přes jinou dávku dojede až na unikát
+            // uq_pi_vendor_invoice — přeložit na 409, ne nechat spadnout na 500.
+            if ((string) $e->getCode() === '23000') {
+                throw new BatchLimitException('duplicate_invoice',
+                    'Doklad už v evidenci existuje (souběžné založení).');
+            }
+            throw $e;
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
             throw $e;
-        }
-
-        // Stav dávky až PO commitu — je to ukazatel, ne součást atomicity.
-        $this->batches->heartbeat($batchId, $supplierId);
-        $remaining = $this->batches->countResultsNotApplied($batchId, $supplierId);
-        if ($remaining === 0) {
-            $this->batches->setStatus($batchId, $supplierId, 'done');
-            // V79b: terminální stav → raw_json pryč. Normalizovaný payload už
-            // leží na každém aplikovaném řádku, surová data nikdo nepotřebuje.
-            $this->batches->purgeRawJson($batchId, $supplierId);
-            $batchStatus = 'done';
-        } else {
-            $this->batches->setStatus($batchId, $supplierId, 'applying');
-            $batchStatus = 'applying';
         }
 
         return [
@@ -232,6 +255,16 @@ final class BatchApply
             ];
         }
 
+        // DOBROPIS: evidence drží položky dobropisu ZÁPORNĚ (táž konvence jako
+        // AI cesta — AiPdfExtractor dělá qty = -abs). Papír je ale běžně tiskne
+        // kladně a V43e kladný dobropis výslovně připouští. Kladně opsaný
+        // dobropis by v agregacích PŘIČÍTAL místo odečítal — proto se znaménko
+        // převádí TADY, s přiznáním ve varování. Smíšená znaménka se nechávají
+        // být: tam si extrakce už nějakou konvenci zvolila a přepis by hádal.
+        if ((string) ($doc['document_kind'] ?? '') === 'credit_note') {
+            $items = $this->normalizeCreditNoteSigns($items, $warnings);
+        }
+
         if (($doc['confidence'] ?? null) === 'low') {
             $warnings[] = 'Extrakce si dokladem nebyla jistá (confidence: low) — zkontrolujte všechna pole proti PDF.';
         }
@@ -244,6 +277,9 @@ final class BatchApply
             $warnings[] = 'Doklad odkazuje na jiné doklady (zálohy/vyúčtování) — vazby je třeba napárovat ručně, apply je nezakládá.';
         }
 
+        $currencyId = $this->currencyIdFor(
+            (string) (($doc['totals'] ?? [])['currency'] ?? 'CZK'), $supplierId, $warnings);
+
         $data = [
             'vendor_id'             => (int) $resolved['id'],
             'vendor_is_vat_payer'   => $resolved['is_vat_payer'],
@@ -255,8 +291,7 @@ final class BatchApply
                 ? (string) $dueDate
                 : date('Y-m-d', strtotime($issueDate . ' +14 days')),
             'received_at'           => $today,
-            'currency_id'           => $this->currencyIdFor(
-                (string) (($doc['totals'] ?? [])['currency'] ?? 'CZK'), $supplierId),
+            'currency_id'           => $currencyId,
             'language'              => 'cs',
             'note_above_items'      => $doc['note_above_items'] ?? null,
             'note_below_items'      => $doc['note_below_items'] ?? null,
@@ -298,10 +333,62 @@ final class BatchApply
             sprintf('Sazba DPH %s %% není v číselníku — doplňte ji, nebo doklad pořiďte ručně.', $norm));
     }
 
-    /** Find-or-create měny per tenant — týž postup jako ISDOC cesta. */
-    private function currencyIdFor(string $code, int $supplierId): int
+    /**
+     * Dobropis s kladně opsanými řádky → záporná množství (konvence evidence).
+     *
+     * @param list<array<string,mixed>> $items
+     * @param list<string> $warnings mutuje se odkazem — každý převod se přizná
+     * @return list<array<string,mixed>>
+     */
+    private function normalizeCreditNoteSigns(array $items, array &$warnings): array
+    {
+        $signs = [];
+        foreach ($items as $it) {
+            $q = (float) $it['quantity'];
+            if ($q !== 0.0) {
+                $signs[$q < 0 ? 'neg' : 'pos'] = true;
+            }
+        }
+
+        if (isset($signs['pos']) && isset($signs['neg'])) {
+            $warnings[] = 'Dobropis má smíšená znaménka položek — znaménka ponechána, zkontrolujte proti PDF.';
+
+            return $items;
+        }
+        if (!isset($signs['pos'])) {
+            // Už záporné (nebo bez peněžních řádků) — není co převádět.
+            return $items;
+        }
+
+        foreach ($items as &$it) {
+            $q = (string) $it['quantity'];
+            if ((float) $q !== 0.0) {
+                $it['quantity'] = '-' . ltrim($q, '+');
+            }
+        }
+        unset($it);
+
+        $warnings[] = 'Dobropis: množství položek převedena na záporná (konvence evidence, stejně jako AI import). Papír je tiskne kladně.';
+
+        return $items;
+    }
+
+    /**
+     * Find-or-create měny per tenant — týž postup jako ISDOC cesta, se dvěma
+     * rozdíly: kód z nedůvěryhodného results.json musí mít TVAR měny
+     * (tři velká písmena — jinak by cokoli až po CHAR(3) přeteklo na
+     * SQLSTATE 22001 → 500), a auto-založení měny se PŘIZNÁ ve varování,
+     * protože překlep extrakce („CZk" projde, „KORUNY" ne, „QQQ" založí
+     * fantom) má vidět člověk na konceptu.
+     */
+    private function currencyIdFor(string $code, int $supplierId, array &$warnings): int
     {
         $code = strtoupper(trim($code)) ?: 'CZK';
+
+        if (!preg_match('/^[A-Z]{3}$/', $code)) {
+            throw new BatchLimitException('invalid_currency',
+                sprintf('Měna „%s" nemá tvar ISO kódu (tři písmena).', mb_substr($code, 0, 12)));
+        }
 
         $pdo  = $this->db->pdo();
         $stmt = $pdo->prepare(
@@ -319,6 +406,8 @@ final class BatchApply
                  (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default)
              VALUES (?, ?, ?, ?, ?, ?, 2, 0, 0)'
         )->execute([$supplierId, $code, "{$code} — jen pro nákup", $code, $code, $code]);
+
+        $warnings[] = sprintf('Měna %s nebyla v číselníku — založena jako neaktivní nákupní měna. Zkontrolujte, že je to skutečně měna dokladu.', $code);
 
         return (int) $pdo->lastInsertId();
     }
@@ -353,6 +442,14 @@ final class BatchApply
 
         $invoice = $this->invoices->find($invoiceId, $supplierId);
         $computed = (string) ($invoice['total_with_vat'] ?? '');
+
+        // Dobropis: znaménka jsme převedli na záporná (konvence evidence),
+        // papír tiskne kladně — porovnává se ABSOLUTNÍ hodnota, jinak by
+        // každý dobropis dostal falešné varování o rozdílu totálů.
+        if ((string) ($doc['document_kind'] ?? '') === 'credit_note') {
+            $computed = ltrim($computed, '-');
+            $paper    = ltrim($paper, '-');
+        }
 
         try {
             if ($computed !== '' && !Money::parse($computed)->equals(Money::parse($paper))) {
