@@ -25,8 +25,10 @@ const routes: RouteRecordRaw[] = [
       // Přijaté faktury (fáze 1 integrace forku)
       { path: 'purchase-invoices',                 name: 'purchase-invoices',        component: () => import('@/pages/purchase-invoices/InvoiceList.vue') },
       { path: 'purchase-invoices/export',          name: 'purchase-invoices-export', component: () => import('@/pages/purchase-invoices/Export.vue') },
-      // FORK: review dávkového importu. Routa existuje vždy; když je příznak
-      // vypnutý, API vrací 404 a stránka to zobrazí jako chybu načtení.
+      // FORK: dávkový import. Routy existují vždy; když je příznak vypnutý,
+      // API vrací 404 a stránky to zobrazí jako chybu načtení (menu se
+      // v takovém případě vůbec nenabízí — AppLayout flag detekuje seznamem).
+      { path: 'purchase-invoices/batch-import',           name: 'purchase-invoice-batch-imports', component: () => import('@/pages/purchase-invoices/BatchImportList.vue') },
       { path: 'purchase-invoices/batch-import/:id(\\d+)', name: 'purchase-invoice-batch-import', component: () => import('@/pages/purchase-invoices/BatchImport.vue') },
       { path: 'purchase-invoices/payment-orders',  name: 'purchase-invoices-payment-orders', component: () => import('@/pages/purchase-invoices/PaymentOrders.vue') },
       { path: 'purchase-invoices/new',             name: 'purchase-invoice-new',     component: () => import('@/pages/purchase-invoices/InvoiceEditor.vue'), meta: { requiresWrite: true, requiresSupplier: true } },

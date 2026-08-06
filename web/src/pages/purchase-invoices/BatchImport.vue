@@ -34,6 +34,11 @@ const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const submitFindings = ref<Finding[] | null>(null)
 
+/** Per-řádkové schvalování — jedno kliknutí = jeden koncept, žádné „vše". */
+const applyBusy = ref<number | null>(null)
+const applyErrors = ref<Record<number, string>>({})
+const applyWarnings = ref<Record<number, string[]>>({})
+
 async function load() {
   if (!Number.isInteger(batchId) || batchId <= 0) {
     loadError.value = t('batch_import.invalid_id')
@@ -64,6 +69,25 @@ async function submit() {
     submitting.value = false
   }
 }
+
+async function applyResult(resultId: number) {
+  applyBusy.value = resultId
+  delete applyErrors.value[resultId]
+  try {
+    const r = await batchImportApi.applyResult(batchId, resultId)
+    if (r.warnings.length) applyWarnings.value[resultId] = r.warnings
+    await load()
+  } catch (e: any) {
+    applyErrors.value[resultId] =
+      e?.response?.data?.error?.message ?? t('batch_import.apply_failed')
+  } finally {
+    applyBusy.value = null
+  }
+}
+
+/** Schvalovat lze jen validovaný řádek dávky, která ještě běží. */
+const canApply = computed(() =>
+  ['validating', 'applying'].includes(detail.value?.batch.status ?? ''))
 
 /** Soubor podle id, ať se u nálezu pozná, o který doklad jde. */
 const fileById = computed(() => {
@@ -118,11 +142,16 @@ load()
           {{ t('batch_import.subtitle') }}
         </p>
       </div>
-      <span
-        v-if="detail"
-        class="rounded px-2 py-1 text-xs font-medium"
-        :class="statusBadgeClass(detail.batch.status)"
-      >{{ detail.batch.status }}</span>
+      <div v-if="detail" class="flex shrink-0 items-center gap-3">
+        <a
+          :href="batchImportApi.packageUrl(batchId)"
+          class="text-sm underline"
+        >{{ t('batch_import.package') }}</a>
+        <span
+          class="rounded px-2 py-1 text-xs font-medium"
+          :class="statusBadgeClass(detail.batch.status)"
+        >{{ t(`batch_import.status.${detail.batch.status}`, detail.batch.status) }}</span>
+      </div>
     </header>
 
     <p v-if="loading" class="text-sm text-slate-500">{{ t('common.loading') }}</p>
@@ -226,6 +255,33 @@ load()
             </li>
           </ul>
           <p v-else class="text-sm text-slate-500">{{ t('batch_import.no_findings') }}</p>
+
+          <!-- Schválení: jen validovaný řádek běžící dávky. Odmítnutý doklad
+               schválit nejde — oprava patří do extrakce, ne sem. -->
+          <div v-if="r.status === 'validated' && canApply" class="mt-3">
+            <button
+              class="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+              :disabled="applyBusy !== null"
+              @click="applyResult(r.id)"
+            >
+              {{ applyBusy === r.id ? t('batch_import.applying') : t('batch_import.apply') }}
+            </button>
+            <p v-if="applyErrors[r.id]" class="mt-2 text-sm text-red-600">{{ applyErrors[r.id] }}</p>
+          </div>
+
+          <div v-else-if="r.status === 'applied' && r.purchase_invoice_id" class="mt-3">
+            <RouterLink
+              :to="`/purchase-invoices/${r.purchase_invoice_id}`"
+              class="text-sm underline"
+            >{{ t('batch_import.open_draft') }}</RouterLink>
+          </div>
+
+          <ul
+            v-if="applyWarnings[r.id]?.length"
+            class="mt-2 space-y-1 text-sm text-amber-700 dark:text-amber-400"
+          >
+            <li v-for="(w, i) in applyWarnings[r.id]" :key="i">{{ w }}</li>
+          </ul>
 
           <p v-if="r.raw_purged_at" class="mt-2 text-xs text-slate-500">
             {{ t('batch_import.raw_purged') }}

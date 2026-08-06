@@ -67,7 +67,72 @@ export interface SubmitResponse {
   findings: Finding[]
 }
 
+export interface BatchListItem {
+  id: number
+  status: string
+  file_count: number
+  total_bytes: number
+  created_at: string
+  applied_at: string | null
+}
+
+export interface CreateBatchResponse {
+  ok: boolean
+  batch_id: number
+  /** Plaintext token — server ho vrací POUZE TEĎ, nikdy podruhé. */
+  token: string
+  token_expires_at: string | null
+  manifest_sha256: string
+  file_count: number
+  total_bytes: number
+}
+
+export interface ApplyResponse {
+  ok: boolean
+  purchase_invoice_id: number
+  warnings: string[]
+  batch_status: string
+}
+
 export const batchImportApi = {
+  /**
+   * Seznam dávek. 404 znamená VYPNUTÝ PŘÍZNAK (routa neexistuje) — navigace
+   * to používá jako detekci featury, žádný jiný konfigurační kanál není.
+   */
+  async list(): Promise<BatchListItem[]> {
+    const { data } = await api.get<{ batches: BatchListItem[] }>('/purchase-invoices/batch-import')
+    return data.batches
+  },
+
+  async create(files: File[], onProgress?: (pct: number) => void): Promise<CreateBatchResponse> {
+    const fd = new FormData()
+    for (const f of files) fd.append('files[]', f, f.name)
+    const { data } = await api.post<CreateBatchResponse>('/purchase-invoices/batch-import', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (e) => {
+        if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100))
+      },
+    })
+    return data
+  },
+
+  /** Jedno volání = jeden doklad = jeden koncept. Hromadné schválení neexistuje. */
+  async applyResult(batchId: number, resultId: number): Promise<ApplyResponse> {
+    const { data } = await api.post<ApplyResponse>(
+      `/purchase-invoices/batch-import/${batchId}/results/${resultId}/apply`,
+    )
+    return data
+  },
+
+  /** Přímý odkaz na ZIP balíček — supplier_id v query (prohlížeč neposílá X-Supplier-Id). */
+  packageUrl(batchId: number): string {
+    const sid = localStorage.getItem('myinvoice.current_supplier_id')
+    const params = new URLSearchParams()
+    if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
+    const qs = params.toString()
+    return `/api/purchase-invoices/batch-import/${batchId}/package${qs ? '?' + qs : ''}`
+  },
+
   async get(id: number): Promise<BatchDetail> {
     const { data } = await api.get<BatchDetail>(`/purchase-invoices/batch-import/${id}`)
     return data
