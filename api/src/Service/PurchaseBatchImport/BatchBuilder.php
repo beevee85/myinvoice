@@ -156,6 +156,43 @@ final class BatchBuilder
         return ['manifest_json' => $json, 'dir' => $this->batchDir($batchId), 'files' => $rows];
     }
 
+    /**
+     * Retence PDF (V79b): smaže soubory dávky z disku. Do review 6. 8. 2026
+     * NEEXISTOVALO — terminální stav mazal jen DB sloupec raw_json a PDF
+     * s obsahem cizích dokladů leželo na disku neomezeně dlouho.
+     *
+     * DISCIPLÍNA MAZÁNÍ: maže se VÝHRADNĚ podle řádků v DB (tenant-scoped),
+     * jméno musí mít tvar `<sha256>.pdf` — nic jiného se nesmaže, žádný glob.
+     * Adresář se odstraní jen prázdný (rmdir neprázdný nesmaže); co v něm
+     * nečekaně zbylo, zůstane viditelné, ne tiše zahlazené.
+     *
+     * @return int počet smazaných souborů (pro log: rozsah a počet, nikdy obsah)
+     */
+    public function purgeStoredFiles(int $batchId, int $supplierId): int
+    {
+        if ($this->repo->find($batchId, $supplierId) === null) {
+            return 0;
+        }
+
+        $dir = $this->batchDir($batchId);
+        $deleted = 0;
+
+        foreach ($this->repo->filesForBatch($batchId, $supplierId) as $f) {
+            $stored = (string) $f['stored_name'];
+            if (!preg_match('/^[0-9a-f]{64}\.pdf$/', $stored)) {
+                continue;
+            }
+            $path = $dir . DIRECTORY_SEPARATOR . $stored;
+            if (is_file($path) && @unlink($path)) {
+                $deleted++;
+            }
+        }
+
+        @rmdir($dir);
+
+        return $deleted;
+    }
+
     // -----------------------------------------------------------------------
 
     /**

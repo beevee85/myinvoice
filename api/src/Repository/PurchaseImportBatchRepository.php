@@ -202,6 +202,15 @@ final class PurchaseImportBatchRepository
     }
 
     /**
+     * Stavy, ve kterých dávka čeká na EXTERNÍ NÁSTROJ — jen ty smí sweeper
+     * prohlásit za opuštěné. `validating`/`applying` čekají na ČLOVĚKA:
+     * review konceptů nemá deadline a sweeper, který po 24 h nečinnosti
+     * schvalujícího zabije dávku a purgne raw_json, by zbylé validované
+     * řádky nevratně umrtvil (nález review correctness/medium).
+     */
+    private const SWEEPABLE_STATUSES = ['pending', 'building', 'awaiting_results'];
+
+    /**
      * Dávky bez známky života starší než N hodin — vstup pro sweeper retence
      * (cesta B dle V79b). Nemůže být řízená stavem dávky: ke změně stavu
      * u opuštěné dávky z definice nedojde, právě proto je opuštěná.
@@ -210,16 +219,16 @@ final class PurchaseImportBatchRepository
      */
     public function findAbandoned(int $supplierId, int $olderThanHours): array
     {
-        $placeholders = implode(',', array_fill(0, count(self::TERMINAL_STATUSES), '?'));
+        $placeholders = implode(',', array_fill(0, count(self::SWEEPABLE_STATUSES), '?'));
         $stmt = $this->db->pdo()->prepare(
             "SELECT id, status, created_at, heartbeat_at
                FROM purchase_import_batches
               WHERE supplier_id = ?
-                AND status NOT IN ({$placeholders})
+                AND status IN ({$placeholders})
                 AND COALESCE(heartbeat_at, created_at) < (current_timestamp() - INTERVAL ? HOUR)
               ORDER BY id ASC"
         );
-        $stmt->execute([$supplierId, ...self::TERMINAL_STATUSES, $olderThanHours]);
+        $stmt->execute([$supplierId, ...self::SWEEPABLE_STATUSES, $olderThanHours]);
 
         return array_map(fn ($r) => $this->cast($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
     }

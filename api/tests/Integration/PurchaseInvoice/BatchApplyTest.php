@@ -445,6 +445,30 @@ final class BatchApplyTest extends TestCase
         );
     }
 
+    /**
+     * Retence V79b: `done` maže i PDF z disku. Do review 6. 8. mazal terminální
+     * stav jen DB sloupec a PDF s obsahem cizích dokladů leželo na disku navždy.
+     */
+    public function testDonePurgesStoredFilesFromDisk(): void
+    {
+        [$batchId, $bySha] = $this->validatedBatch(
+            [$this->doc(self::SHA_A, 'BA-2026-150')], [self::SHA_A]);
+
+        // Soubor na disku, jak by ho založil BatchBuilder.
+        $dir = \MyInvoice\Infrastructure\Config\RuntimePaths::storage(
+            'purchase-import-batches' . DIRECTORY_SEPARATOR . $batchId);
+        mkdir($dir, 0o750, true);
+        $path = $dir . DIRECTORY_SEPARATOR . self::SHA_A . '.pdf';
+        file_put_contents($path, "%PDF-1.7\nsynteticka fixture\n%%EOF\n");
+
+        $r = $this->apply->apply($batchId, $bySha[self::SHA_A],
+            $this->supplierA, $this->userId, '2026-08-06');
+
+        self::assertSame('done', $r['batch_status'], 'předpoklad: jednodokladová dávka končí done');
+        self::assertFileDoesNotExist($path, 'PDF musí po done zmizet z disku (V79b)');
+        self::assertDirectoryDoesNotExist($dir, 'prázdný adresář dávky se uklidí');
+    }
+
     // -----------------------------------------------------------------------
     // Guardy doplněné po adversariálním review (nálezy [10], [2], [6])
     // -----------------------------------------------------------------------

@@ -175,6 +175,33 @@ if ($candidates !== []) {
 $report['doc_trash_autopurged'] = $autopurged;
 $report['doc_trash_autopurge_skipped'] = $autopurgeSkipped;
 
+// FORK batch-import: retence dávek (V79b, cesta B). Sweeper opuštěných dávek
+// (jen stavy čekající na externí nástroj) + purge normalized_json po retenci.
+// cfg.sample.php tyhle klíče deklaroval od začátku — ČETL je až tenhle blok;
+// do review 6. 8. 2026 sweeper žádného volajícího neměl.
+$biSwept = 0; $biRawPurged = 0; $biFilesPurged = 0; $biNormPurged = 0;
+if ((bool) $config->get('purchase_invoice.batch_import.enabled', false)) {
+    $biContainer = Bootstrap::buildApp()->getContainer();
+    if ($biContainer !== null) {
+        $biIntake = $biContainer->get(\MyInvoice\Service\PurchaseBatchImport\ResultsIntake::class);
+        $biRepo   = $biContainer->get(\MyInvoice\Repository\PurchaseImportBatchRepository::class);
+        $biHours  = (int) $config->get('purchase_invoice.batch_import.abandoned_batch_hours', 24);
+        $biDays   = (int) $config->get('purchase_invoice.batch_import.normalized_json_retention_days', 90);
+        foreach ($pdo->query('SELECT id FROM supplier')->fetchAll(PDO::FETCH_COLUMN) as $biSid) {
+            $r = $biIntake->sweepAbandoned((int) $biSid, $biHours);
+            $biSwept      += $r['swept'];
+            $biRawPurged  += $r['purged'];
+            $biFilesPurged += $r['files'];
+            $biNormPurged += $biRepo->purgeNormalizedJsonOlderThan((int) $biSid, $biDays);
+        }
+    }
+}
+// Do reportu jde ROZSAH A POČET, nikdy obsah (V82).
+$report['batch_import_swept'] = $biSwept;
+$report['batch_import_raw_purged'] = $biRawPurged;
+$report['batch_import_files_purged'] = $biFilesPurged;
+$report['batch_import_normalized_purged'] = $biNormPurged;
+
 // Pročisti cron_runs — drž max 500 posledních záznamů na skript.
 $report['cron_runs_purged'] = CronRun::purgeOld($pdo, 500);
 

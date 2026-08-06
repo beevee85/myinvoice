@@ -41,6 +41,7 @@ final class BatchApply
         private readonly PurchaseInvoiceRepository $invoices,
         private readonly PurchaseInvoiceWriteService $writer,
         private readonly ClientResolver $clients,
+        private readonly BatchBuilder $builder,
     ) {}
 
     /**
@@ -144,6 +145,12 @@ final class BatchApply
             }
 
             $pdo->commit();
+
+            // PDF z disku až PO commitu: mazání souborů se nedá rollbacknout,
+            // takže nesmí předběhnout jistotu, že stav `done` platí.
+            if ($batchStatus === 'done') {
+                $this->builder->purgeStoredFiles($batchId, $supplierId);
+            }
         } catch (\PDOException $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();

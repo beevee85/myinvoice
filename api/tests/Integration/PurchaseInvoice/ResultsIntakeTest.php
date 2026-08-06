@@ -345,4 +345,50 @@ final class ResultsIntakeTest extends TestCase
         self::assertNotSame('failed', $this->statusOf($id, $this->supplierA),
             'běžící dlouhá dávka se známkou života se smazat nesmí');
     }
+
+    /**
+     * Dávka ve `validating` čeká na ČLOVĚKA, ne na worker — review konceptů
+     * nemá deadline. Sweep by purgnul raw_json a zbylé validované řádky by
+     * nešly aplikovat nikdy (nález review: 24 h nečinnosti schvalujícího
+     * zničí rozpracovanou dávku).
+     */
+    public function testBatchAwaitingHumanApprovalIsNeverSwept(): void
+    {
+        [$id, $token] = $this->makeBatch($this->supplierA);
+        $this->accept($id, $this->supplierA, $token, $this->payload([self::SHA_A]));
+        self::assertSame('validating', $this->statusOf($id, $this->supplierA), 'předpoklad');
+
+        // Známka života stará dva dny — přesto se sweepnout NESMÍ.
+        $this->db->pdo()->prepare(
+            'UPDATE purchase_import_batches SET heartbeat_at = (current_timestamp() - INTERVAL 48 HOUR) WHERE id = ?'
+        )->execute([$id]);
+
+        $this->intake->sweepAbandoned($this->supplierA, 24);
+
+        self::assertSame('validating', $this->statusOf($id, $this->supplierA),
+            'dávka čekající na lidské schválení nemá deadline');
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT raw_json FROM purchase_import_batch_results WHERE purchase_import_batch_id = ?');
+        $stmt->execute([$id]);
+        self::assertNotNull($stmt->fetchColumn(), 'raw_json rozpracované dávky musí přežít');
+    }
+
+    /** Retence V79b: selhání dávky maže i PDF z disku, ne jen raw_json. */
+    public function testFailedBatchPurgesStoredFilesFromDisk(): void
+    {
+        [$id, $token] = $this->makeBatch($this->supplierA, [self::SHA_A]);
+
+        $dir = \MyInvoice\Infrastructure\Config\RuntimePaths::storage(
+            'purchase-import-batches' . DIRECTORY_SEPARATOR . $id);
+        mkdir($dir, 0o750, true);
+        $path = $dir . DIRECTORY_SEPARATOR . self::SHA_A . '.pdf';
+        file_put_contents($path, "%PDF-1.7\nsynteticka fixture\n%%EOF\n");
+
+        // Doklad o souboru mimo dávku → V4 → failed.
+        $this->accept($id, $this->supplierA, $token, $this->payload([self::SHA_B]));
+
+        self::assertSame('failed', $this->statusOf($id, $this->supplierA), 'předpoklad');
+        self::assertFileDoesNotExist($path, 'PDF neúspěšné dávky musí z disku zmizet');
+    }
 }

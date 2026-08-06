@@ -38,6 +38,7 @@ final class ResultsIntake
         private readonly Connection $db,
         private readonly PurchaseImportBatchRepository $repo,
         private readonly ResultsValidator $validator,
+        private readonly BatchBuilder $builder,
     ) {}
 
     /**
@@ -89,35 +90,44 @@ final class ResultsIntake
         } else {
             $this->repo->setStatus($batchId, $supplierId, 'failed', 'validation_failed',
                 sprintf('Validace nalezla %d problémů.', count($result['findings'])));
-            // V79b, cesta A: terminální stav → raw_json pryč. Neúspěšná dávka
-            // nemá důvod držet obsah cizích dokladů déle než ostatní.
+            // V79b, cesta A: terminální stav → raw_json I PDF pryč. Neúspěšná
+            // dávka nemá důvod držet obsah cizích dokladů déle než ostatní.
+            // (PDF mazání do review 6. 8. neexistovalo — retence byla poloviční.)
             $this->repo->purgeRawJson($batchId, $supplierId);
+            $this->builder->purgeStoredFiles($batchId, $supplierId);
         }
 
         return ['ok' => $result['ok'], 'batch_id' => $batchId, 'findings' => $result['findings']];
     }
 
     /**
-     * Sweeper opuštěných dávek (V79b, cesta B). Volá se z `cron-cleanup`,
-     * protože dávku bez známky života nelze probudit jejím vlastním stavem —
-     * ke změně stavu u opuštěné dávky z definice nedojde.
+     * Sweeper opuštěných dávek (V79b, cesta B). Volá ho `api/bin/cron-cleanup.php`
+     * — DO 6. 8. 2026 TO TENHLE KOMENTÁŘ JEN TVRDIL a žádný volající neexistoval;
+     * review to našlo a zapojení je teď skutečné.
      *
-     * @return array{swept: int, purged: int}
+     * Zametá VÝHRADNĚ dávky čekající na externí nástroj (pending/building/
+     * awaiting_results). Dávka ve `validating`/`applying` čeká na ČLOVĚKA
+     * a review konceptů deadline nemá — sweep by zbylé validované řádky
+     * nevratně umrtvil (purge raw_json = apply už nemá z čeho číst).
+     *
+     * @return array{swept: int, purged: int, files: int}
      */
     public function sweepAbandoned(int $supplierId, int $olderThanHours): array
     {
         $swept = 0;
         $purged = 0;
+        $files = 0;
 
         foreach ($this->repo->findAbandoned($supplierId, $olderThanHours) as $batch) {
             $id = (int) $batch['id'];
             $this->repo->setStatus($id, $supplierId, 'failed', 'abandoned',
                 'Dávka nedokončila a nejeví známky života.');
             $purged += $this->repo->purgeRawJson($id, $supplierId);
+            $files  += $this->builder->purgeStoredFiles($id, $supplierId);
             $swept++;
         }
 
-        return ['swept' => $swept, 'purged' => $purged];
+        return ['swept' => $swept, 'purged' => $purged, 'files' => $files];
     }
 
     // -----------------------------------------------------------------------
