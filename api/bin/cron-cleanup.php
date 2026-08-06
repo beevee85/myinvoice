@@ -125,6 +125,105 @@ if ($exportIds !== []) {
 $report['monthly_export_jobs']  = count($exportIds);
 $report['monthly_export_files'] = $exportFilesDeleted;
 
+// 6b) Dokumentové joby — do review 6. 8. 2026 neměly ŽÁDNÝ úklid: opuštěný
+// chunkovaný upload (klient nezavolal /upload/finish), spadlý worker i smazaný
+// job nechávaly v storage/documents/sup-N/_jobs/ ZIPy a stagingy (až 1 GiB)
+// navždy. Tři kroky, které na sebe navazují:
+//   1. stale queued/running → failed (worker se nespawnul nebo umřel bez stopy),
+//   2. finální joby po 7 dnech → smaž result soubor + řádek (zrcadlí monthly_export),
+//   3. sirotčí soubory bez živého jobu po 48 h → smaž (kryje pády, po nichž
+//      neuklidil ani worker — ten od tohoto commitu po selhání uklízí sám).
+// Prahy se liší podle stavu: running job hlásí progress (updated_at se
+// obnovuje) → 24 h stačí. Queued job ale může být rozběhnutý chunkovaný
+// upload — chunk endpointy řádek jobu NEDOTÝKAJÍ (aktivitu vidí jen mtime
+// souborů ve stagingu, který hlídá reaper níže) → 72 h, schválně VÍC než
+// 48h souborový práh, aby napřed odešly soubory a teprve pak status.
+$n = $pdo->exec(
+    "UPDATE import_jobs
+        SET status = 'failed', finished_at = NOW(),
+            last_error = 'Job ukončen jako neaktivní (cron-cleanup).'
+      WHERE source IN ('document_zip_import', 'document_folder_import', 'document_zip_export')
+        AND (
+              (status = 'running' AND updated_at < NOW() - INTERVAL 24 HOUR)
+           OR (status = 'queued'  AND updated_at < NOW() - INTERVAL 72 HOUR)
+        )"
+);
+$report['document_jobs_stale'] = (int) $n;
+
+$docBase = \MyInvoice\Infrastructure\Config\RuntimePaths::storage('documents');
+$stmt = $pdo->query(
+    "SELECT id, result_path FROM import_jobs
+      WHERE source IN ('document_zip_import', 'document_folder_import', 'document_zip_export')
+        AND status IN ('completed', 'failed', 'cancelled')
+        AND COALESCE(finished_at, created_at) < NOW() - INTERVAL 7 DAY"
+);
+$docRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$docFilesDeleted = 0;
+$docIds = [];
+$docBaseReal = realpath($docBase);
+foreach ($docRows as $r) {
+    $docIds[] = (int) $r['id'];
+    $rel = (string) ($r['result_path'] ?? '');
+    if ($rel === '') continue;
+    $abs = realpath($docBase . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $rel));
+    // Path-traversal guard — maž jen v rámci storage/documents.
+    if ($abs !== false && $docBaseReal !== false && is_file($abs)
+        && str_starts_with(strtolower($abs), strtolower($docBaseReal) . DIRECTORY_SEPARATOR)) {
+        if (@unlink($abs)) $docFilesDeleted++;
+    }
+}
+if ($docIds !== []) {
+    $in = implode(',', array_fill(0, count($docIds), '?'));
+    $pdo->prepare("DELETE FROM import_jobs WHERE id IN ($in)")->execute($docIds);
+}
+$report['document_jobs_reaped'] = count($docIds);
+$report['document_export_files'] = $docFilesDeleted;
+
+$docOrphans = 0;
+$docCutoff = time() - 48 * 3600;
+$docStatusStmt = $pdo->prepare('SELECT status FROM import_jobs WHERE id = ?');
+if (is_dir($docBase)) {
+    foreach (glob($docBase . '/sup-*/_jobs', GLOB_ONLYDIR) ?: [] as $jobsDir) {
+        // Opuštěné chunkované stagingy: stáří bereme z nejnovějšího souboru
+        // uvnitř — append do blobu nemění mtime adresáře, a rozběhnutý upload
+        // se nesmí smazat pod rukama.
+        foreach (glob($jobsDir . '/up-*', GLOB_ONLYDIR) ?: [] as $dir) {
+            $newest = (int) (@filemtime($dir) ?: 0);
+            foreach (glob($dir . '/*') ?: [] as $f) {
+                $newest = max($newest, (int) (@filemtime($f) ?: 0));
+            }
+            if ($newest >= $docCutoff) continue;
+            foreach (glob($dir . '/*') ?: [] as $f) {
+                if (is_file($f)) @unlink($f);
+            }
+            if (@rmdir($dir)) $docOrphans++;
+        }
+        // import-*.zip: worker je maže po zpracování — co tu leží >48 h, je sirotek.
+        foreach (glob($jobsDir . '/import-*.zip') ?: [] as $f) {
+            if ((int) (@filemtime($f) ?: 0) < $docCutoff && @unlink($f)) $docOrphans++;
+        }
+        // libzip mkstemp leftovery (`export-{id}.zip.XXXXXX`): worker zabitý
+        // uprostřed ZipArchive::close (OOM kill, reboot) nechá temp soubor,
+        // který nematchne export-*.zip a nikdo jiný ho nesmaže.
+        foreach (glob($jobsDir . '/*.zip.*') ?: [] as $f) {
+            if (is_file($f) && (int) (@filemtime($f) ?: 0) < $docCutoff && @unlink($f)) $docOrphans++;
+        }
+        // export-*.zip: bez živého (queued/running) nebo completed jobu je
+        // soubor sirotek — job spadl, nebo byl smazán dřív, než vznikl result.
+        foreach (glob($jobsDir . '/export-*.zip') ?: [] as $f) {
+            if ((int) (@filemtime($f) ?: 0) >= $docCutoff) continue;
+            $status = '';
+            if (preg_match('~/export-(\d+)\.zip$~', str_replace('\\', '/', $f), $m)) {
+                $docStatusStmt->execute([(int) $m[1]]);
+                $status = (string) ($docStatusStmt->fetchColumn() ?: '');
+            }
+            if (in_array($status, ['queued', 'running', 'completed'], true)) continue;
+            if (@unlink($f)) $docOrphans++;
+        }
+    }
+}
+$report['document_jobs_orphans'] = $docOrphans;
+
 // FORK 0905: automatické vysypání koše dokladů po retenci.
 // Per supplier: doc_trash_enabled=1 a doc_trash_retention_days>0 → doklady
 // (vydané i přijaté) s deleted_at starším než retence se TVRDĚ smažou přes
