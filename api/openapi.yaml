@@ -2951,6 +2951,80 @@ paths:
         '404': { description: "Příkaz nenalezen" }
         '422': { description: "Export selhal" }
 
+  /api/v1/purchase-invoices/batch-import/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Purchase invoices]
+      summary: Stav dávkového importu a nálezy validace
+      description: |
+        FORK (beevee85). Endpoint existuje jen se zapnutým příznakem
+        `purchase_invoice.batch_import.enabled`. VYPNUTÝ PŘÍZNAK ZNAMENÁ 404, NE 403 —
+        403 by prozradilo, že featura existuje a je jen vypnutá.
+
+        Cizí dávka vrací rovněž 404, ze stejného důvodu.
+
+        POZOR NA CESTU: `batch-import`, nikoli `import-batches`. To druhé už upstream
+        používá pro jiný koncept (dohledání dávky AI importu).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BatchImportDetail' }
+        '404': { description: "Dávka nenalezena — nebo příznak vypnutý" }
+
+  /api/v1/purchase-invoices/batch-import/{id}/results:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [Purchase invoices]
+      summary: Odeslání results.json k nezávislé validaci
+      description: |
+        FORK (beevee85). `results.json` je NEDŮVĚRYHODNÝ VSTUP — server nevěří ani
+        jednomu číslu a všechno si přepočítá sám. Nezakládá doklady, jen KONCEPTY
+        ke schválení člověkem.
+
+        TĚLO SE ČTE JAKO SYROVÝ TEXT, ne přes parsovaný JSON. Duplicitní klíče by
+        parser zahodil dřív, než je kontrola uvidí — a právě na jejich odhalení je
+        pravidlo V80 postavené. Klient proto nesmí tělo protahovat přes
+        `JSON.parse` + `JSON.stringify`.
+
+        Token jde HLAVIČKOU `X-Batch-Token`, ne v těle: v těle by ho zachytil každý
+        log requestů. Je to DRUHÝ FAKTOR, ne přihlášení — endpoint je za běžnou
+        autentizací a token jen váže požadavek na konkrétní dávku.
+      parameters:
+        - in: header
+          name: X-Batch-Token
+          required: true
+          schema: { type: string }
+          description: "Token dávky. Ověřuje se proti SHA-256 uloženému u dávky."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: string
+              description: "Syrový obsah `results.json`. Limit 8 MiB."
+      responses:
+        '200':
+          description: "Zvalidováno. `ok: false` znamená nálezy, ne chybu požadavku."
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BatchImportSubmitResult' }
+        '400': { description: "Neplatné ID, chybějící hlavička X-Batch-Token nebo prázdné tělo" }
+        '403': { description: "Neplatný token dávky" }
+        '409': { description: "Dávka už je v koncovém stavu — výsledky se přijímají jen jednou" }
+        '413': { description: "Tělo překračuje 8 MiB" }
+
   /api/v1/purchase-invoices/{id}/payment-qr:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -7055,6 +7129,95 @@ components:
         editable: { type: boolean }
         needs_account: { type: boolean }
         can_extract: { type: [boolean, "null"] }
+
+    BatchImportFinding:
+      type: object
+      description: |
+        FORK (beevee85) — jeden nález validace `results.json`.
+
+        `message` je REDIGOVANÝ. Server do něj nikdy nevkládá obsah cizího dokladu;
+        echo hodnoty je povolen jen u uzavřeného seznamu polí. Kdo potřebuje vidět
+        hodnotu, otevře doklad — nález ji nenese.
+      required: [rule, severity, pointer, message]
+      properties:
+        rule: { type: string, description: "ID pravidla z katalogu, např. `V43b`.", example: "V43b" }
+        severity: { type: string, enum: [fail, warn, info] }
+        pointer:
+          type: string
+          description: "JSON Pointer do `results.json` na místo nálezu."
+          example: "/documents/2/items/0/line_base"
+        message: { type: string }
+
+    BatchImportBatch:
+      type: object
+      description: "FORK (beevee85) — stav dávky. Hash tokenu se nevrací; je to tajemství, ne stav."
+      properties:
+        id: { type: integer, format: int64 }
+        status: { type: string, enum: [new, building, ready, submitted, validating, done, failed, cancelled] }
+        file_count: { type: integer }
+        total_bytes: { type: integer, format: int64 }
+        manifest_sha256: { type: [string, "null"] }
+        heartbeat_at: { type: [string, "null"], format: date-time }
+        error_code: { type: [string, "null"] }
+        error_message: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        applied_at: { type: [string, "null"], format: date-time }
+
+    BatchImportDetail:
+      type: object
+      description: |
+        FORK (beevee85) — stav dávky, soubory a nálezy.
+
+        `raw_json` ANI `normalized_json` SE NEVRACEJÍ, a to záměrně. Nesou obsah
+        cizích dokladů; UI potřebuje nálezy, ne obsah. Kdyby je endpoint vracel,
+        vzniklo by druhé místo, kudy osobní údaje odcházejí, a retence by ztratila
+        smysl — co odešlo, se nedá odmazat.
+      properties:
+        batch: { $ref: '#/components/schemas/BatchImportBatch' }
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer, format: int64 }
+              original_name:
+                type: string
+                description: "Jméno od uživatele. NA DISKU NENÍ — soubor se ukládá jako `<sha256>.pdf`."
+              stored_name: { type: string }
+              byte_size: { type: integer, format: int64 }
+              sha256: { type: string }
+              mime_type: { type: [string, "null"] }
+              page_count: { type: [integer, "null"] }
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer, format: int64 }
+              purchase_import_batch_file_id: { type: integer, format: int64 }
+              status: { type: string, enum: [pending, validated, rejected, applied] }
+              findings:
+                type: array
+                items: { $ref: '#/components/schemas/BatchImportFinding' }
+              purchase_invoice_id: { type: [integer, "null"], format: int64 }
+              raw_purged_at: { type: [string, "null"], format: date-time }
+              normalized_purged_at: { type: [string, "null"], format: date-time }
+              created_at: { type: string, format: date-time }
+
+    BatchImportSubmitResult:
+      type: object
+      description: |
+        FORK (beevee85) — výsledek validace.
+
+        `ok: false` NENÍ chyba požadavku: vrací se s HTTP 200. Neúspěšná validace
+        je výsledek, ne porucha, a UI ji potřebuje zobrazit i s nálezy.
+      required: [ok, batch_id, findings]
+      properties:
+        ok: { type: boolean }
+        batch_id: { type: integer, format: int64 }
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/BatchImportFinding' }
 
     WorkReportLinkStatus:
       type: object
