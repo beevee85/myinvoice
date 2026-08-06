@@ -92,9 +92,23 @@ final class ExportPurchaseInvoicesAction
         $archiveRoot = $this->resolveArchiveRoot();
         $archiveRootReal = realpath($archiveRoot);
 
-        $tmpZip = tempnam(sys_get_temp_dir(), 'pinv-zip-') . '.zip';
+        // tempnam() vytvoří placeholder BEZ přípony, ZIP vzniká až pod jménem
+        // s příponou. Kdo maže jen soubor s příponou, nechá po každém exportu
+        // v temp adresáři jeden nulový soubor navždy — proto se drží obojí
+        // a maže se ve všech větvích (chyba i shutdown hook).
+        $tmpBase = tempnam(sys_get_temp_dir(), 'pinv-zip-');
+        if ($tmpBase === false) {
+            return Json::error($response, 'zip_failed', 'Nelze vytvořit dočasný soubor.', 500);
+        }
+        $tmpZip = $tmpBase . '.zip';
+        $cleanup = static function () use ($tmpBase, $tmpZip): void {
+            if (is_file($tmpZip)) @unlink($tmpZip);
+            if (is_file($tmpBase)) @unlink($tmpBase);
+        };
+
         $zip = new ZipArchive();
         if ($zip->open($tmpZip, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            $cleanup();
             return Json::error($response, 'zip_failed', 'Nelze vytvořit ZIP.', 500);
         }
 
@@ -153,7 +167,7 @@ final class ExportPurchaseInvoicesAction
         $zip->close();
 
         if ($included === 0) {
-            @unlink($tmpZip);
+            $cleanup();
             return Json::error($response, 'no_invoices_processed',
                 "Za období {$period->label} se nepodařilo vyexportovat žádnou přijatou fakturu.",
                 500,
@@ -179,13 +193,11 @@ final class ExportPurchaseInvoicesAction
         $size = filesize($tmpZip);
         $fp = fopen($tmpZip, 'rb');
         if ($fp === false) {
-            @unlink($tmpZip);
+            $cleanup();
             return Json::error($response, 'zip_failed', 'Nelze otevřít ZIP ke streamu.', 500);
         }
         $stream = new Stream($fp);
-        register_shutdown_function(static function () use ($tmpZip): void {
-            if (is_file($tmpZip)) @unlink($tmpZip);
-        });
+        register_shutdown_function($cleanup);
 
         $r = $response
             ->withBody($stream)
@@ -246,9 +258,21 @@ final class ExportPurchaseInvoicesAction
      */
     private function exportIsdocZip(Response $response, Request $request, array $rows, ExportPeriod $period, int $supplierId): Response
     {
-        $tmpZip = tempnam(sys_get_temp_dir(), 'pinv-isdoc-') . '.zip';
+        // Stejný vzor jako u pdf-zip: placeholder z tempnam (bez přípony) se
+        // drží a maže spolu se ZIPem, jinak by po každém exportu zůstal sirotek.
+        $tmpBase = tempnam(sys_get_temp_dir(), 'pinv-isdoc-');
+        if ($tmpBase === false) {
+            return Json::error($response, 'zip_failed', 'Nelze vytvořit dočasný soubor.', 500);
+        }
+        $tmpZip = $tmpBase . '.zip';
+        $cleanup = static function () use ($tmpBase, $tmpZip): void {
+            if (is_file($tmpZip)) @unlink($tmpZip);
+            if (is_file($tmpBase)) @unlink($tmpBase);
+        };
+
         $zip = new ZipArchive();
         if ($zip->open($tmpZip, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            $cleanup();
             return Json::error($response, 'zip_failed', 'Nelze vytvořit ZIP.', 500);
         }
 
@@ -270,7 +294,7 @@ final class ExportPurchaseInvoicesAction
         $zip->close();
 
         if ($included === 0) {
-            @unlink($tmpZip);
+            $cleanup();
             return Json::error($response, 'no_invoices_processed',
                 'Nepodařilo se vyexportovat žádnou fakturu.', 500, ['errors' => $errors]);
         }
@@ -290,13 +314,11 @@ final class ExportPurchaseInvoicesAction
         $size = filesize($tmpZip);
         $fp = fopen($tmpZip, 'rb');
         if ($fp === false) {
-            @unlink($tmpZip);
+            $cleanup();
             return Json::error($response, 'zip_failed', 'Nelze otevřít ZIP ke streamu.', 500);
         }
         $stream = new Stream($fp);
-        register_shutdown_function(static function () use ($tmpZip): void {
-            if (is_file($tmpZip)) @unlink($tmpZip);
-        });
+        register_shutdown_function($cleanup);
 
         return $response
             ->withBody($stream)
