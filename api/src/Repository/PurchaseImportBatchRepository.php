@@ -98,6 +98,27 @@ final class PurchaseImportBatchRepository
     }
 
     /**
+     * Zapíše manifest dávky — jeho `sha256`, počet souborů a celkovou velikost.
+     * Proti tomuhle hashi se později ověřuje `results.json` (V4).
+     */
+    public function setManifest(
+        int $batchId,
+        int $supplierId,
+        string $manifestSha256,
+        int $fileCount,
+        int $totalBytes,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE purchase_import_batches
+                SET manifest_sha256 = ?, file_count = ?, total_bytes = ?
+              WHERE id = ? AND supplier_id = ?'
+        );
+        $stmt->execute([$manifestSha256, $fileCount, $totalBytes, $batchId, $supplierId]);
+
+        return $stmt->rowCount();
+    }
+
+    /**
      * Známka života workeru. Strop opuštěné dávky se počítá odsud, ne od
      * `created_at` — jinak by sweeper smazal běžící dlouhou dávku.
      */
