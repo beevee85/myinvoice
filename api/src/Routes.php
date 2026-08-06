@@ -418,6 +418,8 @@ final class Routes
                 \MyInvoice\Action\PurchaseInvoice\BatchImport\GetBatchPackageAction::class);
             $app->post('/api/purchase-invoices/batch-import/{id:[0-9]+}/results',
                 \MyInvoice\Action\PurchaseInvoice\BatchImport\SubmitResultsAction::class);
+            $app->post('/api/purchase-invoices/batch-import/{id:[0-9]+}/results/{resultId:[0-9]+}/apply',
+                \MyInvoice\Action\PurchaseInvoice\BatchImport\ApplyResultAction::class);
         }
 
         $app->post   ('/api/purchase-invoices/scan-inbox',                ScanInboxAction::class);

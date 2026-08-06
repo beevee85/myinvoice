@@ -264,12 +264,72 @@ final class PurchaseImportBatchRepository
     }
 
     // -----------------------------------------------------------------------
+    // Apply (vznik konceptů)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Jeden řádek výsledku, vázaný na dávku I tenanta. `raw_json` je tu záměrně —
+     * apply z něj čte doklad; po purge je null a apply to musí umět říct nahlas.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function findResult(int $resultId, int $batchId, int $supplierId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, purchase_import_batch_id, purchase_import_batch_file_id,
+                    supplier_id, status, raw_json, findings_json, purchase_invoice_id
+               FROM purchase_import_batch_results
+              WHERE id = ? AND purchase_import_batch_id = ? AND supplier_id = ?'
+        );
+        $stmt->execute([$resultId, $batchId, $supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : $this->cast($row);
+    }
+
+    /**
+     * Označí řádek jako aplikovaný. GUARD `status = validated` JE VE WHERE,
+     * ne v aplikaci: dvě souběžná schválení téhož řádku se tu potkají a druhé
+     * dostane rowCount 0 — bez zámku, bez race. Volající na 0 MUSÍ reagovat
+     * rollbackem, jinak by druhé schválení nechalo v DB svůj koncept.
+     */
+    public function markResultApplied(
+        int $resultId,
+        int $supplierId,
+        int $purchaseInvoiceId,
+        string $normalizedJson,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE purchase_import_batch_results
+                SET status = 'applied', purchase_invoice_id = ?, normalized_json = ?
+              WHERE id = ? AND supplier_id = ? AND status = 'validated'"
+        );
+        $stmt->execute([$purchaseInvoiceId, $normalizedJson, $resultId, $supplierId]);
+
+        return $stmt->rowCount();
+    }
+
+    /** Kolik řádků dávky ještě není aplikovaných. 0 = dávka může na `done`. */
+    public function countResultsNotApplied(int $batchId, int $supplierId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM purchase_import_batch_results
+              WHERE purchase_import_batch_id = ? AND supplier_id = ?
+                AND status <> 'applied'"
+        );
+        $stmt->execute([$batchId, $supplierId]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    // -----------------------------------------------------------------------
 
     /** @param array<string,mixed> $row @return array<string,mixed> */
     private function cast(array $row): array
     {
         foreach (['id', 'supplier_id', 'created_by_user_id', 'file_count', 'total_bytes',
-                  'byte_size', 'page_count'] as $k) {
+                  'byte_size', 'page_count', 'purchase_import_batch_id',
+                  'purchase_import_batch_file_id', 'purchase_invoice_id'] as $k) {
             if (array_key_exists($k, $row) && $row[$k] !== null) {
                 $row[$k] = (int) $row[$k];
             }

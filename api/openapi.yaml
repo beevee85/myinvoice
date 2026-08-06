@@ -3048,6 +3048,55 @@ paths:
         '404': { description: "Dávka nenalezena — nebo příznak vypnutý" }
         '500': { description: "manifest_mismatch, chybějící soubor na disku nebo selhání ZIPu" }
 
+  /api/v1/purchase-invoices/batch-import/{id}/results/{resultId}/apply:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+      - in: path
+        name: resultId
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [Purchase invoices]
+      summary: Schválení jednoho výsledku — vznik konceptu
+      description: |
+        FORK (beevee85). Jedno volání = jeden doklad = jeden KONCEPT přes
+        `PurchaseInvoiceWriteService` (stejná cesta jako ruční pořízení).
+        Hromadné schválení záměrně neexistuje.
+
+        Schválit lze jen řádek ve stavu `validated` — doklad s nálezem FAIL
+        (`rejected`) nejde schválit vůbec. Celý apply běží v jedné transakci;
+        souběžné druhé schválení téhož řádku dostane 409 a nic po něm nezbude.
+
+        Sazba DPH se hledá v číselníku PŘESNĚ — nenalezená sazba je 422,
+        ne tichých 0 %. Rozdíl přepočtených totálů proti papíru se přizná
+        varováním na konceptu (`extraction_warning`), nikdy se tiše nepřepíše.
+
+        Token se tu nežádá: váže odeslání výsledků, ne lidské schválení.
+      responses:
+        '201':
+          description: Koncept založen
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, purchase_invoice_id, warnings, batch_status]
+                properties:
+                  ok: { type: boolean }
+                  purchase_invoice_id: { type: integer, format: int64 }
+                  warnings:
+                    type: array
+                    items: { type: string }
+                  batch_status: { type: string, enum: [applying, done] }
+        '400': { description: "Chybí identita schvalujícího uživatele" }
+        '404': { description: "Dávka nebo výsledek nenalezen — nebo příznak vypnutý" }
+        '409': { description: "Výsledek odmítnutý/aplikovaný, dávka ve špatném stavu, nebo duplicitní doklad" }
+        '422': { description: "Sazba DPH z dokladu není v číselníku" }
+        '500': { description: "Surová data smazána retencí nebo nečitelná" }
+
   /api/v1/purchase-invoices/batch-import/{id}:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
