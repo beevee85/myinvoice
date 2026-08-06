@@ -7,8 +7,9 @@ namespace MyInvoice\Service\PurchaseBatchImport;
 /**
  * FORK (beevee85) — Commit 11d: orchestrátor doménové validace.
  *
- * Spojuje `StrictJson` (V80), `IdentityRules` (V15–V55) a `AmountRules` (V43–V81b)
- * a přidává to, co jde ověřit jen proti dávce: párování na manifest.
+ * Spojuje `StrictJson` (V80), `IdentityRules` (V15–V55), `AmountRules` (V43–V81b)
+ * a `QrCheck` (V33–V35) a přidává to, co jde ověřit jen proti dávce: párování
+ * na manifest.
  *
  * TOHLE JE MÍSTO, KDE PLATÍ „SERVERU SE NEVĚŘÍ ANI JEDNO ČÍSLO". `results.json`
  * neprošel naší validací a přišel zvenčí, takže se neověřuje jen jeho tvar, ale
@@ -48,6 +49,7 @@ final class ResultsValidator
         private readonly StrictJson $json,
         private readonly IdentityRules $identity,
         private readonly AmountRules $amounts,
+        private readonly QrCheck $qr,
     ) {}
 
     /**
@@ -55,9 +57,15 @@ final class ResultsValidator
      * @param list<array<string,mixed>> $manifestFiles  soubory dávky z databáze
      * @param array{ic: string, dic: string} $tenant
      * @param string $today                   „YYYY-MM-DD", injektovaný (V84)
+     * @param array<string,array{spayd: ?string, independence: string}> $qrBySha
+     *        dekódované QR per soubor (klíč = sha256). QR data NEJSOU součástí
+     *        `results.json` — to je rozhodnutí A2: kdyby SPAYD posílala extrakce,
+     *        kontrola by si ověřovala sama sebe. Plní je server z vlastního
+     *        dekodéru; bez dekodéru je mapa prázdná a každý doklad dostane
+     *        INFO „kontrola neproběhla" — poctivější než ticho.
      * @return array{ok: bool, findings: list<array<string,string>>}
      */
-    public function validate(string $raw, array $manifestFiles, array $tenant, string $today): array
+    public function validate(string $raw, array $manifestFiles, array $tenant, string $today, array $qrBySha = []): array
     {
         // 1. Tvar. Když neprojde, dál se nepokračuje — nemá co validovat.
         try {
@@ -122,10 +130,14 @@ final class ResultsValidator
             $seen[$sha] = true;
 
             // 3. Obsah dokladu.
+            $qrInput = $qrBySha[$sha]
+                ?? ['spayd' => null, 'independence' => QrCheck::INDEPENDENCE_UNAVAILABLE];
+
             $findings = array_merge(
                 $findings,
                 $this->identity->validate($doc, $tenant, $today, $p),
                 $this->amounts->validate($doc, $p),
+                $this->qr->verify($qrInput['spayd'], $qrInput['independence'], $doc, $p),
                 $this->suspiciousContent($doc, $p),
             );
         }

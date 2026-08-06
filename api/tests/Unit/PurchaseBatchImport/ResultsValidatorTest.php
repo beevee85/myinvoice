@@ -6,7 +6,9 @@ namespace MyInvoice\Tests\Unit\PurchaseBatchImport;
 
 use MyInvoice\Service\PurchaseBatchImport\AmountRules;
 use MyInvoice\Service\PurchaseBatchImport\IdentityRules;
+use MyInvoice\Service\PurchaseBatchImport\QrCheck;
 use MyInvoice\Service\PurchaseBatchImport\ResultsValidator;
+use MyInvoice\Service\PurchaseBatchImport\SpaydParser;
 use MyInvoice\Service\PurchaseBatchImport\StrictJson;
 use PHPUnit\Framework\TestCase;
 
@@ -31,6 +33,7 @@ final class ResultsValidatorTest extends TestCase
                            maxObjectKeys: 200, maxStringLength: 4096),
             new IdentityRules(),
             new AmountRules(),
+            new QrCheck(new SpaydParser()),
         );
     }
 
@@ -84,9 +87,9 @@ final class ResultsValidatorTest extends TestCase
         ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
     }
 
-    private function check(string $raw, array $shas): array
+    private function check(string $raw, array $shas, array $qrBySha = []): array
     {
-        return $this->validator()->validate($raw, $this->manifest($shas), $this->tenant(), self::TODAY);
+        return $this->validator()->validate($raw, $this->manifest($shas), $this->tenant(), self::TODAY, $qrBySha);
     }
 
     /** @return list<string> */
@@ -270,5 +273,111 @@ final class ResultsValidatorTest extends TestCase
         ])]), [self::SHA_A]);
 
         self::assertTrue($r['ok'], 'popisný řádek je INFO, ne důvod k odmítnutí dávky');
+    }
+
+    // -----------------------------------------------------------------------
+    // V33–V35 — QR kontrola na dávkové cestě
+    // -----------------------------------------------------------------------
+
+    /**
+     * Bez dekodéru MUSÍ každý doklad dostat INFO „kontrola neproběhla".
+     * Ticho by znamenalo, že se nedá rozeznat „QR souhlasí" od „nikdo se
+     * nedíval" — a to je přesně rozdíl, kvůli kterému má QrCheck tři stavy.
+     */
+    public function testWithoutDecoderEveryDocumentGetsUnavailableInfo(): void
+    {
+        $r = $this->check(
+            $this->payload([$this->document(self::SHA_A), $this->document(self::SHA_B)]),
+            [self::SHA_A, self::SHA_B],
+        );
+
+        self::assertTrue($r['ok'], 'chybějící dekodér nesmí dávku shodit');
+
+        $qrInfo = array_values(array_filter($r['findings'], static fn (array $f)
+            => $f['rule'] === 'V33' && $f['severity'] === 'info'
+               && str_contains($f['message'], 'dekodér')));
+
+        self::assertCount(2, $qrInfo, 'každý doklad musí mít vlastní INFO o neprovedené kontrole');
+        self::assertSame(['/documents/0', '/documents/1'],
+            array_column($qrInfo, 'pointer'));
+    }
+
+    /**
+     * QR data přicházejí MIMO `results.json` (A2) — kdyby je posílala extrakce,
+     * kontrola by si ověřovala sama sebe. Tady se ověřuje, že mapa $qrBySha
+     * skutečně teče až do QrCheck: plná nezávislost + jiná částka = FAIL V34.
+     */
+    public function testIndependentQrAmountMismatchFailsTheDocument(): void
+    {
+        $r = $this->check(
+            $this->payload([$this->document(self::SHA_A)]),
+            [self::SHA_A],
+            [self::SHA_A => [
+                'spayd'        => 'SPD*1.0*ACC:CZ6508000000001000000005*AM:999.00*CC:CZK*X-VS:2026001',
+                'independence' => QrCheck::INDEPENDENCE_FULL,
+            ]],
+        );
+
+        self::assertFalse($r['ok'], 'nezávislý QR s jinou částkou musí doklad shodit');
+        self::assertContains('V34', $this->rules($r));
+    }
+
+    /**
+     * `partial` (rastr dodala extrakce) smí jen varovat — kontrola, která si
+     * ověřuje sama sebe, nesmí mít sílu FAILu.
+     */
+    public function testDependentQrAmountMismatchOnlyWarns(): void
+    {
+        $r = $this->check(
+            $this->payload([$this->document(self::SHA_A)]),
+            [self::SHA_A],
+            [self::SHA_A => [
+                'spayd'        => 'SPD*1.0*ACC:CZ6508000000001000000005*AM:999.00*CC:CZK*X-VS:2026001',
+                'independence' => QrCheck::INDEPENDENCE_PARTIAL,
+            ]],
+        );
+
+        self::assertTrue($r['ok'], 'závislý QR nesmí dávku shodit');
+
+        $warns = array_filter($r['findings'], static fn (array $f)
+            => $f['rule'] === 'V34' && $f['severity'] === 'warn');
+        self::assertCount(1, $warns);
+    }
+
+    /** Varsymbol z QR se porovnává bez vedoucích nul; jiný symbol = FAIL. */
+    public function testIndependentQrVarsymbolMismatchFails(): void
+    {
+        $r = $this->check(
+            $this->payload([$this->document(self::SHA_A)]),
+            [self::SHA_A],
+            [self::SHA_A => [
+                'spayd'        => 'SPD*1.0*ACC:CZ6508000000001000000005*AM:121.00*CC:CZK*X-VS:999',
+                'independence' => QrCheck::INDEPENDENCE_FULL,
+            ]],
+        );
+
+        self::assertFalse($r['ok']);
+        self::assertContains('V35', $this->rules($r));
+    }
+
+    /**
+     * QR pro doklad vyřazený párováním (V4) se NESMÍ vyhodnocovat — doklad
+     * mluví o souboru, který v dávce není, takže jeho obsah nemá proti čemu
+     * stát. Kontrola obsahu vyřazeného dokladu by dávala nálezy bez podkladu.
+     */
+    public function testQrIsNotEvaluatedForDocumentRejectedByPairing(): void
+    {
+        $r = $this->check(
+            $this->payload([$this->document(self::SHA_UNKNOWN)]),
+            [self::SHA_A],
+            [self::SHA_UNKNOWN => [
+                'spayd'        => 'SPD*1.0*ACC:CZ6508000000001000000005*AM:999.00*CC:CZK*X-VS:2026001',
+                'independence' => QrCheck::INDEPENDENCE_FULL,
+            ]],
+        );
+
+        $v34 = array_filter($r['findings'], static fn (array $f) => $f['rule'] === 'V34');
+        self::assertSame([], array_values($v34),
+            'vyřazený doklad nesmí dostat QR nálezy — V4 ho vyřadilo dřív');
     }
 }

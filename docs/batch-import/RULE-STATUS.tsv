@@ -99,6 +99,15 @@
 # V33–V35 zůstávají nevynucené POCTIVĚ: `QrCheck` je hotový a otestovaný, ale
 # nikdo ho nevolá, takže na dávkové cestě nikdy nedoběhne. Napsaný kód není
 # vynucené pravidlo — a přesně tohle rozlišení je důvod, proč katalog existuje.
+#   ⤷ 6. 8. 2026: QrCheck ZAPOJEN do ResultsValidatoru — pojistka [7] to sama
+#     vynutila (3 červené hned po injektáži). Stav V33–V35 ale zůstává
+#     definovano-nevynuceno: v systému není dekodér QR rastru (A2 — volitelná
+#     závislost provozovatele), takže kontrola běží ve stavu `unavailable`
+#     a vydává INFO „kontrola neproběhla". Doklad s payment.iban navíc schéma
+#     results/1 vůbec nenese, takže V33 nemá doklad-stranu ani teoreticky;
+#     V34/V35 začnou porovnávat dnem, kdy dekodér vznikne. Zapojená kontrola,
+#     která přizná, že neběží, je víc než nezapojená — ale pořád to není
+#     vynucené pravidlo.
 
 V75	vynuceno-a-otestovano	test:Integration/PurchaseInvoice/PurchaseInvoiceWriteServiceTransactionTest	test:Integration/PurchaseInvoice/Characterization/PartialWriteCharacterizationTest
 V76	vynuceno-a-otestovano	test:Integration/PurchaseInvoice/ShadowValidationTest	test:Integration/PurchaseInvoice/HistoricalValidationScannerTest
@@ -156,9 +165,9 @@ V29	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implem
 V30	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
 V31	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
 V32	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno do dávkové cesty	od:2026-07-30	dnes:ANO
-V33	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno — QrCheck nikdo nevolá, ResultsValidator si ho neinjektuje	od:2026-07-30	dnes:NE
-V34	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno — QrCheck nikdo nevolá, ResultsValidator si ho neinjektuje	od:2026-07-30	dnes:NE
-V35	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:nezapojeno — QrCheck nikdo nevolá, ResultsValidator si ho neinjektuje	od:2026-07-30	dnes:NE
+V33	definovano-nevynuceno	vynuceni:dekodér QR rastru (A2 — volitelná závislost provozovatele)	blokuje:chybí dekodér QR — QrCheck zapojen do ResultsValidatoru, běží ve stavu unavailable a vydává INFO	od:2026-08-06	dnes:NE
+V34	definovano-nevynuceno	vynuceni:dekodér QR rastru (A2 — volitelná závislost provozovatele)	blokuje:chybí dekodér QR — QrCheck zapojen do ResultsValidatoru, běží ve stavu unavailable a vydává INFO	od:2026-08-06	dnes:NE
+V35	definovano-nevynuceno	vynuceni:dekodér QR rastru (A2 — volitelná závislost provozovatele)	blokuje:chybí dekodér QR — QrCheck zapojen do ResultsValidatoru, běží ve stavu unavailable a vydává INFO	od:2026-08-06	dnes:NE
 V36	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/IdentityRulesTest	cesta:davkovy-import	dnes:ČÁST
 V37	definovano-nevynuceno	vynuceni:dávková cesta, Commit 9–11	blokuje:implementace neexistuje	od:2026-07-30	dnes:NE
 V38	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/IdentityRulesTest	cesta:davkovy-import	dnes:NE

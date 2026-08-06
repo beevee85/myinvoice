@@ -292,6 +292,7 @@ final class BatchImportRuleCatalogTest extends TestCase
         'jádro neexistuje'        => 'no-code',
         'tabulky neexistují'      => 'no-code',
         'nezapojeno'              => 'not-wired',  // prefix
+        'chybí dekodér QR'        => 'other',      // prefix; V33–V35: zapojeno, běží unavailable (A2)
         'test neexistuje'         => 'other',
         'není implementace'       => 'no-code',    // prefix
         'jediný výskyt v repu'    => 'other',      // prefix
