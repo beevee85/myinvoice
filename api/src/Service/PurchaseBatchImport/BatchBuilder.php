@@ -117,6 +117,45 @@ final class BatchBuilder
         return ['batch_id' => $batchId, 'manifest' => $manifest, 'manifest_sha256' => $sha];
     }
 
+    /**
+     * Obsah balíčku pro stažení: soubory na disku + manifest ZNOVU SESTAVENÝ
+     * z databáze a OVĚŘENÝ proti hashi uloženému při založení dávky.
+     *
+     * Rekonstrukce žije ZDE, vedle konstrukce — kdyby ji dělala akce sama,
+     * měly by formát manifestu dva vlastníci a rozešly by se tiše. Ověření
+     * proti `manifest_sha256` navíc chytí zásah do řádků `files` po založení:
+     * balíček, jehož manifest nesedí na uložený hash, se NESMÍ vydat, protože
+     * proti témuž hashi se později ověřuje results.json (V4).
+     *
+     * @return array{manifest_json: string, dir: string, files: list<array<string,mixed>>}
+     *
+     * @throws BatchLimitException batch_not_found | manifest_mismatch
+     */
+    public function packageContents(int $batchId, int $supplierId): array
+    {
+        $batch = $this->repo->find($batchId, $supplierId);
+        if ($batch === null) {
+            throw new BatchLimitException('batch_not_found', 'Dávka neexistuje.');
+        }
+
+        $rows = $this->repo->filesForBatch($batchId, $supplierId);
+
+        $manifest = $this->manifest($batchId, array_map(static fn (array $r) => [
+            'sha256'        => (string) $r['sha256'],
+            'byte_size'     => (int) $r['byte_size'],
+            'original_name' => (string) $r['original_name'],
+        ], $rows));
+
+        $json = json_encode($manifest, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+
+        if (hash('sha256', $json) !== (string) ($batch['manifest_sha256'] ?? '')) {
+            throw new BatchLimitException('manifest_mismatch',
+                'Manifest rekonstruovaný z databáze nesedí na uložený hash — dávka byla po založení změněna.');
+        }
+
+        return ['manifest_json' => $json, 'dir' => $this->batchDir($batchId), 'files' => $rows];
+    }
+
     // -----------------------------------------------------------------------
 
     /**

@@ -408,8 +408,14 @@ final class Routes
                 ->get('purchase_invoice.batch_import.enabled', false);
 
         if ($batchImportEnabled) {
+            $app->get ('/api/purchase-invoices/batch-import',
+                \MyInvoice\Action\PurchaseInvoice\BatchImport\ListBatchesAction::class);
+            $app->post('/api/purchase-invoices/batch-import',
+                \MyInvoice\Action\PurchaseInvoice\BatchImport\CreateBatchAction::class);
             $app->get ('/api/purchase-invoices/batch-import/{id:[0-9]+}',
                 \MyInvoice\Action\PurchaseInvoice\BatchImport\GetBatchAction::class);
+            $app->get ('/api/purchase-invoices/batch-import/{id:[0-9]+}/package',
+                \MyInvoice\Action\PurchaseInvoice\BatchImport\GetBatchPackageAction::class);
             $app->post('/api/purchase-invoices/batch-import/{id:[0-9]+}/results',
                 \MyInvoice\Action\PurchaseInvoice\BatchImport\SubmitResultsAction::class);
         }

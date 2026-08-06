@@ -226,4 +226,56 @@ final class BatchBuilderTest extends TestCase
         $after = (int) $this->db->pdo()->query('SELECT COUNT(*) FROM purchase_import_batches')->fetchColumn();
         self::assertSame($before, $after, 'odmítnutá dávka nesmí nechat v databázi hlavičku');
     }
+
+    // -----------------------------------------------------------------------
+    // Balíček (packageContents)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Rekonstruovaný manifest musí bajtově sedět na ten z build() — jinak by
+     * balíček posílal uživatele vstříc jistému selhání V4 při validaci.
+     */
+    public function testPackageManifestMatchesTheOneFromBuild(): void
+    {
+        $r = $this->build([$this->pdf('faktura-a.pdf'), $this->pdf('faktura-b.pdf', 'y')]);
+
+        $pkg = $this->builder->packageContents((int) $r['batch_id'], $this->supplierId);
+
+        self::assertSame($r['manifest_sha256'], hash('sha256', $pkg['manifest_json']),
+            'rekonstrukce z DB musí dát týž manifest jako založení');
+        self::assertCount(2, $pkg['files']);
+        foreach ($pkg['files'] as $f) {
+            self::assertFileExists($pkg['dir'] . DIRECTORY_SEPARATOR . $f['stored_name'],
+                'soubor z manifestu musí ležet na disku');
+        }
+    }
+
+    /**
+     * Zásah do řádků `files` PO založení = balíček se NEVYDÁ. Proti uloženému
+     * hashi se později ověřuje results.json; vydat jiný manifest by znamenalo
+     * dvě pravdy o téže dávce.
+     */
+    public function testTamperedFileRowRefusesPackage(): void
+    {
+        $r = $this->build([$this->pdf('faktura-a.pdf')]);
+        $batchId = (int) $r['batch_id'];
+
+        $this->db->pdo()
+            ->prepare('UPDATE purchase_import_batch_files
+                          SET original_name = ?
+                        WHERE purchase_import_batch_id = ? AND supplier_id = ?')
+            ->execute(['podvrzene-jmeno.pdf', $batchId, $this->supplierId]);
+
+        $this->expectReason('manifest_mismatch',
+            fn () => $this->builder->packageContents($batchId, $this->supplierId));
+    }
+
+    /** Cizí dávka neexistuje — ani pro balíček. */
+    public function testForeignBatchHasNoPackage(): void
+    {
+        $r = $this->build([$this->pdf('faktura-a.pdf')]);
+
+        $this->expectReason('batch_not_found',
+            fn () => $this->builder->packageContents((int) $r['batch_id'], $this->supplierId + 999));
+    }
 }

@@ -2951,6 +2951,103 @@ paths:
         '404': { description: "Příkaz nenalezen" }
         '422': { description: "Export selhal" }
 
+  /api/v1/purchase-invoices/batch-import:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Purchase invoices]
+      summary: Seznam dávek dávkového importu
+      description: |
+        FORK (beevee85). Seznam dávek tenanta (nejnovější první). Routa existuje
+        jen se zapnutým příznakem `purchase_invoice.batch_import.enabled` —
+        200 = featura zapnutá, 404 = jako by neexistovala. Frontend tuhle
+        dvojznačnost využívá záměrně jako detekci příznaku.
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batches:
+                    type: array
+                    items: { $ref: '#/components/schemas/BatchImportBatch' }
+    post:
+      tags: [Purchase invoices]
+      summary: Založení dávky z nahraných PDF
+      description: |
+        FORK (beevee85). Multipart upload (`files[]`). O přijetí rozhoduje
+        OBSAH, ne přípona: magic bytes `%PDF-`, limity počtu a velikosti,
+        dedup podle sha256 — dávka je buď celá přijatelná, nebo se neuloží nic.
+
+        ODPOVĚĎ OBSAHUJE TOKEN DÁVKY PRÁVĚ JEDNOU. Do databáze jde jen jeho
+        SHA-256; kdo si token neuloží, výsledky už neodešle. Obnovitelný token
+        by přestal být druhým faktorem.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files[]:
+                  type: array
+                  items: { type: string, format: binary }
+      responses:
+        '201':
+          description: Dávka založena
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, batch_id, token]
+                properties:
+                  ok: { type: boolean }
+                  batch_id: { type: integer, format: int64 }
+                  token:
+                    type: string
+                    description: "Plaintext token dávky — zobrazuje se POUZE TEĎ."
+                  token_expires_at: { type: [string, "null"], format: date-time }
+                  manifest_sha256: { type: string }
+                  file_count: { type: integer }
+                  total_bytes: { type: integer, format: int64 }
+        '400': { description: "Žádný soubor, vadný soubor (není PDF, prázdný, duplicitní) nebo chybí supplier kontext" }
+        '413': { description: "Překročen limit počtu souborů nebo velikosti (max_files / max_file_bytes / max_batch_bytes)" }
+        '500': { description: "Úložiště nedostupné nebo zápis selhal" }
+
+  /api/v1/purchase-invoices/batch-import/{id}/package:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Purchase invoices]
+      summary: Balíček dávky pro lokální extrakci (ZIP)
+      description: |
+        FORK (beevee85). ZIP s PDF pod jmény `<sha256>.pdf`, `manifest.json`
+        a `prompt.txt`. Manifest je rekonstruovaný z databáze a OVĚŘENÝ proti
+        hashi uloženému při založení — dávka změněná po založení balíček
+        nevydá (500 `manifest_mismatch`), protože proti témuž hashi se
+        později validuje results.json.
+
+        TOKEN V BALÍČKU NENÍ — balíček smí ležet na disku a sdílet se
+        s nástrojem, token je druhý faktor.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        '404': { description: "Dávka nenalezena — nebo příznak vypnutý" }
+        '500': { description: "manifest_mismatch, chybějící soubor na disku nebo selhání ZIPu" }
+
   /api/v1/purchase-invoices/batch-import/{id}:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
