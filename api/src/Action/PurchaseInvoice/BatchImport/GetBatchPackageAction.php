@@ -55,9 +55,28 @@ final class GetBatchPackageAction
             return Json::error($response, $e->reasonCode(), $e->getMessage(), 500);
         }
 
-        $tmpZip = tempnam(sys_get_temp_dir(), 'batch-pkg-') . '.zip';
+        // POZOR NA VZOR `tempnam() . '.zip'`, který má zbytek repa: placeholder
+        // vytvořený tempnam (bez přípony) se pak nikdy nesmaže a každé stažení
+        // nechá v temp adresáři jeden soubor navždy (nález review). Tady se
+        // placeholder drží a maže spolu se ZIPem.
+        $tmpBase = tempnam(sys_get_temp_dir(), 'batch-pkg-');
+        if ($tmpBase === false) {
+            return Json::error($response, 'zip_failed', 'Nelze vytvořit dočasný soubor.', 500);
+        }
+        $tmpZip = $tmpBase . '.zip';
+        $cleanup = static function () use ($tmpBase, $tmpZip): void {
+            if (is_file($tmpZip)) {
+                @unlink($tmpZip);
+            }
+            if (is_file($tmpBase)) {
+                @unlink($tmpBase);
+            }
+        };
+
         $zip = new ZipArchive();
         if ($zip->open($tmpZip, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            $cleanup();
+
             return Json::error($response, 'zip_failed', 'Nelze vytvořit ZIP.', 500);
         }
 
@@ -68,7 +87,7 @@ final class GetBatchPackageAction
             $abs = $contents['dir'] . DIRECTORY_SEPARATOR . $stored;
             if (!is_file($abs)) {
                 $zip->close();
-                @unlink($tmpZip);
+                $cleanup();
 
                 // Soubor v DB, ale ne na disku — to je porucha úložiště, ne 404.
                 return Json::error($response, 'file_missing',
@@ -84,17 +103,13 @@ final class GetBatchPackageAction
         $size = filesize($tmpZip);
         $fp = fopen($tmpZip, 'rb');
         if ($fp === false) {
-            @unlink($tmpZip);
+            $cleanup();
 
             return Json::error($response, 'zip_failed', 'Nelze otevřít ZIP ke streamu.', 500);
         }
         // Streamem z disku, ne přes paměť — dávka smí mít až 200 MiB.
         $stream = new Stream($fp);
-        register_shutdown_function(static function () use ($tmpZip): void {
-            if (is_file($tmpZip)) {
-                @unlink($tmpZip);
-            }
-        });
+        register_shutdown_function($cleanup);
 
         return $response
             ->withBody($stream)

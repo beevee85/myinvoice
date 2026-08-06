@@ -49,10 +49,17 @@ final class BatchImportOpenApiCoverageTest extends TestCase
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
 
+        // KLÍČEM JE „METODA cesta", ne jen cesta. Review našlo, že dedup podle
+        // vzoru zploštil GET a POST /batch-import na jeden záznam a kontrola
+        // byla k metodě slepá: smazaný blok `post:` ve specifikaci prošel,
+        // protože klíč cesty držel `get:`.
         $out = [];
         foreach ($app->getRouteCollector()->getRoutes() as $route) {
-            if (str_contains($route->getPattern(), '/batch-import')) {
-                $out[$route->getPattern()] = true;
+            if (!str_contains($route->getPattern(), '/batch-import')) {
+                continue;
+            }
+            foreach ($route->getMethods() as $method) {
+                $out[$method . ' ' . $route->getPattern()] = true;
             }
         }
 
@@ -67,55 +74,102 @@ final class BatchImportOpenApiCoverageTest extends TestCase
         return $patterns;
     }
 
+    /**
+     * Mapa cesta → seznam metod ze specifikace. Parsuje se řádkově: klíč cesty
+     * na dvou mezerách, operace na čtyřech; `components:` sekci paths ukončí,
+     * aby se nic pod ní nepřipsalo poslední cestě.
+     *
+     * @return array<string,list<string>>
+     */
+    private function specOperations(): array
+    {
+        $lines = explode("\n", (string) file_get_contents(dirname(__DIR__, 2) . '/openapi.yaml'));
+
+        $ops = [];
+        $current = null;
+        foreach ($lines as $line) {
+            if (preg_match('/^components:/', $line)) {
+                $current = null;
+                continue;
+            }
+            if (preg_match('/^  (\/api\/v1\/[^:]+):/', $line, $m)) {
+                $current = $m[1];
+                $ops[$current] ??= [];
+                continue;
+            }
+            if ($current !== null && preg_match('/^    (get|post|put|patch|delete):/', $line, $m)) {
+                $ops[$current][] = strtoupper($m[1]);
+            }
+        }
+
+        return $ops;
+    }
+
     public function testEveryRegisteredBatchImportRouteHasASpecEntry(): void
     {
-        $spec = (string) file_get_contents(dirname(__DIR__, 2) . '/openapi.yaml');
-        self::assertNotSame('', $spec, 'openapi.yaml se nenačetl — kontrola by neměla co porovnávat.');
+        $ops = $this->specOperations();
+        self::assertNotSame([], $ops, 'openapi.yaml nevydal žádné cesty — parser by neměl co porovnávat.');
 
         $missing = [];
-        foreach ($this->batchImportPatterns() as $pattern) {
+        foreach ($this->batchImportPatterns() as $methodPattern) {
+            [$method, $pattern] = explode(' ', $methodPattern, 2);
             $path = self::toSpecPath($pattern);
-            if (!str_contains($spec, "\n  {$path}:")) {
-                $missing[] = "{$pattern} → očekáváno '{$path}:' v openapi.yaml";
+
+            if (!in_array($method, $ops[$path] ?? [], true)) {
+                $missing[] = "{$methodPattern} → očekávána operace " . strtolower($method) . ": pod '{$path}:'";
             }
         }
 
         self::assertSame([], $missing,
-            "routa bez záznamu ve specifikaci:\n  " . implode("\n  ", $missing));
+            "routa bez operace ve specifikaci:\n  " . implode("\n  ", $missing));
     }
 
     /**
-     * Popis nesmí být prázdná slupka.
+     * Popis nesmí být prázdná slupka — a to PER OPERACE, ne per cesta.
      *
-     * Bez tohohle by šlo pojistku uspokojit holým klíčem cesty bez jediného slova
-     * — zelená za to, že řetězec existuje. Kontroluje se `summary:`, protože
-     * to je minimum, které integrátorovi řekne, k čemu endpoint je.
+     * Bez tohohle by šlo pojistku uspokojit holým klíčem bez jediného slova.
+     * Review našlo starší slabinu: summary GETu uspokojilo i POST na téže
+     * cestě. Teď se `summary:` hledá uvnitř bloku konkrétní operace.
      */
-    public function testEverySpecEntryForOurRoutesCarriesASummary(): void
+    public function testEverySpecOperationForOurRoutesCarriesASummary(): void
     {
         $lines = explode("\n", (string) file_get_contents(dirname(__DIR__, 2) . '/openapi.yaml'));
 
         $wanted = [];
-        foreach ($this->batchImportPatterns() as $pattern) {
-            $wanted[self::toSpecPath($pattern)] = false;
+        foreach ($this->batchImportPatterns() as $methodPattern) {
+            [$method, $pattern] = explode(' ', $methodPattern, 2);
+            $wanted[self::toSpecPath($pattern) . ' ' . strtolower($method)] = false;
         }
 
-        $current = null;
+        $currentPath = null;
+        $currentOp   = null;
         foreach ($lines as $line) {
-            if (preg_match('/^  (\/api\/v1\/[^:]+):/', $line, $m)) {
-                $current = $m[1];
+            if (preg_match('/^components:/', $line)) {
+                $currentPath = $currentOp = null;
                 continue;
             }
-            if ($current !== null && array_key_exists($current, $wanted)
+            if (preg_match('/^  (\/api\/v1\/[^:]+):/', $line, $m)) {
+                $currentPath = $m[1];
+                $currentOp   = null;
+                continue;
+            }
+            if ($currentPath !== null && preg_match('/^    (get|post|put|patch|delete):/', $line, $m)) {
+                $currentOp = $m[1];
+                continue;
+            }
+            if ($currentPath !== null && $currentOp !== null
                 && preg_match('/^\s+summary:\s*\S/', $line)) {
-                $wanted[$current] = true;
+                $key = $currentPath . ' ' . $currentOp;
+                if (array_key_exists($key, $wanted)) {
+                    $wanted[$key] = true;
+                }
             }
         }
 
         $withoutSummary = array_keys(array_filter($wanted, static fn (bool $ok) => !$ok));
 
         self::assertSame([], $withoutSummary,
-            'záznam ve specifikaci bez `summary:` — klíč cesty sám o sobě nic nedokumentuje: '
+            'operace ve specifikaci bez `summary:` — klíč sám o sobě nic nedokumentuje: '
             . implode(', ', $withoutSummary));
     }
 }

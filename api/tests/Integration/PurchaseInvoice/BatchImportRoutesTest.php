@@ -86,8 +86,23 @@ final class BatchImportRoutesTest extends TestCase
 
         if ($enabled) {
             self::assertNotSame([], $routes, 'se zapnutým příznakem musí routy existovat');
-            self::assertContains('POST /api/purchase-invoices/batch-import/{id:[0-9]+}/results', $routes);
-            self::assertContains('GET /api/purchase-invoices/batch-import/{id:[0-9]+}', $routes);
+            // VŠECHNY routy featury, ne vzorek. Review našlo, že test hlídal jen
+            // dvě z šesti — smazaná registrace apply by prošla zeleně, protože
+            // OpenAPI pojistka kontroluje jen směr routy→spec (zmizelá routa
+            // ze sbírky zmizí i z kontroly).
+            $expected = [
+                'GET /api/purchase-invoices/batch-import',
+                'POST /api/purchase-invoices/batch-import',
+                'GET /api/purchase-invoices/batch-import/{id:[0-9]+}',
+                'GET /api/purchase-invoices/batch-import/{id:[0-9]+}/package',
+                'POST /api/purchase-invoices/batch-import/{id:[0-9]+}/results',
+                'POST /api/purchase-invoices/batch-import/{id:[0-9]+}/results/{resultId:[0-9]+}/apply',
+            ];
+            sort($expected);
+            $actual = $routes;
+            sort($actual);
+            self::assertSame($expected, $actual,
+                'množina rout featury musí sedět PŘESNĚ — nová routa sem patří v témže commitu');
         } else {
             self::assertSame([], $routes,
                 'vypnutý příznak nesmí routy registrovat vůbec — jinak 403 prozradí, že featura existuje');

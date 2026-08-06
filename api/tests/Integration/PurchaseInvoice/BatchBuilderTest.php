@@ -206,8 +206,18 @@ final class BatchBuilderTest extends TestCase
     /** V79 — limit počtu dokladů; ověřuje se PŘED jakýmkoli zápisem. */
     public function testRejectsBatchOverFileCountLimit(): void
     {
+        // Limit ZE SKUTEČNÉ konfigurace instance — natvrdo zapsaných 51 by na
+        // instanci s limitem ≥ 51 zčervenalo a s limitem < 50 měřilo něco
+        // jiného, než si myslí (nález review o config-závislé fixtuře).
+        $limit = (int) Bootstrap::buildApp()->getContainer()
+            ->get(\MyInvoice\Infrastructure\Config\Config::class)
+            ->get('purchase_invoice.batch_import.max_files', 50);
+        if ($limit > 200) {
+            $this->markTestSkipped("max_files={$limit} — stavět {$limit}+1 fixtur nemá smysl.");
+        }
+
         $uploads = [];
-        for ($i = 0; $i < 51; $i++) {
+        for ($i = 0; $i <= $limit; $i++) {
             $uploads[] = $this->pdf("f{$i}.pdf", chr(97 + ($i % 26)) . $i);
         }
         $this->expectReason('max_files', fn () => $this->build($uploads));
