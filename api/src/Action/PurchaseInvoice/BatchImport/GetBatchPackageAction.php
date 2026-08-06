@@ -55,10 +55,10 @@ final class GetBatchPackageAction
             return Json::error($response, $e->reasonCode(), $e->getMessage(), 500);
         }
 
-        // POZOR NA VZOR `tempnam() . '.zip'`, který má zbytek repa: placeholder
-        // vytvořený tempnam (bez přípony) se pak nikdy nesmaže a každé stažení
-        // nechá v temp adresáři jeden soubor navždy (nález review). Tady se
-        // placeholder drží a maže spolu se ZIPem.
+        // POZOR NA VZOR `tempnam() . '.zip'`, který míval zbytek repa (vymýceno
+        // v Commitech 26 a 29): placeholder vytvořený tempnam (bez přípony) se
+        // pak nikdy nesmaže a každé stažení nechá v temp adresáři jeden soubor
+        // navždy (nález review). Tady se placeholder drží a maže spolu se ZIPem.
         $tmpBase = tempnam(sys_get_temp_dir(), 'batch-pkg-');
         if ($tmpBase === false) {
             return Json::error($response, 'zip_failed', 'Nelze vytvořit dočasný soubor.', 500);
