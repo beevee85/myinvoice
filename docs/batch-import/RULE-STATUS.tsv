@@ -114,7 +114,7 @@ V76	vynuceno-a-otestovano	test:Integration/PurchaseInvoice/ShadowValidationTest	
 V77	definovano-nevynuceno	vynuceni:Architecture/PurchaseInvoiceCreationPathsTest	blokuje:RULE-PATH-MATRIX.md	od:2026-07-29
 V78	definovano-nevynuceno	vynuceni:doménový validátor, Commit 11	blokuje:kód neexistuje	od:2026-07-30
 V79	definovano-nevynuceno	vynuceni:JSON Schema validátor, Commit 9	blokuje:kód neexistuje	od:2026-07-30
-V79b	definovano-nevynuceno	vynuceni:retence raw_json/normalized_json, Commit 7	blokuje:tabulky neexistují	od:2026-07-30
+V79b	vynuceno-a-otestovano	test:Integration/PurchaseInvoice/ResultsIntakeTest	test:Integration/PurchaseInvoice/BatchApplyTest	cesta:davkovy-import
 V80	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/StrictJsonTest	test:Unit/PurchaseBatchImport/ResultsValidatorTest	cesta:davkovy-import
 V81a	definovano-nevynuceno	vynuceni:statická kontrola nad naším jmenným prostorem	blokuje:kód neexistuje	od:2026-07-30
 V81b	vynuceno-a-otestovano	test:Unit/PurchaseBatchImport/AmountRulesTest	cesta:davkovy-import
