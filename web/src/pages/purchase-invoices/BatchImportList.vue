@@ -20,6 +20,9 @@ import {
 const { t } = useI18n()
 const router = useRouter()
 
+/** true = vloženo jako záložka stránky AI importu — hlavičku nese záložka. */
+withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
+
 const batches = ref<BatchListItem[]>([])
 const loading = ref(false)
 const loadError = ref<string | null>(null)
@@ -102,12 +105,15 @@ load()
 
 <template>
   <div class="space-y-6">
-    <header>
+    <header v-if="!embedded">
       <h1 class="text-xl font-semibold">{{ t('batch_import.list_title') }}</h1>
       <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
         {{ t('batch_import.list_subtitle') }}
       </p>
     </header>
+    <p v-else class="text-sm text-slate-600 dark:text-slate-400">
+      {{ t('batch_import.list_subtitle') }}
+    </p>
 
     <!-- Nová dávka -->
     <section class="rounded-lg border border-slate-200 p-4 dark:border-slate-700">

@@ -387,7 +387,6 @@
     "imports": "Imports",
     "imports_issued": "Imports (issued)",
     "imports_purchase": "Imports (purchase)",
-    "batch_import": "Batch import",
     "ai_import": "AI import",
     "integrations": "External integrations",
     "crm": "CRM",
@@ -4443,6 +4442,9 @@
       "delete_confirm": "Really remove Fakturoid credentials?",
       "deleted": "Fakturoid credentials removed",
       "coming_hint": "—"
+    },
+    "batch": {
+      "tab": "Batch import"
     },
     "ai": {
       "tab": "AI extraction",
