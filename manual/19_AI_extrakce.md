@@ -85,3 +85,78 @@ bez DPH), doklad automaticky daňově připraví:
   — zkontroluj hlavně zboží vs. služba a případně změň kód (23 ↔ 24).
 
 Detail daňové logiky viz [§ 17.2.6](17_Prijate_faktury.md#1726-reverse-charge-z-eu-porizeni-zbozi-vs-sluzba).
+
+## 19.9 Dávkový import přes předplatné (rozšíření forku)
+
+Hromadný import přijatých faktur z PDF **bez API kreditů**: extrakci dat
+neprovádí server, ale **lokální nástroj u tebe** (např. Claude v rámci
+předplatného). Server výsledkům **nevěří ani jedno číslo** — všechno si
+nezávisle přepočítá a z ověřených dokladů vzniknou **jen koncepty** ke
+schválení.
+
+Najdeš ho v menu **Nákup → Dávkový import**. Položka se zobrazuje jen tehdy,
+když je funkce zapnutá v konfiguraci (viz konec kapitoly).
+
+### Postup krok za krokem
+
+1. **Nahraj PDF** (max 50 souborů, každý do 20 MB). O přijetí rozhoduje obsah
+   souboru, ne přípona — cokoli, co není PDF, dávku odmítne celou.
+2. **Ulož si token dávky.** Zobrazí se **pouze jednou** — server ukládá jen
+   jeho otisk a podruhé ho nevydá. Bez tokenu výsledky neodešleš a dávku
+   musíš založit znovu. Platnost tokenu je omezená (výchozí 2 hodiny).
+3. **Stáhni balíček** (ZIP): PDF pod jmény `<sha256>.pdf`, `manifest.json`
+   a `prompt.txt` s přesným zadáním pro extrakční nástroj.
+4. **Spusť lokální extrakci** — nástroji předáš balíček a prompt; výstupem je
+   soubor `results.json`.
+5. Na stránce dávky **vlož token a obsah `results.json`** přesně tak, jak ho
+   nástroj vytvořil. Neupravuj ho — server ověřuje i věci, které by úprava
+   zahladila (např. duplicitní klíče).
+6. **Schvaluj po dokladech.** U každého ověřeného dokladu je tlačítko
+   **Schválit → koncept**; hromadné „přijmout vše" záměrně neexistuje.
+   Doklad s chybou (FAIL) schválit nejde — oprav extrakci a založ nové kolo.
+
+### Co server kontroluje
+
+| Kontrola | Při neshodě |
+|---|---|
+| Odpověď mluví o téže dávce (párování přes otisky souborů) | celá dávka se odmítne |
+| Součty: řádky = základ, základ + DPH = celkem (na haléř přesně) | doklad FAIL |
+| IČO dodavatele (kontrolní součet), odběratel = tvoje firma | doklad FAIL |
+| Datumy (tvar, splatnost ≥ vystavení, ne v budoucnosti) | doklad FAIL |
+| Duplicitní doklad v evidenci (dodavatel + číslo + datum) | schválení se odmítne |
+| Sazba DPH proti číselníku — **žádný tichý fallback** | schválení se odmítne |
+
+### Koncepty a varování
+
+Vše končí jako **koncept** — interní číslo dostane doklad až při přechodu na
+*Přijatá*, variabilní symbol dodavatele se ukládá zvlášť. Na konceptu se může
+objevit žluté upozornění, které **nic neblokuje, ale chce tvou kontrolu**:
+
+- přepočtený součet nesedí na částku z dokladu (typicky jiné zaokrouhlení DPH),
+- extrakce si dokladem nebyla jistá (`confidence: low`),
+- **dobropis** byl na papíře kladně — do evidence se založil se zápornými
+  množstvími (stejná konvence jako AI import),
+- měna dokladu nebyla v číselníku a založila se jako neaktivní nákupní,
+- doklad odkazuje na zálohy — vazby (§ 37a) je třeba napárovat ručně.
+
+> [!WARNING]
+> **Soukromí a retence:** obsah dokladů neopouští server — API vrací jen
+> nálezy kontrol, nikdy text dokladu. Po dokončení nebo selhání dávky se
+> nahraná PDF i surová data automaticky mažou; opuštěné dávky uklízí noční
+> úloha. Rozpracovaná dávka čekající na tvoje schválení se nemaže nikdy.
+
+### Zapnutí
+
+Funkce je vypnutá, dokud ji nezapneš v `cfg.php` (v Dockeru `cfg.docker.php`):
+
+```php
+'purchase_invoice' => [
+    'batch_import' => [
+        'enabled' => true,
+    ],
+],
+```
+
+Po změně konfigurace v Dockeru **restartuj aplikační kontejner** — běžící
+PHP si změnu jinak nenačte. Vypnutá funkce není vidět v menu a její adresy
+vrací 404, jako by neexistovala.
