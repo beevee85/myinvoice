@@ -4,9 +4,16 @@ Instalace: `faktury.example.com`, VPS, `/opt/myinvoice`. Pravidla práce viz `CL
 
 Po každém updatu z upstreamu projdi celý seznam níže a ověř, že žádná úprava tiše nevypadla.
 
-## Plán: co nabídnout do oficiální větve (upstream `radekhulan/myinvoice`)
+## Plán: co nabídnout do oficiální větve
 
-Uživatel chce tyto fork funkce navrhnout autorovi. Detailní checklist „před odesláním upstreamu" je vždy u příslušné sekce níže.
+> **ROZHODNUTÍ 7. 8. 2026:** cílem příspěvků je **MyÚčto.cz** (`radekhulan/myucto`),
+> nástupce, kam se přesunul vývoj (viz v4.53.2) — NE MyInvoice. **Zatím se ale NIC
+> NEODESÍLÁ**, jen zaznamenaný směr. Nic nepublikovat bez nového výslovného pokynu
+> uživatele. Až dojde: nejdřív prozkoumat MyÚčto (co už z toho existuje), přečíslovat
+> migrace do jeho řady, pak teprve PR. Checklisty „před odesláním" u jednotlivých
+> sekcí níž platí dál, jen míří na jiný repozitář.
+
+Uživatel chce tyto fork funkce navrhnout autorovi (do MyÚčta). Detailní checklist „před odesláním upstreamu" je vždy u příslušné sekce níže.
 
 | Funkce | Sekce | Stav | Hlavní překážka před PR |
 |---|---|---|---|
