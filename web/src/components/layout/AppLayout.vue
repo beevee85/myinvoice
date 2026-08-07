@@ -202,10 +202,11 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/clients?role=vendors',       label: t('nav.vendors'),            icon: ICONS.suppliers, newTo: '/clients/new?role=vendor' },
         { to: '/purchase-invoices/payment-orders', label: t('nav.payment_orders'), icon: ICONS.payment_orders },
         { to: '/purchase-invoices/export',   label: t('nav.purchase_export'),    icon: ICONS.exports },
-        // FORK: jen když backend flag žije (viz loadBatchImportMenu).
-        ...(batchImportEnabled.value ? [{ to: '/purchase-invoices/batch-import', label: t('nav.batch_import'), icon: ICONS.imports }] : []),
         ...(isAdmin ? [{ to: '/admin/import?tab=purchase',  label: t('nav.imports_purchase'), icon: ICONS.imports }] : []),
         ...(isAdmin ? [{ to: '/admin/integrations?tab=ai',  label: t('nav.ai_import'),        icon: ICONS.ai }] : []),
+        // FORK: naše rozšíření → až POD upstreamové položky (přání uživatele);
+        // zobrazuje se jen když backend flag žije (viz loadBatchImportMenu).
+        ...(batchImportEnabled.value ? [{ to: '/purchase-invoices/batch-import', label: t('nav.batch_import'), icon: ICONS.imports }] : []),
       ],
     },
     {
