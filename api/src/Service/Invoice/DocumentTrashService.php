@@ -128,6 +128,13 @@ final class DocumentTrashService
             'bank_matches'=> $this->rowsFor('payment_matches', 'invoice_id', $id),
             'attachments' => $this->rowsFor('invoice_attachments', 'invoice_id', $id),
             'pdf_history' => $this->rowsFor('invoice_pdfs', 'invoice_id', $id),
+            // Audit 2026-08-07: výkazy práce jdou dolů KASKÁDOU (fk_wr_invoice
+            // ON DELETE CASCADE, i work_report_items/materials) — bez nich by
+            // snapshot nebyl „kompletní JSON otisk" (0905) a nenávratně by zmizel
+            // podklad hodinové fakturace i případného sporu.
+            'work_reports'          => $this->rowsFor('work_reports', 'invoice_id', $id),
+            'work_report_items'     => $this->workReportChildren('work_report_items', $id),
+            'work_report_materials' => $this->workReportChildren('work_report_materials', $id),
             'children'    => $children,
         ]);
 
@@ -302,6 +309,23 @@ final class DocumentTrashService
     {
         $st = $this->db->pdo()->prepare("SELECT * FROM $table WHERE $column = ?");
         $st->execute([$id]);
+        return $st->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Řádky vázané na výkazy práce faktury (přes work_report_id). Do snapshotu
+     * před tvrdým smazáním — kaskáda je jinak smaže bez otisku.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function workReportChildren(string $table, int $invoiceId): array
+    {
+        $st = $this->db->pdo()->prepare(
+            "SELECT t.* FROM $table t
+               JOIN work_reports wr ON wr.id = t.work_report_id
+              WHERE wr.invoice_id = ?"
+        );
+        $st->execute([$invoiceId]);
         return $st->fetchAll(\PDO::FETCH_ASSOC);
     }
 

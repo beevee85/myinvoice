@@ -83,7 +83,21 @@ final class Money
         $neg   = str_starts_with($quantity, '-');
         $body  = $neg ? substr($quantity, 1) : $quantity;
         $parts = explode('.', $body, 2);
+
+        // Audit 2026-08-07: rozsah PŘED přetypováním. Bez toho by 16+ciferné
+        // množství (OCR slepí číslo účtu do quantity) přeteklo (int) do floatu
+        // a intdiv(float) by pod strict_types hodil TypeError → 500 místo
+        // validačního nálezu. Reálné množství tolik číslic nemá.
+        if (strlen($parts[0]) > 12) {
+            throw new MoneyFormatException($quantity);
+        }
         $milli = ((int) $parts[0]) * 1000 + (int) str_pad($parts[1] ?? '', 3, '0');
+
+        // Součin haléře × tisíciny taky může přetéct int64 (velké cents × velké
+        // milli). Kontrola PŘED násobením — po přetečení už je pozdě.
+        if ($this->cents !== 0 && abs($milli) > intdiv(PHP_INT_MAX, abs($this->cents))) {
+            throw new MoneyFormatException($quantity);
+        }
 
         $product = $this->cents * $milli;                 // haléře × tisíciny
         $rounded = intdiv(abs($product) + 500, 1000);      // half-up

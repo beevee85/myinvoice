@@ -94,6 +94,23 @@ final class IdentityRulesTest extends TestCase
         self::assertContains('V17', $this->failIds($f));
     }
 
+    /**
+     * Audit 2026-08-07: název delší než sloupec clients.company_name VARCHAR(190)
+     * musí být FAIL už při validaci — jinak apply spadl na SQLSTATE 22001 (500)
+     * a dávka uvízla ve `validating`. Měří se v bajtech (diakritika je vícebajtová).
+     */
+    public function testOverlongVendorNameIsAFailure(): void
+    {
+        $f = $this->check(['vendor' => ['company_name' => str_repeat('A', 191), 'ic' => self::ICO_VENDOR]]);
+        self::assertContains('V17', $this->failIds($f));
+    }
+
+    public function testVendorNameAtLimitPasses(): void
+    {
+        $f = $this->check(['vendor' => ['company_name' => str_repeat('A', 190), 'ic' => self::ICO_VENDOR]]);
+        self::assertNotContains('V17', $this->failIds($f), '190 bajtů se do sloupce vejde');
+    }
+
     public function testVendorWithoutNameAndIcoIsAFailure(): void
     {
         $f = $this->check(['vendor' => ['company_name' => '', 'ic' => '']]);

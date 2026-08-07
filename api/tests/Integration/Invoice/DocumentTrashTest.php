@@ -390,6 +390,55 @@ final class DocumentTrashTest extends TestCase
         self::assertSame($snapshotId, (int) ($logPayload['snapshot_id'] ?? 0));
     }
 
+    /**
+     * Audit 2026-08-07: výkaz práce jde kaskádou (fk_wr_invoice ON DELETE
+     * CASCADE) — snapshot ho MUSÍ zachytit, jinak se nenávratně ztratí podklad
+     * hodinové fakturace. Dřív ve snapshotu nebyl.
+     */
+    public function testForceDeleteSnapshotsWorkReport(): void
+    {
+        $pdo = $this->db->pdo();
+        $id = $this->insertInvoice('issued', 'TR2098-WR');
+        $this->trash($id);
+
+        // Projekt (FK) + výkaz práce + jeho položka.
+        $pdo->prepare(
+            "INSERT INTO projects (client_id, name, currency_id, status)
+             VALUES (?, 'Koš test projekt', ?, 'active')"
+        )->execute([$this->clientId, $this->currencyId]);
+        $projectId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare(
+            "INSERT INTO work_reports (invoice_id, project_id, title, total_hours, total_amount)
+             VALUES (?, ?, 'Výkaz práce červen', 8.00, 8000.00)"
+        )->execute([$id, $projectId]);
+        $wrId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO work_report_items (work_report_id, description, work_date, hours, rate, total_amount, order_index)
+             VALUES (?, 'Analýza', '2098-06-10', 8.00, 1000.00, 8000.00, 0)"
+        )->execute([$wrId]);
+
+        try {
+            $ok = $this->forceDelete($id, 'admin', 'TR2098-WR');
+            self::assertSame(200, $ok->getStatusCode(), (string) $ok->getBody());
+            $snapshotId = (int) self::json($ok)['snapshot_id'];
+
+            $payload = json_decode((string) $pdo->query(
+                "SELECT payload FROM deleted_document_snapshots WHERE id = {$snapshotId}"
+            )->fetchColumn(), true);
+
+            self::assertNotEmpty($payload['work_reports'] ?? [],
+                'Snapshot musí nést výkaz práce (kaskádou by jinak zmizel bez otisku).');
+            self::assertSame('Výkaz práce červen', $payload['work_reports'][0]['title'] ?? null);
+            self::assertNotEmpty($payload['work_report_items'] ?? [],
+                'Snapshot musí nést i položky výkazu (hodiny, sazby).');
+            self::assertEqualsWithDelta(8.0, (float) ($payload['work_report_items'][0]['hours'] ?? 0), 0.005);
+        } finally {
+            // Projekt uklidit (invoice + work_report smazal force delete kaskádou).
+            $pdo->prepare('DELETE FROM projects WHERE id = ?')->execute([$projectId]);
+        }
+    }
+
     public function testForceDeleteRequiresTrashFirstWhenTrashEnabled(): void
     {
         $id = $this->insertInvoice('issued', 'TR2098-NIT');

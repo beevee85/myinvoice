@@ -115,6 +115,23 @@ final class NativeUpdateService
         $blockers = [];
         $warnings = [];
 
+        // FORK audit 2026-08-07: nativní updater NESMÍ běžet v kontejneru. Guard
+        // dosud žil jen ve VersionService::nativePreflight (HTTP cesta) — worker
+        // api/bin/native-update.php a přímé volání ho obcházely. V našem Docker
+        // nasazení by upstream bundle přepsal forkový strom (koš, DDKPZ, dávkový
+        // import, § 37a opravy) čistým upstreamem a pustil jeho migrace nad
+        // forkovou DB. Upgrade řeší host-side rebuild image, ne tenhle updater.
+        if (self::isContainer()) {
+            return [
+                'ok'        => false,
+                'supported' => false,
+                'blockers'  => ['Nativní updater se v Docker/kontejnerovém nasazení nepoužívá — '
+                    . 'upgrade řeší přestavba image na hostiteli. Spuštění v kontejneru by přepsalo '
+                    . 'forkové úpravy čistým upstreamem.'],
+                'warnings'  => [],
+            ];
+        }
+
         if (!self::isValidVersion($target)) {
             $blockers[] = 'Cílová verze „' . $target . '" není platný semver (X.Y.Z).';
         }
@@ -176,6 +193,13 @@ final class NativeUpdateService
     public function run(string $target, string $requestedBy): array
     {
         $log = $this->logPath();
+
+        // Druhá vrstva guardu (audit 2026-08-07): i kdyby někdo run() zavolal
+        // s vynecháním preflightu, v kontejneru se NIC nepřepíše.
+        if (self::isContainer()) {
+            return $this->finishFailed($target,
+                'Nativní updater se v Docker/kontejnerovém nasazení nepoužívá — přepsal by forkové úpravy.', $log);
+        }
 
         if (!self::isValidVersion($target)) {
             return $this->finishFailed($target, 'Cílová verze „' . $target . '" není platný semver.', $log);
@@ -844,6 +868,21 @@ final class NativeUpdateService
     public static function isValidVersion(string $v): bool
     {
         return preg_match('/^\d+\.\d+\.\d+$/', $v) === 1;
+    }
+
+    /**
+     * Běžíme v kontejneru? Shodná detekce jako VersionService::detectEnvironment
+     * ('docker' = existence /.dockerenv nebo /run/.containerenv). Env override
+     * MYINVOICE_ALLOW_NATIVE_UPDATE=1 nechává dveře pro záměrný host-side běh,
+     * kdyby někdo měl bind-mount /.dockerenv mimo kontejner (krajní případ).
+     */
+    public static function isContainer(): bool
+    {
+        if (filter_var(getenv('MYINVOICE_ALLOW_NATIVE_UPDATE') ?: '', FILTER_VALIDATE_BOOLEAN)) {
+            return false;
+        }
+
+        return is_file('/.dockerenv') || is_file('/run/.containerenv');
     }
 
     /** Leží relativní cesta v chráněné množině? */
