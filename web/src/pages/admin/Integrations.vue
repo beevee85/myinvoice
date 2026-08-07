@@ -10,21 +10,39 @@ import { apiErrorMessage } from '@/api/errors'
 import { purchaseInvoicesApi, type PurchaseDocumentKind } from '@/api/purchaseInvoices'
 import { PURCHASE_DOCUMENT_KINDS, purchaseDocumentKindLabelKey } from '@/constants/purchaseDocumentKinds'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
+// FORK: dávkový import přes předplatné — čtvrtá záložka (viz manuál 19.9).
+import { batchImportApi } from '@/api/batchImport'
+import BatchImportList from '@/pages/purchase-invoices/BatchImportList.vue'
 
 const { t } = useI18n()
 const toast = useToast()
 
-type Tab = 'idoklad' | 'fakturoid' | 'ai'
+type Tab = 'idoklad' | 'fakturoid' | 'ai' | 'batch'
 // Tab z ?tab=... query (default idoklad). Watch pro proklik mezi sidebar položkami
 // "Externí integrace" (no query) ↔ "AI import" (?tab=ai).
 const route = useRoute()
 function readTabFromQuery(): Tab {
   const q = String(route.query.tab ?? '')
-  return q === 'fakturoid' || q === 'ai' ? q as Tab : 'idoklad'
+  return q === 'fakturoid' || q === 'ai' || q === 'batch' ? q as Tab : 'idoklad'
 }
 const tab = ref<Tab>(readTabFromQuery())
 watch(() => route.query.tab, () => {
   tab.value = readTabFromQuery()
+})
+
+// FORK: záložka dávkového importu se zobrazuje jen se zapnutým backend
+// příznakem — detekce GETem seznamu (404 = routa neexistuje = vypnuto),
+// stejný mechanismus, jaký dřív používalo menu.
+const batchImportEnabled = ref(false)
+const visibleTabs = computed<Tab[]>(() =>
+  batchImportEnabled.value ? ['idoklad', 'fakturoid', 'ai', 'batch'] : ['idoklad', 'fakturoid', 'ai'])
+onMounted(async () => {
+  try {
+    await batchImportApi.list()
+    batchImportEnabled.value = true
+  } catch {
+    batchImportEnabled.value = false
+  }
 })
 
 // ── iDoklad credentials state ─────────────────────────────────────────
@@ -503,10 +521,10 @@ onMounted(() => {
       <p class="text-sm text-neutral-500 mt-0.5">{{ t('integrations.subtitle') }}</p>
     </div>
 
-    <!-- Tabs: iDoklad / Fakturoid / AI -->
+    <!-- Tabs: iDoklad / Fakturoid / AI / (FORK) Dávkový import -->
     <div class="border-b border-neutral-200 mb-4 flex gap-1 overflow-x-auto">
       <button
-        v-for="tt in (['idoklad', 'fakturoid', 'ai'] as const)" :key="tt"
+        v-for="tt in visibleTabs" :key="tt"
         @click="tab = tt"
         class="cursor-pointer px-4 py-2 text-sm border-b-2 transition whitespace-nowrap inline-flex items-center gap-1.5"
         :class="tab === tt
@@ -1137,6 +1155,11 @@ onMounted(() => {
           </details>
         </div>
       </div>
+    </div>
+
+    <!-- ════ FORK: Dávkový import tab (manuál 19.9) ════ -->
+    <div v-else-if="tab === 'batch' && batchImportEnabled">
+      <BatchImportList embedded />
     </div>
 
     <!-- Fallback (žádný tab nevyhovuje) -->

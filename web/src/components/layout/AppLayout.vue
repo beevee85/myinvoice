@@ -6,7 +6,6 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { updateApi, type PublicVersion } from '@/api/update'
 import { settingsApi } from '@/api/settings'
-import { batchImportApi } from '@/api/batchImport'
 import SupplierSwitcher from './SupplierSwitcher.vue'
 import GlobalSearch from './GlobalSearch.vue'
 import ThemeToggle from './ThemeToggle.vue'
@@ -32,14 +31,10 @@ const moreOpen = ref(false)
 const supportOpen = ref(false)
 const featureOpen = ref(false)
 const accountantSigningProfilesEnabled = ref(false)
-// FORK: dávkový import. Backend flag nemá vlastní kanál — detekuje se GETem
-// seznamu, jehož routa při vypnutém příznaku NEEXISTUJE (404 = featura není).
-const batchImportEnabled = ref(false)
 const logoutBusy = ref(false)
 const canLockSession = computed(() => sessionSecurity.state?.session_state === 'active'
   && sessionSecurity.state.unlock_methods.includes('passkey'))
 let signingSettingsRequest = 0
-let batchImportRequest = 0
 
 /** Iniciály uživatele pro avatar v topbaru (max 2 znaky). */
 const initials = computed(() =>
@@ -88,27 +83,9 @@ async function loadAccountantSigningMenu() {
   }
 }
 
-async function loadBatchImportMenu() {
-  const requestId = ++batchImportRequest
-  if (!supplierStore.currentSupplierId) {
-    batchImportEnabled.value = false
-    return
-  }
-  try {
-    await batchImportApi.list()
-    if (requestId === batchImportRequest) batchImportEnabled.value = true
-  } catch {
-    // 404 = vypnutý příznak (routa neexistuje); cokoli jiného = radši neukazovat.
-    if (requestId === batchImportRequest) batchImportEnabled.value = false
-  }
-}
-
 watch(
   () => [auth.user?.role, supplierStore.currentSupplierId] as const,
-  () => {
-    void loadAccountantSigningMenu()
-    void loadBatchImportMenu()
-  },
+  () => { void loadAccountantSigningMenu() },
   { immediate: true },
 )
 
@@ -203,10 +180,9 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/purchase-invoices/payment-orders', label: t('nav.payment_orders'), icon: ICONS.payment_orders },
         { to: '/purchase-invoices/export',   label: t('nav.purchase_export'),    icon: ICONS.exports },
         ...(isAdmin ? [{ to: '/admin/import?tab=purchase',  label: t('nav.imports_purchase'), icon: ICONS.imports }] : []),
+        // FORK: dávkový import NEMÁ vlastní položku — je záložkou stránky
+        // AI importu (?tab=batch), stejně jako je sekcí 19.9 v manuálu.
         ...(isAdmin ? [{ to: '/admin/integrations?tab=ai',  label: t('nav.ai_import'),        icon: ICONS.ai }] : []),
-        // FORK: naše rozšíření → až POD upstreamové položky (přání uživatele);
-        // zobrazuje se jen když backend flag žije (viz loadBatchImportMenu).
-        ...(batchImportEnabled.value ? [{ to: '/purchase-invoices/batch-import', label: t('nav.batch_import'), icon: ICONS.imports }] : []),
       ],
     },
     {

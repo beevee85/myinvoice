@@ -387,7 +387,6 @@
     "imports": "Importy",
     "imports_issued": "Import vystavených",
     "imports_purchase": "Import přijatých",
-    "batch_import": "Dávkový import",
     "ai_import": "AI import",
     "integrations": "Externí integrace",
     "crm": "CRM",
@@ -4443,6 +4442,9 @@
       "delete_confirm": "Opravdu odebrat Fakturoid credentials?",
       "deleted": "Fakturoid credentials odebrány",
       "coming_hint": "—"
+    },
+    "batch": {
+      "tab": "Dávkový import"
     },
     "ai": {
       "tab": "AI extrakce",

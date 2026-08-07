@@ -94,8 +94,9 @@ předplatného). Server výsledkům **nevěří ani jedno číslo** — všechno
 nezávisle přepočítá a z ověřených dokladů vzniknou **jen koncepty** ke
 schválení.
 
-Najdeš ho v menu **Nákup → Dávkový import**. Položka se zobrazuje jen tehdy,
-když je funkce zapnutá v konfiguraci (viz konec kapitoly).
+Najdeš ho v menu **Nákup → AI import**, záložka **Dávkový import**. Záložka
+se zobrazuje jen tehdy, když je funkce zapnutá v konfiguraci (viz konec
+kapitoly).
 
 ### Postup krok za krokem
 
