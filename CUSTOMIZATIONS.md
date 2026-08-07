@@ -1318,3 +1318,29 @@ Navíc: `fix(dashboard)` — gradient hlavičky widgetu „Akce pro tebe" použ�
 **Zálohy před změnou:** `/root/backup-myinvoice-db-2026-07-02-0122.sql`, `/root/backup-myinvoice-data-2026-07-02-0123.tar.gz`.
 
 **Rollback:** `docker compose -f docker-compose.production.yml up -d` (poslední GHCR image).
+
+## 2026-08-07 — UPDATE z upstreamu: v4.52.1 → **v4.53.2**
+
+Merge tagu (commit 3a7d229f + dořešení 341e83b7). 28 commitů: nativní
+auto-update z production bundlu, MFA záložní kódy (migrace 0149), parsery
+avíz Air Bank + RB, dědění jednotky splatnosti, patička modálu, zvýraznění
+menu přes `newTo`, ZIP zálohy bez práv zdroje.
+
+**Konflikty 3:** AGENTS.md (obě strany nezávisle opravily zastaralé tvrzení
+o `dist/` — vzato naše znění), AppLayout.vue (isActive/newTo z upstreamu —
+POZOR, změna signatury `isActive(item: NavItem)` shodila build, dořešeno
+341e83b7; pilulka „Pracuješ jako" a footer zůstávají forkové; **MyÚčto promo
+banner NEPŘEVZAT**), Modal.vue (tutéž patičku přidaly obě strany — vzato
+upstream znění).
+
+**Strategická zpráva upstreamu:** vývoj se přesouvá do nástupce
+**MyÚčto.cz** (`radekhulan/myucto`); MyInvoice zůstává základ, MyÚčto z něj
+merguje. Upstream v AGENTS.md žádá nové funkce psát do MyÚčta. Dopad na
+plán „co nabídnout upstreamu" (tabulka výše) K ROZHODNUTÍ uživatelem —
+kandidáti (koš, DDKPZ, dávkový import) možná míří do špatného repa.
+
+Suita po merge: 2501 zelených, 47 skipů (všechny upstream/prostředí, žádný
+náš). Ověřeno po nasazení: verze 4.53.2, migrace 0149 OK, batch-import
+6 rout, dist chunky na místě. Zálohy:
+`/root/backup-myinvoice-db-2026-08-07-pred-v4532.zip`, image
+`myinvoice:pred-v4532`.
