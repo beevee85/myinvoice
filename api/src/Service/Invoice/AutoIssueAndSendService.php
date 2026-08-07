@@ -56,6 +56,13 @@ final class AutoIssueAndSendService
         if ($invoice === null) {
             throw new \RuntimeException("Invoice #$invoiceId not found");
         }
+        // FORK audit 2026-08-07: guard V SLUŽBĚ, ne jen v HTTP akcích — sem vedou
+        // cesty bez TrashGuardu (recurring cron, schvalovací tok). Doklad v koši
+        // se NESMÍ vystavit ani odeslat: propálil by číslo řady a jako doklad
+        // s deleted_at by unikl DPH evidenci i párování plateb.
+        if (!empty($invoice['deleted_at'])) {
+            throw new \DomainException('Doklad je v koši — vystavení a odeslání není možné. Nejdřív ho obnovte.');
+        }
 
         $issued = false;
         // 1. Vystavit pokud draft

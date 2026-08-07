@@ -497,6 +497,11 @@ final class RecurringInvoiceGenerator
         if ($invoice === null) {
             throw new \RuntimeException("Invoice #$invoiceId not found after generation");
         }
+        // FORK audit 2026-08-07: druhá vrstva pod findPeriodInvoice filtrem —
+        // doklad v koši se nesmí vystavit (propálený VS + únik z DPH evidence).
+        if (!empty($invoice['deleted_at'])) {
+            throw new \DomainException('Doklad je v koši — vystavení není možné.');
+        }
 
         $supplierId = (int) $invoice['supplier_id'];
         $issueDate = new \DateTimeImmutable((string) $invoice['issue_date']);

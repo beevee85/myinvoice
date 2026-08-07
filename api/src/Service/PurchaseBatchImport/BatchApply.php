@@ -100,8 +100,9 @@ final class BatchApply
             $dupe = $this->findDuplicate($supplierId, (int) $data['vendor_id'],
                 (string) $data['vendor_invoice_number'], (string) $data['issue_date']);
             if ($dupe !== null) {
-                throw new BatchLimitException('duplicate_invoice',
-                    sprintf('Doklad už v evidenci existuje (id %d).', $dupe));
+                throw new BatchLimitException('duplicate_invoice', $dupe['in_trash']
+                    ? sprintf('Týž doklad leží v koši (id %d) — obnovte ho, nebo ho trvale smažte.', $dupe['id'])
+                    : sprintf('Doklad už v evidenci existuje (id %d).', $dupe['id']));
             }
 
             $invoiceId = $this->writer->createWithItems($data, $userId, $supplierId, 'purchase_batch_import');
@@ -419,17 +420,25 @@ final class BatchApply
         return (int) $pdo->lastInsertId();
     }
 
-    private function findDuplicate(int $supplierId, int $vendorId, string $number, string $issueDate): ?int
+    /**
+     * @return array{id: int, in_trash: bool}|null
+     *
+     * Doklad V KOŠI se hlásí taky — unikát uq_pi_vendor_invoice trashed řádky
+     * pokrývá, takže založení by stejně spadlo; ale hláška musí říct, ŽE je
+     * duplikát v koši, jinak uživatel hledá doklad, který v evidenci nevidí
+     * (audit 2026-08-07, sémantika koše 0905).
+     */
+    private function findDuplicate(int $supplierId, int $vendorId, string $number, string $issueDate): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id FROM purchase_invoices
+            'SELECT id, deleted_at FROM purchase_invoices
               WHERE supplier_id = ? AND vendor_id = ? AND vendor_invoice_number = ? AND issue_date = ?
               LIMIT 1'
         );
         $stmt->execute([$supplierId, $vendorId, $number, $issueDate]);
-        $id = $stmt->fetchColumn();
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
-        return $id === false ? null : (int) $id;
+        return $row === false ? null : ['id' => (int) $row['id'], 'in_trash' => !empty($row['deleted_at'])];
     }
 
     /**

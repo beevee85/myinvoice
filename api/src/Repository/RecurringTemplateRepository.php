@@ -332,10 +332,14 @@ final class RecurringTemplateRepository
      */
     public function findPeriodInvoice(int $templateId, string $issueDate): ?array
     {
+        // FORK audit 2026-08-07: doklad v koši = mimo evidenci (0905). Bez filtru
+        // cron našel trashed koncept, vystavil ho a odeslal — s deleted_at,
+        // takže ho neviděla DPH evidence ani párování plateb.
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, status, varsymbol
                FROM invoices
               WHERE recurring_template_id = ? AND issue_date = ?
+                AND deleted_at IS NULL
               ORDER BY id DESC
               LIMIT 1'
         );

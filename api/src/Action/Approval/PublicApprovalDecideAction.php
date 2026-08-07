@@ -49,7 +49,10 @@ final class PublicApprovalDecideAction
         }
 
         $invoice = $this->repo->findByApprovalToken($token);
-        if ($invoice === null || $invoice['approval_status'] !== 'requested') {
+        // FORK audit 2026-08-07: doklad v koši se veřejnému odkazu chová, jako by
+        // neexistoval (0905) — schválení by ho jinak vystavilo a odeslalo.
+        if ($invoice === null || $invoice['approval_status'] !== 'requested'
+            || !empty($invoice['deleted_at'])) {
             return Json::error($response, 'token_invalid_or_expired',
                 'Tento odkaz byl již použit nebo není platný.', 404);
         }

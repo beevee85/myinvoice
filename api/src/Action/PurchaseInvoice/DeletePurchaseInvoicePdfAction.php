@@ -6,6 +6,7 @@ namespace MyInvoice\Action\PurchaseInvoice;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TrashGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -45,6 +46,11 @@ final class DeletePurchaseInvoicePdfAction
         $invoice = $this->repo->find($id, $supplierId);
         if ($invoice === null) {
             return Json::error($response, 'not_found', 'Přijatá faktura nenalezena.', 404);
+        }
+        // FORK audit 2026-08-07: doklad v koši je read-only (0905) — párový upload
+        // guard má, mazání ho obcházelo a ničilo originál PDF bez snapshotu.
+        if (($blocked = TrashGuard::blockIfTrashed($invoice, $response)) !== null) {
+            return $blocked;
         }
         if (empty($invoice['pdf_path'])) {
             return Json::error($response, 'no_pdf', 'Faktura nemá archivované PDF.', 404);
