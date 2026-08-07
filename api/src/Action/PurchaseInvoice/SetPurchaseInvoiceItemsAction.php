@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\PurchaseInvoice;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\SettlementLockGuard;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Http\TrashGuard;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -56,6 +57,12 @@ final class SetPurchaseInvoiceItemsAction
         $items = $body['items'] ?? [];
         if (!is_array($items)) {
             return Json::error($response, 'validation_failed', 'items musí být pole', 400, ['fields' => ['items' => ['items musí být pole']]]);
+        }
+
+        // Audit 2026-08-07: tatáž pojistka jako v UpdatePurchaseInvoiceAction —
+        // odpočtové řádky § 37a spárovaného DDKPZ nelze smazat přes PUT /items.
+        if (($blocked = SettlementLockGuard::blockIfDroppingLinkedRows($existing, $items, $response)) !== null) {
+            return $blocked;
         }
 
         $vatRates = $this->repo->vatRateMap();

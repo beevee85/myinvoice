@@ -422,10 +422,21 @@ final class MonthlyExportService
     private function findPurchaseInvoices(int $sid, ExportPeriod $period): array
     {
         // Přijaté dle pozdějšího z (DUZP, vystavení) — § 73/1/a ZDPH; zahraniční
-        // reverse charge dle DUZP (§ 25, § 73/1/b — issue #117). Shodné s VatLedgerService.
+        // reverse charge dle DUZP (§ 25, § 73/1/b — issue #117).
+        // MUSÍ ZRCADLIT VatLedgerService (audit 2026-08-07): RC se poznává flagem
+        // NEBO klasifikačním kódem (23/24/24e/25) — import kódy 24/24e přiřazuje
+        // BEZ flagu. Dřív to hlídal jen flag, takže importovaný RC doklad vypadl
+        // do jiného měsíce než Kniha DPH: účetní pak dostala knihu s dokladem,
+        // který v ZIPu chyběl. Export nejoinuje položky, takže kód se hledá i
+        // v položkách přes EXISTS.
         // CASE místo GREATEST kvůli přenositelnosti (SQLite GREATEST nemá).
+        $rcExpr = "(pi.reverse_charge = 1"
+            . " OR pi.vat_classification_code IN ('23','24','24e','25')"
+            . " OR EXISTS (SELECT 1 FROM purchase_invoice_items pii"
+            . "            WHERE pii.purchase_invoice_id = pi.id"
+            . "              AND pii.vat_classification_code IN ('23','24','24e','25')))";
         $dateExpr = 'CASE'
-            . " WHEN pi.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ'"
+            . " WHEN {$rcExpr} AND COALESCE(co.iso2, 'CZ') <> 'CZ'"
             . ' THEN COALESCE(pi.tax_date, pi.issue_date)'
             . ' WHEN pi.tax_date IS NULL THEN pi.issue_date'
             . ' WHEN pi.issue_date IS NULL THEN pi.tax_date'

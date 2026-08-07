@@ -196,4 +196,30 @@ final class MoneyTest extends TestCase
         self::assertSame(1, Money::parse('100.00')->diffCents(Money::parse('100.01')));
         self::assertSame(0, Money::parse('100.00')->diffCents(Money::parse('100.00')));
     }
+
+    /**
+     * Audit 2026-08-07: přemrštěné množství NESMÍ přetéct do floatu a shodit
+     * intdiv() TypeErrorem (500). Musí dát MoneyFormatException, kterou
+     * validace zachytí jako nález (V43) — ne pád serveru.
+     */
+    public function testOversizedQuantityIsRejectedNotOverflowed(): void
+    {
+        // 17 číslic → milli přeteče int64
+        $this->expectException(MoneyFormatException::class);
+        Money::parse('1.00')->multiplyByQuantity('10000000000000000');
+    }
+
+    public function testQuantityTimesPriceOverflowIsRejected(): void
+    {
+        // OCR slepí číslo účtu do quantity: cents × milli přeteče i s int milli
+        $this->expectException(MoneyFormatException::class);
+        Money::parse('999999999999.99')->multiplyByQuantity('2301234567');
+    }
+
+    public function testRealisticLargeButValidQuantityStillWorks(): void
+    {
+        // 12ciferné množství × rozumná cena je pořád v rozsahu
+        self::assertSame('1000000000.00',
+            (string) Money::parse('1.00')->multiplyByQuantity('1000000000'));
+    }
 }

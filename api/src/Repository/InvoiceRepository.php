@@ -328,6 +328,12 @@ final class InvoiceRepository
             || (int) ($advance['supplier_id'] ?? 0) !== $supplierId) {
             throw new \RuntimeException('Doklad nenalezen.');
         }
+        // FORK audit 2026-08-07: protistrana přichází z těla požadavku a TrashGuard
+        // akce ji nevidí — zrcadlo kontroly z přijaté strany (0905): na doklad
+        // v koši se nesmí navázat vazba.
+        if (!empty($final['deleted_at']) || !empty($advance['deleted_at'])) {
+            throw new \RuntimeException('Doklad je v koši — nejdřív ho obnovte.');
+        }
         if (($advance['invoice_type'] ?? '') !== 'proforma') {
             throw new \RuntimeException('Propojit lze jen se zálohovou fakturou (proforma).');
         }
@@ -1573,8 +1579,11 @@ final class InvoiceRepository
      */
     public function publicInvoiceRefByToken(string $token): ?array
     {
+        // FORK audit 2026-08-07: doklad v koši nesmí být veřejně dostupný —
+        // anonymnímu odkazu se chová, jako by neexistoval (0905).
         $stmt = $this->db->pdo()->prepare(
-            "SELECT id, supplier_id FROM invoices WHERE public_token = ? AND status <> 'draft'"
+            "SELECT id, supplier_id FROM invoices
+              WHERE public_token = ? AND status <> 'draft' AND deleted_at IS NULL"
         );
         $stmt->execute([$token]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);

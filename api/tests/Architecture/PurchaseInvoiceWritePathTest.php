@@ -81,6 +81,7 @@ final class PurchaseInvoiceWritePathTest extends TestCase
     {
         $apiDir = dirname(__DIR__, 2);
         $offenders = [];
+        $callsSeen = 0;
 
         $iterator = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($apiDir . '/src', \FilesystemIterator::SKIP_DOTS)
@@ -100,6 +101,7 @@ final class PurchaseInvoiceWritePathTest extends TestCase
 
             preg_match_all('/->createWithItems\(([^;]*?)\);/s', $source, $matches);
             foreach ($matches[1] as $args) {
+                $callsSeen++;
                 // Čtyři argumenty = tři čárky na nejvyšší úrovni. Volání jsou plochá.
                 if (substr_count($args, ',') < 3) {
                     $offenders[] = str_replace($apiDir . '/', '', $file->getPathname())
@@ -107,6 +109,13 @@ final class PurchaseInvoiceWritePathTest extends TestCase
                 }
             }
         }
+
+        // Audit 2026-08-07: bez téhle aserce test prochází NAPRÁZDNO — kdyby se
+        // volání přejmenovala nebo přesunula mimo sken, prázdná množina by dala
+        // zelenou (táž třída chyby, kterou tenhle repo hlídá jinde). Volajících
+        // je víc než jeden; nula = sken se rozešel se skutečností.
+        self::assertGreaterThan(1, $callsSeen,
+            'Sken nenašel volání createWithItems — regex nebo cesta se rozešly se skutečností.');
 
         self::assertSame([], $offenders, implode("\n", array_merge(
             ['Tenhle volající nechává zdroj zápisu na defaultu `unknown`:'],

@@ -52,4 +52,30 @@ final class InvoiceAmountSourceGuardsTest extends TestCase
             );
         }
     }
+
+    /**
+     * Audit 2026-08-07: zámek odpočtových řádků § 37a musí mít KAŽDÁ cesta, která
+     * přepisuje položky přijaté faktury — jinak jednou z nich (PUT /items) šlo
+     * odpočtové řádky spárovaného DDKPZ smazat a rozbít rekapitulaci. Logika je
+     * ve sdíleném SettlementLockGuard; tenhle test hlídá, že ho obě akce volají.
+     *
+     * (Substring check je bezpečný vůči BypassFinals — nestaví na `final`/`readonly`,
+     * které stream wrapper v testech ze zdroje odstraňuje.)
+     */
+    public function testBothItemWritePathsCallSettlementLockGuard(): void
+    {
+        $root = dirname(__DIR__, 3);
+        foreach ([
+            '/api/src/Action/PurchaseInvoice/SetPurchaseInvoiceItemsAction.php',
+            '/api/src/Action/PurchaseInvoice/UpdatePurchaseInvoiceAction.php',
+        ] as $rel) {
+            $code = file_get_contents($root . $rel);
+            self::assertIsString($code, "Nenalezen $rel");
+            self::assertStringContainsString(
+                'SettlementLockGuard::blockIfDroppingLinkedRows',
+                $code,
+                "$rel nevolá SettlementLockGuard — odpočtové řádky § 37a jdou touhle cestou smazat."
+            );
+        }
+    }
 }

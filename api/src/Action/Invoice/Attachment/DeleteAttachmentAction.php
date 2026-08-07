@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Invoice\Attachment;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TrashGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceAttachmentRepository;
 use MyInvoice\Repository\InvoiceRepository;
@@ -31,6 +32,10 @@ final class DeleteAttachmentAction
         $invoice = $this->invoices->find($id);
         if (!SupplierGuard::owns($request, $invoice)) {
             return Json::error($response, 'not_found', 'Faktura nenalezena.', 404);
+        }
+        // FORK audit 2026-08-07: doklad v koši je read-only (0905).
+        if (($blocked = TrashGuard::blockIfTrashed($invoice, $response)) !== null) {
+            return $blocked;
         }
 
         $att = $this->attachments->find($attId, $id);

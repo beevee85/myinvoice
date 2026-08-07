@@ -54,10 +54,14 @@ final class FinalFromProformaCreator
 
         $pdo = $this->db->pdo();
 
-        // Idempotence — pokud už existuje child final, vrátit její id
+        // Idempotence — pokud už existuje child final, vrátit její id.
+        // STORNOVANÝ finál se IGNORUJE (audit 2026-08-07): po stornu se musí
+        // dát vyúčtovat znovu, jinak akce vrátí id cancelled dokladu jako úspěch
+        // a plnění zůstane nevyúčtované. Shodně s PaymentTaxDocumentCreator
+        // a IssueInvoiceAction, které storno vylučují taky.
         $existing = $pdo->prepare(
             "SELECT id FROM invoices
-              WHERE parent_invoice_id = ? AND invoice_type = 'invoice'
+              WHERE parent_invoice_id = ? AND invoice_type = 'invoice' AND status <> 'cancelled'
               ORDER BY id LIMIT 1"
         );
         $existing->execute([$proformaId]);

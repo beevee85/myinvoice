@@ -6,6 +6,7 @@ namespace MyInvoice\Action\PurchaseInvoice;
 
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
 use MyInvoice\Http\Json;
+use MyInvoice\Http\SettlementLockGuard;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Http\TrashGuard;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -85,31 +86,11 @@ final class UpdatePurchaseInvoiceAction
         // párování DDKPZ trvá — smazáním by se rozbila symetrie unlinku (snížené
         // vat_overrides by na dokladu zůstaly navždy). Správná cesta: „Zrušit
         // propojení" u daňového dokladu (unlink řádky odebere i vrátí rekapitulaci).
-        $linkedSources = [];
-        foreach ((array) ($existing['settlement_documents'] ?? []) as $sd) {
-            if (($sd['status'] ?? '') !== 'cancelled') {
-                $linkedSources[(int) $sd['id']] = true;
-            }
-        }
-        if ($linkedSources !== [] && array_key_exists('items', $body)) {
-            $keptSources = [];
-            foreach ((array) $body['items'] as $it) {
-                $src = (int) (is_array($it) ? ($it['settlement_source_purchase_invoice_id'] ?? 0) : 0);
-                if ($src > 0) {
-                    $keptSources[$src] = true;
-                }
-            }
-            foreach ((array) ($existing['items'] ?? []) as $it) {
-                $src = (int) ($it['settlement_source_purchase_invoice_id'] ?? 0);
-                if ($src > 0 && isset($linkedSources[$src]) && !isset($keptSources[$src])) {
-                    return Json::error(
-                        $response,
-                        'settlement_rows_locked',
-                        'Odpočtové řádky daňového dokladu k záloze nelze smazat editací — nejdřív zrušte párování v detailu dokladu („Zrušit propojení").',
-                        409,
-                    );
-                }
-            }
+        // Sdílený guard (SettlementLockGuard) — táž pojistka i v SetItems (audit).
+        if (array_key_exists('items', $body)
+            && ($blocked = SettlementLockGuard::blockIfDroppingLinkedRows(
+                $existing, (array) $body['items'], $response)) !== null) {
+            return $blocked;
         }
 
         $errors = PurchaseInvoiceValidation::invoice($body, $this->repo->vatRateMap());

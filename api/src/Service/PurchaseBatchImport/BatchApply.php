@@ -91,7 +91,7 @@ final class BatchApply
             }
 
             $doc = $this->documentFor($row, $batchId, $supplierId);
-            [$data, $warnings] = $this->mapToDraft($doc, $supplierId, $today);
+            [$data, $warnings, $blockingWarning] = $this->mapToDraft($doc, $supplierId, $today);
 
             // Duplicitní doklad: unikát (supplier, vendor, číslo, datum) by
             // jinak vybuchl jako SQLSTATE 23000 → 500. Řekneme to srozumitelně.
@@ -100,8 +100,9 @@ final class BatchApply
             $dupe = $this->findDuplicate($supplierId, (int) $data['vendor_id'],
                 (string) $data['vendor_invoice_number'], (string) $data['issue_date']);
             if ($dupe !== null) {
-                throw new BatchLimitException('duplicate_invoice',
-                    sprintf('Doklad už v evidenci existuje (id %d).', $dupe));
+                throw new BatchLimitException('duplicate_invoice', $dupe['in_trash']
+                    ? sprintf('Týž doklad leží v koši (id %d) — obnovte ho, nebo ho trvale smažte.', $dupe['id'])
+                    : sprintf('Doklad už v evidenci existuje (id %d).', $dupe['id']));
             }
 
             $invoiceId = $this->writer->createWithItems($data, $userId, $supplierId, 'purchase_batch_import');
@@ -116,8 +117,13 @@ final class BatchApply
             $warnings = array_merge($warnings, $this->totalsWarnings($invoiceId, $supplierId, $doc));
 
             if ($warnings !== []) {
+                // Audit 2026-08-07: rozpor „doklad s DPH × dodavatel neplátce" musí
+                // být BLOKUJÍCÍ (parita s AI cestou / migrací 0911) — jinak po
+                // přechodu draft→received varování tiše zmizí a doklad s DPH od
+                // „neplátce" projde do výkazů bez povšimnutí. Blokující varování
+                // nezmizí bez vědomého vyřešení (TransitionAction ho drží).
                 $this->invoices->setExtractionWarning($invoiceId, $supplierId,
-                    implode("\n\n", $warnings), false);
+                    implode("\n\n", $warnings), $blockingWarning);
             }
 
             // Guard `status = validated` ve WHERE zůstává jako druhá vrstva
@@ -233,11 +239,12 @@ final class BatchApply
      *       float až na svém prahu; syrové haléře by se uložily 100× špatně)
      *
      * @param array<string,mixed> $doc
-     * @return array{0: array<string,mixed>, 1: list<string>}
+     * @return array{0: array<string,mixed>, 1: list<string>, 2: bool} data, varování, blokující?
      */
     private function mapToDraft(array $doc, int $supplierId, string $today): array
     {
         $warnings = [];
+        $blocking = false;
 
         $vendor   = (array) ($doc['vendor'] ?? []);
         $resolved = $this->clients->resolveVendor([
@@ -277,8 +284,20 @@ final class BatchApply
         }
         // Neplátce DPH → odpočet nelze uplatnit. Týž bezpečný default jako
         // ruční cesta (CreatePurchaseInvoiceAction) — s přiznáním, ne tiše.
+        // ROZPOR „doklad s DPH × neplátce" je BLOKUJÍCÍ (parita s 0911 / AI cestou):
+        // člen DPH skupiny (DIČ CZ699…) bývá na kartě omylem jako neplátce, ale
+        // doklad DPH nese. Nezávazné varování by po draft→received zmizelo a doklad
+        // s DPH od „neplátce" by prošel do výkazů. Blokující se vyřešit musí.
         if ($resolved['is_vat_payer'] === false) {
-            $warnings[] = 'Dodavatel není plátce DPH — odpočet nastaven na „žádný".';
+            if ($this->documentShowsVat($doc)) {
+                $warnings[] = 'ROZPOR: doklad obsahuje rozpis DPH s nenulovou sazbou, ale dodavatel '
+                    . 'je na kartě veden jako neplátce DPH — ověřte DIČ a registraci (pozor na členy '
+                    . 'DPH skupiny: DIČ tvaru CZ699… je v ARES jako „DIČ skupiny"). Sazby ponechány '
+                    . 'dle dokladu, odpočet vypnut. Po ověření nastavte „Plátce DPH" na kartě dodavatele.';
+                $blocking = true;
+            } else {
+                $warnings[] = 'Dodavatel není plátce DPH — odpočet nastaven na „žádný".';
+            }
         }
         if (!empty($doc['linked_documents'])) {
             $warnings[] = 'Doklad odkazuje na jiné doklady (zálohy/vyúčtování) — vazby je třeba napárovat ručně, apply je nezakládá.';
@@ -312,7 +331,20 @@ final class BatchApply
             $data['vat_deduction'] = 'none';
         }
 
-        return [$data, $warnings];
+        return [$data, $warnings, $blocking];
+    }
+
+    /** Nese doklad nenulovou DPH? (aspoň jeden řádek se sazbou > 0, nebo totals.vat > 0). */
+    private function documentShowsVat(array $doc): bool
+    {
+        foreach ((array) ($doc['items'] ?? []) as $line) {
+            if ((float) str_replace([',', '%', ' '], ['.', '', ''], (string) ($line['vat_rate'] ?? '0')) > 0.0) {
+                return true;
+            }
+        }
+        $vat = (string) (($doc['totals'] ?? [])['vat'] ?? '0');
+
+        return $vat !== '' && (float) $vat !== 0.0;
     }
 
     /**
@@ -419,17 +451,25 @@ final class BatchApply
         return (int) $pdo->lastInsertId();
     }
 
-    private function findDuplicate(int $supplierId, int $vendorId, string $number, string $issueDate): ?int
+    /**
+     * @return array{id: int, in_trash: bool}|null
+     *
+     * Doklad V KOŠI se hlásí taky — unikát uq_pi_vendor_invoice trashed řádky
+     * pokrývá, takže založení by stejně spadlo; ale hláška musí říct, ŽE je
+     * duplikát v koši, jinak uživatel hledá doklad, který v evidenci nevidí
+     * (audit 2026-08-07, sémantika koše 0905).
+     */
+    private function findDuplicate(int $supplierId, int $vendorId, string $number, string $issueDate): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id FROM purchase_invoices
+            'SELECT id, deleted_at FROM purchase_invoices
               WHERE supplier_id = ? AND vendor_id = ? AND vendor_invoice_number = ? AND issue_date = ?
               LIMIT 1'
         );
         $stmt->execute([$supplierId, $vendorId, $number, $issueDate]);
-        $id = $stmt->fetchColumn();
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
-        return $id === false ? null : (int) $id;
+        return $row === false ? null : ['id' => (int) $row['id'], 'in_trash' => !empty($row['deleted_at'])];
     }
 
     /**

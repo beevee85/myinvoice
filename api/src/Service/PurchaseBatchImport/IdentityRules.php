@@ -124,6 +124,18 @@ final class IdentityRules
                 'Dodavatel nemá ani název, ani IČO.');
         }
 
+        // Audit 2026-08-07: délka názvu proti sloupci clients.company_name
+        // VARCHAR(190). Bez téhle kontroly extrakce slila název + adresu do
+        // 220 znaků, validace prošla a apply spadl na SQLSTATE 22001 (500) —
+        // řádek pak nešel aplikovat ani odmítnout a dávka uvízla ve `validating`
+        // s neuklizeným raw_json. Měří se v BAJTECH (sloupec je bajtový, diakritika
+        // je vícebajtová), s rezervou na sanitizaci v ClientResolveru.
+        $companyName = (string) ($vendor['company_name'] ?? '');
+        if ($companyName !== '' && strlen($companyName) > 190) {
+            $findings[] = Finding::fail('V17', $base . '/vendor/company_name',
+                'Název dodavatele je delší než 190 bajtů — nevejde se do evidence, zkraťte ho v dokladu.');
+        }
+
         return $findings;
     }
 

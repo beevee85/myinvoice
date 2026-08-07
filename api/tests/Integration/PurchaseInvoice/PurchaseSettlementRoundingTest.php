@@ -295,4 +295,49 @@ final class PurchaseSettlementRoundingTest extends TestCase
         }
         return array_map(static fn (float $v): float => round($v, 2), $out);
     }
+
+    /**
+     * Audit 2026-08-07 (nález [19]): koeficient § 37 v applyGrossTargets.
+     *
+     * Rekapitulace § 37a se počítá SHORA z hrubé částky: vat = gross·rate/(100+rate).
+     * Mutace na gross·rate/100 (nebo obrácené znaménko) přežila celou sadu, protože
+     * ostatní testy fixují jen stavy s nulovým hrubým rozdílem — split base/vat tam
+     * na výsledek nesahá. Tady se čte přímo `vat_overrides` a tvrdí invariant:
+     * pro každý řádek rekapitulace musí `vat` sedět na koeficient shora. To je
+     * vlastnost, kterou mutovaný koeficient poruší.
+     */
+    public function testSettlementRecapUsesTopDownVatCoefficient(): void
+    {
+        // ČÁSTEČNÉ napárování ZÁMĚRNĚ: linkne se jen DDKPZ #1 (hrubě 10 000),
+        // takže na sazbě 21 % zbývá nevyrovnaný základ (111 000 − 10 000 = 101 000).
+        // applyGrossTargets ten NETTO zbytek rozdělí koeficientem shora — a právě
+        // tady mutace /100 mění výsledek (17 528,93 → 21 210,00). Testy s PLNÝM
+        // vyrovnáním (netto ≈ 0) koeficient neexponují, proto mutace přežívala.
+        [$final, $doc1] = $this->scenario('CZ20970003');
+
+        $this->settlement->link($final, $doc1, $this->supplierId, true);
+
+        $header    = $this->repo->find($final, $this->supplierId);
+        $overrides = $header['vat_overrides'] ?? null;
+        self::assertIsArray($overrides);
+        self::assertNotSame([], $overrides, 'link musí zapsat rekapitulaci § 73/§ 37a');
+
+        $checked = 0;
+        foreach ($overrides as $o) {
+            $rate = (float) ($o['rate'] ?? 0);
+            $base = (float) ($o['base'] ?? 0);
+            $vat  = (float) ($o['vat'] ?? 0);
+            if ($rate <= 0.0 || round($base + $vat, 2) < 1.0) {
+                continue;   // nulové/haléřové sazby koeficient neexponují
+            }
+            $gross = round($base + $vat, 2);
+            $expectedVat = round($gross * $rate / (100 + $rate), 2);
+            self::assertEqualsWithDelta($expectedVat, $vat, 0.01,
+                "Sazba {$rate} %: DPH v rekapitulaci musí být spočtena SHORA "
+                . "(gross·rate/(100+rate)); mutace koeficientu tenhle test shodí.");
+            $checked++;
+        }
+        self::assertGreaterThan(0, $checked,
+            'aspoň jedna nenulová sazba musí být ověřena — jinak test běží naprázdno');
+    }
 }

@@ -34,6 +34,7 @@ use Slim\Psr7\Response as Psr7Response;
 final class DocumentTrashTest extends TestCase
 {
     private Connection $db;
+    private \Psr\Container\ContainerInterface $container;
     private DeleteInvoiceAction $delete;
     private RestoreInvoiceAction $restore;
     private ForceDeleteInvoiceAction $force;
@@ -60,6 +61,7 @@ final class DocumentTrashTest extends TestCase
         }
         try {
             $c = Bootstrap::buildApp()->getContainer();
+            $this->container = $c;
             $this->db       = $c->get(Connection::class);
             $this->delete   = $c->get(DeleteInvoiceAction::class);
             $this->restore  = $c->get(RestoreInvoiceAction::class);
@@ -123,7 +125,7 @@ final class DocumentTrashTest extends TestCase
             $this->numberFormatOverridden = false;
         }
         // Testovací counter období 209806 (rok 2098) — úklid, ať se testy dají opakovat.
-        $pdo->prepare("DELETE FROM invoice_counters WHERE supplier_id = ? AND period IN ('209806', '2098', 'ALL')")
+        $pdo->prepare("DELETE FROM invoice_counters WHERE supplier_id = ? AND period = '209806'")
             ->execute([$this->supplierId]);
         $pdo->prepare("DELETE FROM tax_submissions WHERE supplier_id = ? AND period_year = 2098")
             ->execute([$this->supplierId]);
@@ -249,21 +251,22 @@ final class DocumentTrashTest extends TestCase
         // Šablona řady s měsíčním counterem. Nemá-li ji supplier nastavenou (CI seed),
         // dočasně ji nastavíme a v tearDown vrátíme — jinak by se klíčové pokrytí
         // číselných řad tiše přeskakovalo.
-        $tpl = (string) ($pdo->query("SELECT invoice_number_format FROM supplier WHERE id = {$this->supplierId}")->fetchColumn() ?: '');
-        if ($tpl === '' || !str_contains($tpl, '{C')) {
-            $this->originalNumberFormat = $tpl;
-            $this->numberFormatOverridden = true;
-            $tpl = 'TR{YY}{MM}{CCC}';
-            $pdo->prepare('UPDATE supplier SET invoice_number_format = ? WHERE id = ?')
-                ->execute([$tpl, $this->supplierId]);
-        }
+        // Audit 2026-08-07: šablonu VŽDY přepíšeme na měsíční — jinak by při
+        // produkční šabloně bez {MM}/{YY} periodKey spadl na 'ALL' (globální
+        // produkční counter) a test by ho ON DUPLICATE přepsal a v cleanupu smazal.
+        // Měsíční tvar drží test v izolovaném období 209806.
+        $this->originalNumberFormat = (string) ($pdo->query("SELECT invoice_number_format FROM supplier WHERE id = {$this->supplierId}")->fetchColumn() ?: '');
+        $this->numberFormatOverridden = true;
+        $tpl = 'TR{YY}{MM}{CCC}';
+        $pdo->prepare('UPDATE supplier SET invoice_number_format = ? WHERE id = ?')
+            ->execute([$tpl, $this->supplierId]);
         $date = new \DateTimeImmutable('2098-06-15');
         $vs1 = $this->varsymbol->render($tpl, $date, 1);
         $vs2 = $this->varsymbol->render($tpl, $date, 2);
         $id1 = $this->insertInvoice('issued', $vs1);
         $id2 = $this->insertInvoice('issued', $vs2);
-        // Counter řady na 2 (poslední použité číslo).
-        $periodKey = str_contains($tpl, '{MM}') ? '209806' : (str_contains($tpl, '{YY') ? '2098' : 'ALL');
+        // Counter řady na 2 (poslední použité číslo). Vždy měsíční → 209806.
+        $periodKey = '209806';
         $pdo->prepare(
             'INSERT INTO invoice_counters (supplier_id, client_id, invoice_type, period, last_number)
              VALUES (?, 0, \'invoice\', ?, 2)
@@ -387,11 +390,149 @@ final class DocumentTrashTest extends TestCase
         self::assertSame($snapshotId, (int) ($logPayload['snapshot_id'] ?? 0));
     }
 
+    /**
+     * Audit 2026-08-07: výkaz práce jde kaskádou (fk_wr_invoice ON DELETE
+     * CASCADE) — snapshot ho MUSÍ zachytit, jinak se nenávratně ztratí podklad
+     * hodinové fakturace. Dřív ve snapshotu nebyl.
+     */
+    public function testForceDeleteSnapshotsWorkReport(): void
+    {
+        $pdo = $this->db->pdo();
+        $id = $this->insertInvoice('issued', 'TR2098-WR');
+        $this->trash($id);
+
+        // Projekt (FK) + výkaz práce + jeho položka.
+        $pdo->prepare(
+            "INSERT INTO projects (client_id, name, currency_id, status)
+             VALUES (?, 'Koš test projekt', ?, 'active')"
+        )->execute([$this->clientId, $this->currencyId]);
+        $projectId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare(
+            "INSERT INTO work_reports (invoice_id, project_id, title, total_hours, total_amount)
+             VALUES (?, ?, 'Výkaz práce červen', 8.00, 8000.00)"
+        )->execute([$id, $projectId]);
+        $wrId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO work_report_items (work_report_id, description, work_date, hours, rate, total_amount, order_index)
+             VALUES (?, 'Analýza', '2098-06-10', 8.00, 1000.00, 8000.00, 0)"
+        )->execute([$wrId]);
+
+        try {
+            $ok = $this->forceDelete($id, 'admin', 'TR2098-WR');
+            self::assertSame(200, $ok->getStatusCode(), (string) $ok->getBody());
+            $snapshotId = (int) self::json($ok)['snapshot_id'];
+
+            $payload = json_decode((string) $pdo->query(
+                "SELECT payload FROM deleted_document_snapshots WHERE id = {$snapshotId}"
+            )->fetchColumn(), true);
+
+            self::assertNotEmpty($payload['work_reports'] ?? [],
+                'Snapshot musí nést výkaz práce (kaskádou by jinak zmizel bez otisku).');
+            self::assertSame('Výkaz práce červen', $payload['work_reports'][0]['title'] ?? null);
+            self::assertNotEmpty($payload['work_report_items'] ?? [],
+                'Snapshot musí nést i položky výkazu (hodiny, sazby).');
+            self::assertEqualsWithDelta(8.0, (float) ($payload['work_report_items'][0]['hours'] ?? 0), 0.005);
+        } finally {
+            // Projekt uklidit (invoice + work_report smazal force delete kaskádou).
+            $pdo->prepare('DELETE FROM projects WHERE id = ?')->execute([$projectId]);
+        }
+    }
+
     public function testForceDeleteRequiresTrashFirstWhenTrashEnabled(): void
     {
         $id = $this->insertInvoice('issued', 'TR2098-NIT');
         $resp = $this->forceDelete($id, 'admin', 'TR2098-NIT');
         self::assertSame(409, $resp->getStatusCode());
         self::assertSame('not_in_trash', self::json($resp)['error']['code']);
+    }
+
+    // ------------------------------------------------------------------
+    // Audit 2026-08-07: doklad v koši = mimo evidenci i MIMO HTTP vrstvu.
+    // TrashGuard kryje jen akce; tyhle testy tvrdí sémantiku v repozitářích
+    // a službách, kudy vedou cron a veřejné endpointy.
+    // ------------------------------------------------------------------
+
+    /**
+     * Recurring cron NESMÍ najít trashed koncept jako fakturu období — jinak
+     * ho vystavil, odeslal klientovi, a doklad s deleted_at unikl DPH evidenci
+     * i párování plateb (nález auditu, HIGH).
+     */
+    public function testTrashedDraftIsInvisibleToRecurringPeriodLookup(): void
+    {
+        $pdo = $this->db->pdo();
+        // FK vyžaduje skutečnou šablonu — minimální řádek, úklid v tearDown přes DELETE níže.
+        $pdo->prepare(
+            "INSERT INTO recurring_invoice_templates
+                (supplier_id, client_id, name, frequency, anchor_date, next_run_date, currency_id, created_by)
+             VALUES (?, ?, 'Koš test šablona', 'monthly', '2098-06-01', '2098-07-01', ?, ?)"
+        )->execute([$this->supplierId, $this->clientId, $this->currencyId, $this->userId]);
+        $tplId = (int) $pdo->lastInsertId();
+
+        $id = $this->insertInvoice('draft', '');
+        $pdo->prepare('UPDATE invoices SET recurring_template_id = ?, issue_date = ? WHERE id = ?')
+            ->execute([$tplId, '2098-06-15', $id]);
+
+        $repo = $this->container->get(\MyInvoice\Repository\RecurringTemplateRepository::class);
+        self::assertNotNull($repo->findPeriodInvoice($tplId, '2098-06-15'),
+            'predpoklad: nesmazany koncept se najde');
+
+        $pdo->prepare('UPDATE invoices SET deleted_at = current_timestamp() WHERE id = ?')->execute([$id]);
+
+        self::assertNull($repo->findPeriodInvoice($tplId, '2098-06-15'),
+            'koncept v koši nesmí být fakturou období');
+
+        // Úklid šablony hned tady — invoices řádek maže tearDown, FK je SET NULL.
+        $pdo->prepare('UPDATE invoices SET recurring_template_id = NULL WHERE id = ?')->execute([$id]);
+        $pdo->prepare('DELETE FROM recurring_invoice_templates WHERE id = ?')->execute([$tplId]);
+    }
+
+    /** Vystavovací služba doklad v koši odmítne — i když ji zavolá cesta bez TrashGuardu. */
+    public function testAutoIssueRefusesTrashedInvoice(): void
+    {
+        $pdo = $this->db->pdo();
+        $id = $this->insertInvoice('draft', '');
+        $pdo->prepare('UPDATE invoices SET deleted_at = current_timestamp() WHERE id = ?')->execute([$id]);
+
+        $svc = $this->container->get(\MyInvoice\Service\Invoice\AutoIssueAndSendService::class);
+
+        $this->expectException(\DomainException::class);
+        $svc->run($id, $this->userId, '127.0.0.1', 'phpunit');
+    }
+
+    /** Veřejný odkaz (web faktura) se dokladu v koši chová, jako by neexistoval. */
+    public function testPublicTokenDoesNotServeTrashedInvoice(): void
+    {
+        $pdo = $this->db->pdo();
+        $id = $this->insertInvoice('issued', 'TR2098-PUB');
+        $token = bin2hex(random_bytes(24));
+        $pdo->prepare('UPDATE invoices SET public_token = ? WHERE id = ?')->execute([$token, $id]);
+
+        $repo = $this->container->get(\MyInvoice\Repository\InvoiceRepository::class);
+        self::assertNotNull($repo->publicInvoiceRefByToken($token), 'predpoklad: bez koše se najde');
+
+        $pdo->prepare('UPDATE invoices SET deleted_at = current_timestamp() WHERE id = ?')->execute([$id]);
+
+        self::assertNull($repo->publicInvoiceRefByToken($token),
+            'doklad v koši nesmí být veřejně dostupný');
+    }
+
+    /** Na doklad v koši se nesmí navázat záloha — protistrana jde z těla požadavku. */
+    public function testLinkAdvanceRefusesTrashedCounterpart(): void
+    {
+        $pdo = $this->db->pdo();
+        $finalId = $this->insertInvoice('draft', '');
+        $advId   = $this->insertInvoice('issued', 'TR2098-ADV');
+        $pdo->prepare("UPDATE invoices SET invoice_type = 'proforma', deleted_at = current_timestamp() WHERE id = ?")
+            ->execute([$advId]);
+
+        $repo = $this->container->get(\MyInvoice\Repository\InvoiceRepository::class);
+
+        try {
+            $repo->linkAdvance($finalId, $advId, $this->supplierId);
+            self::fail('vazba na proformu v koši musí být odmítnuta');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('koši', $e->getMessage());
+        }
     }
 }

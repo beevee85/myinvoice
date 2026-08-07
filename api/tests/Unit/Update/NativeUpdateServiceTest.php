@@ -25,14 +25,42 @@ final class NativeUpdateServiceTest extends TestCase
     {
         $this->tmp = sys_get_temp_dir() . '/myinvoice-upd-test-' . bin2hex(random_bytes(6));
         mkdir($this->tmp, 0775, true);
+        // Audit 2026-08-07: nový container-guard by v Dockeru (kde běží CI/testy)
+        // shodil testy filesystemu. Override ho vypne — vlastní test guardu níž
+        // si ho zapne zpět.
+        putenv('MYINVOICE_ALLOW_NATIVE_UPDATE=1');
     }
 
     protected function tearDown(): void
     {
+        putenv('MYINVOICE_ALLOW_NATIVE_UPDATE');
         $this->removeTree($this->tmp);
     }
 
     // ---------- verze -----------------------------------------------------
+
+    /**
+     * Audit 2026-08-07: v kontejneru MUSÍ preflight i run blokovat — nativní
+     * updater by přepsal forkový strom čistým upstreamem. Test běží jen tam,
+     * kde je kontejner skutečně detekován (/.dockerenv), jinak se přeskočí.
+     */
+    public function testContainerBlocksNativeUpdate(): void
+    {
+        putenv('MYINVOICE_ALLOW_NATIVE_UPDATE');   // vypnout override ze setUp
+        if (!NativeUpdateService::isContainer()) {
+            self::markTestSkipped('Neběžíme v kontejneru — guard nelze ověřit bez /.dockerenv.');
+        }
+
+        $svc = new NativeUpdateService($this->tmp, $this->tmp);
+
+        $pre = $svc->preflight('9.9.9');
+        self::assertFalse($pre['ok'], 'preflight musí v kontejneru blokovat');
+        self::assertNotSame([], $pre['blockers']);
+
+        $run = $svc->run('9.9.9', 'test');
+        self::assertSame('failed', $run['status'] ?? '', 'run musí v kontejneru blokovat i bez preflightu');
+        self::assertStringContainsString('kontejner', mb_strtolower((string) ($run['message'] ?? '')));
+    }
 
     public function testOnlyPlainSemverIsAccepted(): void
     {
