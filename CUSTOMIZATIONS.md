@@ -1344,3 +1344,40 @@ náš). Ověřeno po nasazení: verze 4.53.2, migrace 0149 OK, batch-import
 6 rout, dist chunky na místě. Zálohy:
 `/root/backup-myinvoice-db-2026-08-07-pred-v4532.zip`, image
 `myinvoice:pred-v4532`.
+
+## 2026-08-07 — AUDIT tří forkových funkcí (koš, DDKPZ, dávkový import)
+
+Multiagentní audit (31 agentů, 8 optik, adversariální ověření) tří velkých
+forkových funkcí + křížové integrace + driftu po v4.53.2. **22 nálezů, 21
+opraveno, 1 vyvrácen skeptikem, 1 odložen.** Merge 06bdc4ce (větev
+fix/audit-2026-08-07). Sada 2514 zelených (+13 regresních testů).
+
+**Koš (0905) — díry mimo HTTP vrstvu (TrashGuard kryl jen akce):**
+- HIGH: recurring cron vystavil a ODESLAL fakturu z koše (findPeriodInvoice
+  bez deleted_at → guard ve findPeriodInvoice + AutoIssueAndSendService).
+- HIGH: schvalovací tok (veřejný endpoint) vystavil doklad z koše.
+- MEDIUM: publicInvoiceRefByToken servíroval web fakturu z koše; Delete
+  PurchaseInvoicePdf/Upload+DeleteAttachment/CloneInvoice bez TrashGuardu;
+  linkAdvance vydané strany navazoval na proformu v koši.
+- HIGH: hard delete kaskádově NIČIL výkaz práce — snapshot ho neukládal.
+
+**DDKPZ § 37a:**
+- HIGH: PUT /items obcházel zámek odpočtových řádků (guard vytažen do
+  SettlementLockGuard, volají ho obě akce).
+- HIGH: DDKPZ v cizí měně dědil kurz proformy místo kurzu dne platby.
+- MEDIUM: unlink mazal zaokrouhlovací řádky všech sazeb, resync jen odpojeného;
+  FinalFromProforma idempotence nacházela stornovaný finál; MonthlyExport RC
+  detekce jen z flagu (rozešla se s ledgerem).
+- ODLOŽEN (IMPROVEMENTS.md): § 37a přeplatek v cizí měně přepočten kurzem
+  konečné faktury místo zálohy — vyžaduje schématickou změnu.
+
+**Dávkový import + infra:**
+- HIGH: apply padal na 500 (délka názvu > 190) → dávka uvízla; Money overflow
+  → TypeError. Oba jako validační nálezy.
+- MEDIUM: rozpor „DPH × neplátce" degradován z blokujícího (parita s 0911);
+  nativní auto-update bez docker guardu (mohl v kontejneru přepsat fork).
+
+**Regresní test [19]:** koeficient § 37a shora — mutace /100 dřív přežila
+celou sadu (testy plně vyrovnávaly, netto ≈ 0). Nový test páruje částečně.
+
+Rollback: myinvoice:pred-audit-fixes, /root/backup-myinvoice-db-2026-08-07-pred-audit-fixes.zip
