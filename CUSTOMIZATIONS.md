@@ -1381,3 +1381,22 @@ fix/audit-2026-08-07). Sada 2514 zelených (+13 regresních testů).
 celou sadu (testy plně vyrovnávaly, netto ≈ 0). Nový test páruje částečně.
 
 Rollback: myinvoice:pred-audit-fixes, /root/backup-myinvoice-db-2026-08-07-pred-audit-fixes.zip
+
+## 2026-08-07 (odpoledne) — poslední nález auditu: § 37a cizoměnový odpočet
+
+Merge dedaa2f0 (větev fix/settlement-fx-rate). Dořešen jediný odložený nález
+auditu: odpočtový řádek zálohy v cizí měně se v DPH evidenci přepočítá kurzem
+ZÁLOHY (§ 37a odst. 2 písm. b), ne kurzem konečné faktury.
+
+**Bez migrace** — při rozboru se ukázalo, že to původně odhadnutou schématickou
+změnu nevyžaduje: odpočtové řádky nesou settlement_source_purchase_invoice_id,
+takže VatLedgerService připojí zdrojový DDKPZ (LEFT JOIN src) a pro odpočtový
+řádek použije jeho kurz. Zdanitelné řádky faktury dál běží kurzem faktury.
+
+Produkční expozice NULOVÁ (0 cizoměnových DDKPZ na obou stranách) — latentní
+správnost, nemohlo rozbít existující data. Regresní test
+testForeignCurrencySettlementRowUsesAdvanceRate mutačně ověřen. Sada 2515 zelených.
+
+Rollback: myinvoice:pred-fx37a, /root/backup-myinvoice-db-2026-08-07-pred-fx37a.zip
+
+TÍM JSOU VYČERPÁNY VŠECHNY NÁLEZY AUDITU (22: 21 opraveno+nasazeno, 1 vyvrácen).
