@@ -263,7 +263,8 @@ final class VatClassificationMapperTest extends TestCase
             total_without_vat REAL NOT NULL,
             total_vat REAL NOT NULL,
             vat_classification_code TEXT NULL,
-            is_fixed_asset INTEGER NOT NULL DEFAULT 0
+            is_fixed_asset INTEGER NOT NULL DEFAULT 0,
+            settlement_source_purchase_invoice_id INTEGER NULL
         )");
 
         $this->pdo->exec("CREATE TABLE invoices (

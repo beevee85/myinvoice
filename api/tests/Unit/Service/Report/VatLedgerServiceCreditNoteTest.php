@@ -177,7 +177,7 @@ final class VatLedgerServiceCreditNoteTest extends TestCase
         // Číselník sazeb — VatLedgerService z něj vylučuje sazbu „mimo předmět DPH" (CZ-NA).
         $this->pdo->exec("CREATE TABLE vat_rates (id INTEGER PRIMARY KEY, code TEXT NOT NULL, rate_percent REAL NOT NULL DEFAULT 0)");
         $this->pdo->exec("INSERT INTO vat_rates (id, code, rate_percent) VALUES (1, 'CZ-21', 21), (2, 'CZ-12', 12), (3, 'CZ-0', 0), (7, 'CZ-NA', 0)");
-        $this->pdo->exec("INSERT INTO currencies (id, code) VALUES (1, 'CZK')");
+        $this->pdo->exec("INSERT INTO currencies (id, code) VALUES (1, 'CZK'), (2, 'EUR')");
         $this->pdo->exec("CREATE TABLE countries (id INTEGER PRIMARY KEY, iso2 TEXT NOT NULL, is_eu INTEGER NOT NULL DEFAULT 0)");
         $this->pdo->exec("INSERT INTO countries (id, iso2, is_eu) VALUES (1,'CZ',1), (4,'DE',1), (9,'US',0)");
         $this->pdo->exec("CREATE TABLE tax_constants (year INTEGER PRIMARY KEY, data TEXT NOT NULL)");
@@ -221,7 +221,8 @@ final class VatLedgerServiceCreditNoteTest extends TestCase
             id INTEGER PRIMARY KEY, purchase_invoice_id INTEGER NOT NULL, vat_rate_id INTEGER,
             vat_rate_snapshot REAL NOT NULL,
             description TEXT NULL, total_without_vat REAL NOT NULL, total_vat REAL NOT NULL,
-            vat_classification_code TEXT NULL, is_fixed_asset INTEGER NOT NULL DEFAULT 0
+            vat_classification_code TEXT NULL, is_fixed_asset INTEGER NOT NULL DEFAULT 0,
+            settlement_source_purchase_invoice_id INTEGER NULL
         )");
         $this->pdo->exec("CREATE TABLE invoices (
             id INTEGER PRIMARY KEY, supplier_id INTEGER NOT NULL, client_id INTEGER NULL, varsymbol TEXT NULL,
@@ -268,5 +269,60 @@ final class VatLedgerServiceCreditNoteTest extends TestCase
         $this->pdo->prepare("INSERT INTO purchase_invoice_items (id, purchase_invoice_id, vat_rate_snapshot, description, total_without_vat, total_vat, vat_classification_code)
             VALUES (?, ?, 21.0, 'plnění', ?, ?, ?)")
             ->execute([$id, $id, $base, $vat, $code]);
+    }
+
+    /**
+     * Audit 2026-08-07 (odložený nález § 37a): odpočtový řádek zálohy v cizí měně
+     * se do DPH evidence přepočítává kurzem ZÁLOHY (§ 37a odst. 2 písm. b),
+     * ne kurzem konečné faktury.
+     *
+     * Scénář: konečná faktura v EUR, kurz konečné 24,00. Odpočet zálohy 1 000 EUR
+     * základ / 210 EUR daň pochází z DDKPZ vystaveného kurzem 25,50. Odpočtový
+     * řádek MUSÍ v CZK vyjít −1 000 × 25,50 = −25 500 (základ) a −210 × 25,50 =
+     * −5 355 (daň), ne kurzem faktury (−24 000 / −5 040). Zdanitelný řádek téže
+     * faktury se dál přepočítává kurzem faktury (24,00) — kurzy se nemíchají.
+     */
+    public function testForeignCurrencySettlementRowUsesAdvanceRate(): void
+    {
+        // DDKPZ (zdroj odpočtu) v EUR, kurz 25,50 — nese svůj vlastní kurz.
+        $this->pdo->prepare("INSERT INTO purchase_invoices (id, supplier_id, vendor_id, varsymbol, vendor_invoice_number, document_kind, issue_date, tax_date, currency_id, exchange_rate, reverse_charge, status, vat_classification_code, total_with_vat)
+            VALUES (500, 1, 201, 'DZ500', 'ZAL500', 'tax_document', '2026-06-15', '2026-06-15', 2, 25.50, 0, 'received', '40', 1210)")
+            ->execute();
+
+        // Konečná faktura v EUR, kurz konečné 24,00.
+        $this->pdo->prepare("INSERT INTO purchase_invoices (id, supplier_id, vendor_id, varsymbol, vendor_invoice_number, document_kind, issue_date, tax_date, currency_id, exchange_rate, reverse_charge, status, vat_classification_code, total_with_vat)
+            VALUES (501, 1, 201, 'PF501', 'FV501', 'invoice', '2026-07-10', '2026-07-10', 2, 24.00, 0, 'received', '40', 0)")
+            ->execute();
+        // Zdanitelný řádek (plná hodnota dokladu) — kurz faktury 24,00.
+        $this->pdo->prepare("INSERT INTO purchase_invoice_items (id, purchase_invoice_id, vat_rate_snapshot, description, total_without_vat, total_vat, vat_classification_code, settlement_source_purchase_invoice_id)
+            VALUES (600, 501, 21.0, 'plnění', 1000.00, 210.00, '40', NULL)")
+            ->execute();
+        // Odpočtový řádek zálohy — nese settlement_source na DDKPZ 500 (kurz 25,50).
+        $this->pdo->prepare("INSERT INTO purchase_invoice_items (id, purchase_invoice_id, vat_rate_snapshot, description, total_without_vat, total_vat, vat_classification_code, settlement_source_purchase_invoice_id)
+            VALUES (601, 501, 21.0, 'Odpočet zálohy', -1000.00, -210.00, '40', 500)")
+            ->execute();
+
+        $rows = $this->purchaseRows('2026-07-01', '2026-07-31');
+        // Jen řádky konečné faktury 501 (DDKPZ 500 je z června).
+        $rows = array_values(array_filter($rows, static fn (array $r) => (int) $r['invoice_id'] === 501));
+
+        $taxable   = null;
+        $deduction = null;
+        foreach ($rows as $r) {
+            if ((float) $r['base_czk'] > 0) $taxable = $r;
+            if ((float) $r['base_czk'] < 0) $deduction = $r;
+        }
+        self::assertNotNull($taxable, 'zdanitelný řádek chybí');
+        self::assertNotNull($deduction, 'odpočtový řádek chybí');
+
+        // Zdanitelný: kurz faktury 24,00.
+        self::assertEqualsWithDelta(24000.00, (float) $taxable['base_czk'], 0.01);
+        self::assertEqualsWithDelta(5040.00, (float) $taxable['vat_czk'], 0.01);
+
+        // Odpočet: kurz ZÁLOHY 25,50 — ne kurz faktury (jinak by vyšlo −24 000 / −5 040).
+        self::assertEqualsWithDelta(-25500.00, (float) $deduction['base_czk'], 0.01,
+            'odpočtový řádek se musí přepočítat kurzem zálohy 25,50, ne faktury 24,00');
+        self::assertEqualsWithDelta(-5355.00, (float) $deduction['vat_czk'], 0.01,
+            'DPH odpočtu kurzem zálohy: -210 × 25,50 = -5 355');
     }
 }

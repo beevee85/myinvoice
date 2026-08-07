@@ -91,8 +91,13 @@ rozbilo by jednoduchost systému.
 
 ## Odloženo z auditu 2026-08-07 (DDKPZ § 37a v cizí měně)
 
-- [ ] **§ 37a: záporný rozdíl v cizí měně přepočítán kurzem konečné faktury místo
-  kurzu zálohy** (MEDIUM, nález auditu). `PurchaseSettlementService::link` páruje
+- [x] **§ 37a: záporný rozdíl v cizí měně přepočítán kurzem konečné faktury místo
+  kurzu zálohy** — VYŘEŠENO 7. 8. 2026 (větev fix/settlement-fx-rate). Ukázalo se, že
+  oprava NEVYŽADUJE migraci: odpočtové řádky nesou settlement_source_purchase_invoice_id,
+  ledger připojí zdrojový DDKPZ a pro odpočtový řádek použije JEHO kurz (= kurz zálohy).
+  Zdanitelné řádky faktury dál běží kurzem faktury. Regresní test
+  testForeignCurrencySettlementRowUsesAdvanceRate (mutačně ověřen). Produkční expozice
+  byla nulová (0 cizoměnových DDKPZ), takže šlo čistě o latentní správnost. (MEDIUM, nález auditu). `PurchaseSettlementService::link` páruje
   v libovolné měně a odpočtové řádky ukládá v měně dokladu; `VatLedgerService`
   pak VŠECHNY řádky konečné faktury (vč. odpočtů z DDKPZ) přepočítá jediným
   kurzem konečné faktury. Podle § 37a odst. 2 písm. b má být odpočet zálohy

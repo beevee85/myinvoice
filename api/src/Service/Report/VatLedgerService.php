@@ -250,6 +250,12 @@ final class VatLedgerService
                          THEN 1 ELSE 0 END) AS code_estimated,
                    pii.vat_rate_snapshot AS vat_rate,
                    pii.description AS description,
+                   -- § 37a/2/b (audit 2026-08-07): odpočtový řádek zálohy se přepočítává
+                   -- kurzem ZÁLOHY (DDKPZ), ne kurzem konečné faktury. Zdrojový DDKPZ nese
+                   -- svůj kurz z doby vzniku (= den platby zálohy), takže ho vezmeme odtud.
+                   -- NULL u běžných řádků → normalize() padne zpět na kurz faktury.
+                   pii.settlement_source_purchase_invoice_id AS settlement_src,
+                   src.exchange_rate AS settlement_src_rate,
                    (CASE WHEN pi.document_kind = 'credit_note'
                          THEN -ABS(COALESCE(pii.total_without_vat, 0))
                          ELSE COALESCE(pii.total_without_vat, 0) END) AS base,
@@ -260,6 +266,7 @@ final class VatLedgerService
               JOIN clients c ON c.id = pi.vendor_id
          LEFT JOIN countries co ON co.id = c.country_id
               JOIN purchase_invoice_items pii ON pii.purchase_invoice_id = pi.id
+         LEFT JOIN purchase_invoices src ON src.id = pii.settlement_source_purchase_invoice_id
          LEFT JOIN currencies cur ON cur.id = pi.currency_id
              WHERE pi.supplier_id = ?
                AND {$statusFilter}
@@ -367,6 +374,17 @@ final class VatLedgerService
         // ho detekují a export zastaví (issue #238), protože 1.0 by tiše vykázalo EUR jako CZK.
         $isCzk = $r['currency'] === 'CZK';
         $rawRate = $r['exchange_rate'] === null ? null : (float) $r['exchange_rate'];
+
+        // § 37a/2/b (audit 2026-08-07): odpočtový řádek zálohy se přepočítává kurzem
+        // ZÁLOHY, ne kurzem konečné faktury. Zdrojový DDKPZ nese svůj kurz z doby vzniku
+        // (den platby zálohy). Když ho má, přebije kurz faktury pro TENHLE řádek —
+        // ostatní (zdanitelné) řádky faktury dál běží kurzem faktury. U CZK nebo když
+        // DDKPZ kurz nemá se nic nemění (padne zpět na kurz faktury / 1.0).
+        if (!$isCzk && !empty($r['settlement_src']) && $r['settlement_src_rate'] !== null
+            && (float) $r['settlement_src_rate'] > 0.0) {
+            $rawRate = (float) $r['settlement_src_rate'];
+        }
+
         $exchangeRateMissing = !$isCzk && ($rawRate === null || $rawRate <= 0.0);
         $rate = ($isCzk || $rawRate === null || $rawRate <= 0.0) ? 1.0 : $rawRate;
         $vatRate = (float) $r['vat_rate'];
