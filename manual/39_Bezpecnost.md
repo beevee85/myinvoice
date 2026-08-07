@@ -86,9 +86,9 @@ TOTP = time-based one-time password (RFC 6238).
 3. Aplikace začne generovat 6-cifrené kódy každých 30 sekund.
 4. Zadej aktuální kód do MyInvoice → **Potvrdit aktivaci**.
 
-> ⚠️ MyInvoice **nepoužívá záložní jednorázové kódy** (recovery codes).
-> Při ztrátě autentikátoru použij jinou passkey, nebo CLI rescue:
-> `php api/bin/reset-mfa.php <email>` — viz [§ 39.2.4](#3924-obnova-pristupu).
+> 💡 Při ztrátě autentikátoru použij jinou passkey nebo **záložní kód**
+> (viz [§ 39.2.4](#3924-obnova-pristupu)). Až když nemáš nic z toho, zbývá CLI
+> rescue `php api/bin/reset-mfa.php <email>`.
 
 ### 39.2.3 Přihlášení s passkey a MFA
 
@@ -142,16 +142,40 @@ Kam se klíč uloží, vybírá prohlížeč při registraci; aplikace to neří
 nezjistí zpětně. Máš-li jediný klíč a ten je vázaný na zařízení, drž si jako
 zálohu buď druhý klíč, nebo aktivní TOTP.
 
-Nejprve použij jinou zaregistrovanou passkey nebo TOTP. Pokud není dostupný
-žádný silný faktor, správce může na serveru spustit:
+#### Záložní jednorázové kódy
+
+**Profil → Přístupové klíče → Záložní kódy.** Sada deseti kódů ve tvaru
+`ABCDE-FGHJK`; každý funguje **právě jednou**. Zadávají se na přihlašovací
+stránce místo passkey i TOTP (odkaz „Nemám klíč ani autentikátor") a potvrdí se
+jimi i odebrání ztraceného klíče.
+
+Server ukládá jen SHA-256 kódu, takže **sadu jde zobrazit jedinkrát** — při
+vygenerování. Ulož ji mimo počítač, ze kterého se přihlašuješ: tisk, trezor,
+správce hesel. Vygenerování nové sady okamžitě ruší tu předchozí.
+
+Co kód schválně **ne**umí, aby zůstal záchranou a nestal se trvalým faktorem:
+
+- nevydá další sadu záložních kódů (nejdřív obnov reálný faktor),
+- nepotvrdí vytvoření API tokenu ani práci s podpisovým certifikátem pro EPO,
+- nepočítá se do `allowed_mfa_methods`; naopak jím projdeš i v konfiguraci, která
+  by tě jinak zamkla ven (`allowed_mfa_methods = ['passkey']` + ztracený klíč).
+
+Použití kódu se zapisuje do activity logu (`auth.recovery_code_login`,
+`auth.recovery_code_used`) i s IP a počtem zbývajících kódů.
+
+#### Rescue na serveru
+
+Nejprve použij jinou zaregistrovanou passkey, TOTP nebo záložní kód. Pokud není
+dostupné nic z toho, správce může na serveru spustit:
 
 ```bash
 php api/bin/reset-mfa.php tvuj@email.cz
 ```
 
 Skript vypne TOTP, odvolá všechny passkeys, zruší důvěryhodná zařízení,
-čekající OTP, WebAuthn flow a step-up proofy a invaliduje všechny session
-uživatele. Původní název `reset-2fa.php` zůstává kompatibilním aliasem.
+čekající OTP, WebAuthn flow, step-up proofy i **záložní kódy** a invaliduje
+všechny session uživatele. Původní název `reset-2fa.php` zůstává kompatibilním
+aliasem.
 
 > ⚠️ Rescue používej jen z důvěryhodného shellu serveru. Přímý SQL zásah není
 > ekvivalentní: snadno ponechá aktivní session nebo rozpracované ověřovací flow.
@@ -174,6 +198,10 @@ Stejné lze přepnout přes ENV (Docker / PaaS):
 MYINVOICE_AUTH_REQUIRE_MFA=true
 MYINVOICE_AUTH_MFA_METHODS=passkey,totp
 ```
+
+Úvodní [wizard](06_Setup_wizard.md) nabízí jen přepínač „vyžadovat silné MFA";
+seznam metod nechává na konfiguraci, takže po instalaci jsou povolené obě. Jeho
+zúžení je vědomý zásah do `cfg.php` / ENV.
 
 Chování:
 

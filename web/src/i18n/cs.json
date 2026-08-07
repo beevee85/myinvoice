@@ -454,6 +454,7 @@
     "feature_text2": "Potřebujete do MyInvoice vlastní funkci, report nebo napojení na váš systém? Napište nám — připravíme nabídku s fixní cenou a fixním termínem.",
     "feature_highlights": "20 let na trhu · Senior tým, žádní junioři · Fixní cena a termín",
     "feature_cta": "Odeslat poptávku",
+    "myucto_link": "MyÚčto — přejděte na kompletní účetní systém",
     "close": "Zavřít"
   },
   "profile_signing": {
@@ -1268,8 +1269,24 @@
     "how_docker_desc": "Klik na 'Aktualizovat' zapíše flag soubor `storage/upgrade-requested.json`. Mimo container běžící watcher (`cmd/docker-update-watcher.(sh/ps1)` jako systemd unit / Scheduled Task) ho zachytí a spustí `cmd/docker-update.(sh/ps1)` — pull nové image, restart stacku, migrace. Výsledek + log se objeví na této stránce.",
     "how_docker_setup": "Pokud watcher ještě nemáš nainstalovaný, postupuj podle § 19.4 v manuálu (systemd unit pro Linux, Scheduled Task pro Windows). Bez watcheru spusť po kliku na 'Aktualizovat' na hostu ručně:",
     "how_native_title": "Nativní instalace",
-    "how_native_desc": "Pro nativní deployment (sdílený hosting / VPS bez Dockeru) UI v této verzi nepouští download tarballu automaticky — místo toho ti po kliku na 'Aktualizovat' ukáže přesné copy-paste příkazy. Vyžaduje na hostu PHP CLI + Composer + Node + pnpm. Pokud nejsou k dispozici, použij production bundle z release page (kompletní deployable tar.gz):",
-    "manual_link": "Detaily v manuálu — § 19 Aktualizace"
+    "how_native_desc": "Klik na „Aktualizovat\" stáhne production bundle z GitHub release (`myinvoice-X.Y.Z.tar.gz`), ověří jeho SHA-256, nasadí ho přes instalaci a spustí migrace — Composer ani Node na hostu nejsou potřeba, bundle má vendor, web/dist i manuál už představěné. Konfigurace (`cfg*.php`) a data (`storage/`, `private/`, `log/`) se nikdy nepřepisují a přepsané soubory se zazálohují do `storage/updates/<verze>/backup/`.",
+    "trigger_native_confirm": "Aktualizovat na {version}? Aplikace stáhne production bundle z GitHub release, nasadí ho přes tuto instalaci a spustí migrace. Konfigurace ani data se nemění, přepsané soubory se zazálohují. Doporučujeme mít aktuální zálohu databáze.",
+    "in_progress_native_desc": "Worker na pozadí stahuje bundle, nasazuje soubory a spouští migrace. Nezavírej instalaci — průběh se tu obnovuje sám.",
+    "step_of": "krok {index} z {count}",
+    "step_preflight": "Kontrola prostředí — práva, místo na disku, PHP CLI, rozšíření.",
+    "step_download": "Stahování production bundlu z GitHub release.",
+    "step_verify": "Ověření SHA-256 kontrolního součtu stáhnutého bundlu.",
+    "step_extract": "Rozbalení bundlu do staging adresáře a kontrola obsahu.",
+    "step_backup": "Záloha souborů, které aktualizace přepíše.",
+    "step_swap": "Nasazení nových souborů přes instalaci.",
+    "step_migrate": "Databázové migrace (php api/bin/migrate.php).",
+    "step_finish": "Dokončení — zápis nové verze a úklid.",
+    "preflight_blocked": "Automatickou aktualizaci teď nelze spustit:",
+    "preflight_ok": "Tato instalace umí aktualizaci provést sama z release bundlu.",
+    "result_log": "Log",
+    "result_backup": "Záloha přepsaných souborů",
+    "how_native_manual": "Když automatická cesta nejde (chybí práva, PHP CLI nebo místo na disku), stejný bundle nasadíš ručně:",
+    "manual_link": "Detaily v manuálu — § 40 Aktualizace"
   },
   "session_lock": {
     "title": "Aplikace je zamčená",
@@ -1312,8 +1329,8 @@
     "credential_label": "Název přístupového klíče",
     "label_placeholder": "Název, např. Pixel 9",
     "fresh_auth_hint": "Přidání a odebrání vyžaduje nové ověření existujícím silným faktorem; u prvního faktoru aktuální heslo.",
-    "totp_label": "TOTP kód pro ověření (volitelně)",
-    "totp_optional": "6místný TOTP kód (volitelná alternativa)",
+    "totp_label": "TOTP kód — když nemáte klíč po ruce",
+    "totp_optional": "6místný kód z autentikátoru",
     "totp_label_required": "TOTP kód pro ověření *",
     "totp_required_placeholder": "6místný TOTP kód",
     "totp_required_hint": "Máte aktivní 2FA, ale zatím žádný přístupový klíč — registraci proto lze ověřit jedině kódem z authenticator aplikace.",
@@ -1325,7 +1342,38 @@
     "rename_prompt": "Nový název přístupového klíče",
     "revoke": "Odebrat",
     "revoke_confirm": "Opravdu odebrat přístupový klíč „{label}“?",
-    "operation_failed": "Operace s přístupovým klíčem se nepodařila."
+    "operation_failed": "Operace s přístupovým klíčem se nepodařila.",
+    "method_not_allowed": "Přístupové klíče jsou v konfiguraci vypnuté (auth.allowed_mfa_methods), takže nový nelze zaregistrovat. Existující klíče níž zůstávají a jdou odebrat.",
+    "revoke_hint_totp": "Odebrání klíče je citlivá operace — potvrdíte ji jiným klíčem, nebo TOTP kódem z pole nahoře, když klíč nemáte po ruce.",
+    "revoke_hint_passkey": "Odebrání klíče je citlivá operace — potvrdíte ji systémovým dialogem některého ze svých klíčů.",
+    "revoke_needs_totp": "Zadejte nahoře 6místný TOTP kód — bez něj odebrání nelze potvrdit.",
+    "revoke_totp_fallback": "Nemáte-li klíč po ruce, zadejte nahoře TOTP kód a zkuste to znovu.",
+    "revoke_last_factor": "Tohle je váš poslední silný faktor a přihlašování dvěma faktory je vynucené — odebrat ho nelze. Zaregistrujte nejdřív druhý klíč nebo si zapněte TOTP.",
+    "revoke_no_method": "Odebrání není čím potvrdit — tenhle prohlížeč neumí přístupové klíče a TOTP není k dispozici."
+  },
+  "recovery_codes": {
+    "title": "Záložní kódy",
+    "subtitle": "Jednorázové kódy pro případ, že přijdete o přístupový klíč i autentikátor. Bez nich zbývá jen zásah na serveru.",
+    "none_yet": "Zatím nemáte vygenerované žádné záložní kódy. Pokud přijdete o jediný silný faktor, nedostanete se do účtu.",
+    "remaining": "Zbývá {remaining} z {total} kódů.",
+    "exhausted": "Všechny záložní kódy jsou vyčerpané — vygenerujte novou sadu.",
+    "generate": "Vygenerovat záložní kódy",
+    "regenerate": "Vygenerovat novou sadu",
+    "regenerate_confirm": "Vygenerováním nové sady okamžitě přestanou platit všechny dosavadní kódy. Pokračovat?",
+    "shown_once": "Uložte si je hned — server je neukládá a podruhé je nezobrazí.",
+    "download": "Stáhnout jako soubor",
+    "copy": "Kopírovat",
+    "copied": "Kódy zkopírovány do schránky.",
+    "copy_failed": "Kopírování do schránky selhalo.",
+    "dismiss": "Mám je uložené",
+    "dismiss_confirm": "Opravdu jste si kódy uložili? Zavřením panelu je ztratíte a bude nutné vygenerovat novou sadu.",
+    "step_up_hint": "Vygenerování je citlivá operace — potvrdíte ji přístupovým klíčem nebo kódem z autentikátoru.",
+    "needs_factor": "Novou sadu smí vydat jen skutečný faktor — zaregistrujte přístupový klíč nebo zapněte TOTP. Záložním kódem to schválně nejde.",
+    "totp_label": "Kód z autentikátoru",
+    "totp_fallback": "Nemáte-li klíč po ruce, zadejte kód z autentikátoru a zkuste to znovu.",
+    "failed": "Vygenerování záložních kódů se nepodařilo.",
+    "file_header": "{app} — záložní kódy pro účet {email}. Každý kód funguje právě jednou.",
+    "file_footer": "Ulož je mimo počítač, ze kterého se přihlašuješ (tisk, trezor, správce hesel)."
   },
   "auth": {
     "login": "Přihlásit",
@@ -1396,9 +1444,13 @@
     "passkey_verifying": "Ověřování…",
     "passkey_failed": "Ověření přístupovým klíčem se nepodařilo.",
     "passkey_timeout": "Systémový dialog pro přístupový klíč se neotevřel nebo nebyl dokončen. Zkuste to znovu, nebo použijte kód z autentikátoru.",
+    "passkey_cancelled": "Ověření přístupovým klíčem bylo zrušeno. Zkuste to znovu, nebo použijte kód z autentikátoru.",
     "passkey_timeout_extension": "Přihlášení přístupovým klíčem přerušilo rozšíření prohlížeče (správce hesel), které si přebírá WebAuthn a spadlo. Vypněte ho pro tuto doménu, nebo použijte kód z autentikátoru.",
     "passkey_unsupported_recovery": "Tento prohlížeč přístupové klíče nepodporuje. Použijte dostupný TOTP kód, podporované zařízení nebo prohlížeč, případně požádejte správce o obnovení MFA.",
-    "use_totp_instead": "Použít kód z autentikátoru"
+    "use_totp_instead": "Použít kód z autentikátoru",
+    "use_recovery_instead": "Nemám klíč ani autentikátor — použít záložní kód",
+    "recovery_code": "Záložní kód",
+    "recovery_hint": "Jeden z kódů, které jste si uložili při jejich vygenerování. Každý funguje jen jednou."
   },
   "approval_inbox": {
     "title": "Schvalování výkazů",
@@ -4554,9 +4606,7 @@
     "require_totp_hint": "Po přihlášení bude každý uživatel přesměrován na nastavení TOTP, dokud 2FA neaktivuje.",
     "require_mfa_label": "Vynutit vícefaktorové ověření (MFA) pro všechny uživatele",
     "require_mfa_hint": "Uživatel musí po zadání hesla použít přístupový klíč nebo TOTP podle povolených metod.",
-    "mfa_passkey": "Přístupový klíč (doporučeno)",
-    "mfa_totp": "TOTP z autentikační aplikace",
-    "mfa_method_required": "Vyber alespoň jednu metodu.",
+    "require_mfa_methods_hint": "Povolený je přístupový klíč i TOTP — uživatel si vybere. Zúžit metody lze později v cfg.php (auth.allowed_mfa_methods).",
     "mfa_setup_next": "Vynucení MFA je aktivní. Po pokračování dokončíš nastavení zvolené metody."
   },
   "mfa_setup": {
@@ -4572,7 +4622,14 @@
     "password_required": "Pro registraci první bezpečnostní metody zadej znovu své heslo.",
     "transition_totp_hint": "Účet už má aktivní TOTP. Potvrď jeho aktuálním kódem bezpečný přechod na přístupový klíč.",
     "transition_totp_required": "Pro registraci přístupového klíče zadej platný 6místný TOTP kód.",
+    "no_method_available": "Tato instalace nemá povolenou žádnou metodu, kterou bys tu mohl aktivovat. Uprav auth.allowed_mfa_methods v cfg.php nebo se obrať na správce.",
     "logout_hint": "Bez dokončení MFA lze účet pouze odhlásit."
+  },
+  "webauthn": {
+    "waiting_title": "Čekám na potvrzení bezpečnostního dialogu",
+    "waiting_hint": "Dialog se možná otevřel za oknem prohlížeče nebo na jiném monitoru — zkontrolujte hlavní panel. Pokud nikde není, akci zrušte a zkuste to znovu.",
+    "waiting_hint_extension": "WebAuthn v tomto prohlížeči obsluhuje rozšíření (správce hesel). Když se jeho okno neukáže, akci zrušte a zkuste to znovu bez rozšíření, nebo použijte kód z autentikátoru.",
+    "waiting_cancel": "Zrušit čekání"
   },
   "validation": {
     "required": "Povinné pole",

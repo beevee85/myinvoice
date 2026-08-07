@@ -198,6 +198,7 @@ final class Routes
 
         // Admin — kontrola a upgrade nové verze (M9, issue „Kontrola a upgrade")
         $app->get  ('/api/admin/update/status',  [UpdateAction::class, 'status']);
+        $app->get  ('/api/admin/update/preflight', [UpdateAction::class, 'preflight']);
         $app->post ('/api/admin/update/refresh', [UpdateAction::class, 'refresh']);
         $app->post ('/api/admin/update/trigger', [UpdateAction::class, 'trigger']);
         $app->post ('/api/admin/update/cancel',  [UpdateAction::class, 'cancel']);
@@ -234,6 +235,9 @@ final class Routes
             $g->patch ('/webauthn/credentials/{id:[0-9]+}',   [PasskeyAction::class, 'rename']);
             $g->delete('/webauthn/credentials/{id:[0-9]+}',   [PasskeyAction::class, 'revoke']);
             $g->post  ('/mfa/step-up/totp',                   [MfaStepUpAction::class, 'totp']);
+            $g->post  ('/mfa/step-up/recovery',               [MfaStepUpAction::class, 'recovery']);
+            $g->get   ('/mfa/recovery-codes',                 [\MyInvoice\Action\Auth\MfaRecoveryCodeAction::class, 'status']);
+            $g->post  ('/mfa/recovery-codes',                 [\MyInvoice\Action\Auth\MfaRecoveryCodeAction::class, 'generate']);
             $g->get   ('/session/status',                     [SessionAction::class, 'status']);
             $g->post  ('/session/activity',                   [SessionAction::class, 'activity']);
             $g->post  ('/session/lock',                       [SessionAction::class, 'lock']);

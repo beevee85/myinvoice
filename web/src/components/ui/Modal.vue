@@ -4,7 +4,8 @@ import { useI18n } from 'vue-i18n'
 
 /**
  * Generic modal — backdrop, ESC close, click-outside close, sticky header.
- * Tělo se scrolluje, hlavička zůstává. Šířka přes `widthClass` (Tailwind utility).
+ * Tělo se scrolluje, hlavička i patička zůstávají. Šířka přes `widthClass`
+ * (Tailwind utility). Volitelný slot `footer` drží akční tlačítka dialogu.
  */
 const props = withDefaults(defineProps<{
   title: string
@@ -53,8 +54,9 @@ void props
         <div class="overflow-y-auto flex-1 px-6 py-5">
           <slot />
         </div>
-        <!-- Volitelná patička pro akční tlačítka; bez slotu se nevykreslí (defaultní chování beze změny). -->
-        <footer v-if="$slots.footer" class="px-6 py-4 border-t border-neutral-200 flex justify-end gap-2 shrink-0">
+        <!-- Volitelná patička pro akční tlačítka; bez slotu se nevykreslí (obě strany ji přidaly nezávisle, vzato upstream znění). -->
+        <footer v-if="$slots.footer"
+          class="px-5 py-3 border-t border-neutral-200 flex items-center justify-end gap-2 shrink-0">
           <slot name="footer" />
         </footer>
       </div>

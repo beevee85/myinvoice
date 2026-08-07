@@ -99,6 +99,9 @@ final class Bootstrap
             Connection::class      => fn (ContainerInterface $c) => new Connection($c->get(Config::class), $c->get(LoggerInterface::class)),
             RedisProbe::class      => fn (ContainerInterface $c) => new RedisProbe($c->get(Config::class)),
             RedisFactory::class    => fn (ContainerInterface $c) => new RedisFactory($c->get(Config::class)),
+            // Nativní updater si cesty (root / data dir) rozřeší sám; explicitní bind,
+            // ať PHP-DI nemusí hádat volitelné string parametry konstruktoru.
+            \MyInvoice\Service\Update\NativeUpdateService::class => fn () => new \MyInvoice\Service\Update\NativeUpdateService(),
             PasskeyService::class  => fn (ContainerInterface $c) => new PasskeyService(
                 $c->get(WebAuthnConfigProvider::class),
             ),

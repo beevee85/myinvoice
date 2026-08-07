@@ -85,7 +85,7 @@ export const useAuthStore = defineStore('auth', () => {
     password: string,
     captchaToken?: string,
     totp?: string,
-    opts?: { emailOtp?: string; rememberDevice?: boolean; resendOtp?: boolean },
+    opts?: { emailOtp?: string; rememberDevice?: boolean; resendOtp?: boolean; recoveryCode?: string },
   ) {
     loading.value = true
     try {
@@ -93,6 +93,7 @@ export const useAuthStore = defineStore('auth', () => {
         email,
         password,
         totp: totp || undefined,
+        recovery_code: opts?.recoveryCode || undefined,
         email_otp: opts?.emailOtp || undefined,
         remember_device: opts?.rememberDevice || undefined,
         resend_otp: opts?.resendOtp || undefined,

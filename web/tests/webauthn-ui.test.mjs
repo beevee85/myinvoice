@@ -67,12 +67,15 @@ test('passkey MFA step keeps the captcha token instead of re-rendering the widge
 test('TOTP code is required for the first passkey and hidden without TOTP', async () => {
   const passkeys = await readFile(new URL('pages/Passkeys.vue', root), 'utf8')
 
-  // Bez TOTP se pole vůbec nevykreslí…
-  assert.match(passkeys, /v-if="hasTotp"/)
+  // Bez TOTP se pole vůbec nevykreslí. Podmínka je nově `totpUsable`, ne `hasTotp`:
+  // aktivní TOTP samo nestačí, musí ho připouštět i `auth.allowed_mfa_methods` —
+  // jinak stránka nabízí ověření, které server odmítne („Nepovolený účel ověření").
+  assert.match(passkeys, /v-if="totpUsable"/)
+  assert.match(passkeys, /const totpUsable = computed\(\(\) => hasTotp\.value && totpAllowed\.value\)/)
   // …a s TOTP, ale bez existující passkey, je povinné (label, placeholder, disabled).
   assert.match(
     passkeys,
-    /const totpRequired = computed\(\(\) => hasTotp\.value && list\.value\.length === 0\)/,
+    /const totpRequired = computed\(\(\) => totpUsable\.value && list\.value\.length === 0\)/,
   )
   assert.match(passkeys, /totpRequired \? t\('passkeys\.totp_label_required'\)/)
   assert.match(passkeys, /:required="totpRequired"/)
@@ -168,4 +171,114 @@ test('WebAuthn options are handed over as plain data, never as a reactive proxy'
   assert.match(webauthn, /function plainJson/)
   assert.match(webauthn, /const options = plainJson\(source\)/)
   assert.match(login, /publicKey: markRaw\(data\.public_key\)/)
+})
+
+test('forced MFA setup offers only methods the server allows', async () => {
+  const setup = await readFile(new URL('pages/ForcedMfaSetup.vue', root), 'utf8')
+
+  // Politiku bere stránka z /me, ne z optimistické hodnoty ve storu — jinak by
+  // nabídla metodu, kterou API zamítne 403 mfa_method_not_allowed.
+  const mounted = setup.match(/onMounted\(async \(\) => \{([\s\S]*?)\n\}\)/)?.[1] || ''
+  assert.match(mounted, /await auth\.refresh\(\)/)
+  assert.match(setup, /const method = ref<'passkey' \| 'totp' \| null>\(null\)/)
+  assert.match(setup, /if \(!allowed\.value\.includes\(next\)\) return/)
+  // Žádná metoda povolená → srozumitelná hláška, ne prázdný box.
+  assert.match(setup, /method === null[\s\S]*no_method_available/)
+})
+
+test('setup wizard does not pin allowed MFA methods per instance', async () => {
+  const wizard = await readFile(new URL('pages/Setup.vue', root), 'utf8')
+
+  // Zaškrtávátka metod jsou pryč (footgun: TOTP-only config + nabídnutá passkey),
+  // wizard posílá jen require_mfa a seznam metod zůstává na cfg.php.
+  assert.doesNotMatch(wizard, /allowed_mfa_methods/)
+  assert.doesNotMatch(wizard, /allowedMfaMethods/)
+  assert.match(wizard, /require_mfa: requireMfa\.value/)
+  // Politika se do storu nesmí propsat z odpovědi setupu (nese požadavek, ne config).
+  assert.doesNotMatch(wizard, /auth\.setMfaPolicy\(/)
+})
+
+test('cancelling a ceremony rejects the pending promise instead of only bumping the generation', async () => {
+  const webauthn = await readFile(new URL('security/webauthn.ts', root), 'utf8')
+  const cancel = webauthn.match(/export function cancelActiveWebAuthnCeremony\(\): void \{([\s\S]*?)\n\}/)?.[1] || ''
+
+  // Bez odmítnutí promise by volající po „Zrušit" visel dál na ceremonii,
+  // která nikdy nedoběhne — přesně ta situace, co vypadá jako zatuhlá appka.
+  assert.match(cancel, /reject\?\.\(new Error\('webauthn_cancelled'\)\)/)
+  assert.match(cancel, /activeWebAuthnCeremony\.value = null/)
+  assert.match(webauthn, /Promise\.race\(\[ceremony, timeout, cancelled\]\)/)
+  // Úklid nesmí přebít novější ceremonii.
+  assert.match(webauthn, /finally \{[\s\S]*if \(isCurrentCeremony\(generation\)\) activeWebAuthnCeremony\.value = null/)
+})
+
+test('a stalled security dialog surfaces a hint with a way out', async () => {
+  const prompt = await readFile(new URL('components/WebAuthnCeremonyPrompt.vue', root), 'utf8')
+  const app = await readFile(new URL('App.vue', root), 'utf8')
+
+  assert.match(prompt, /activeWebAuthnCeremony/)
+  assert.match(prompt, /cancelActiveWebAuthnCeremony\(\)/)
+  assert.match(prompt, /waiting_hint_extension/)
+  // Globálně, ať to platí pro login, odemčení zámku i registraci klíče.
+  assert.match(app, /<WebAuthnCeremonyPrompt \/>/)
+})
+
+test('every passkey entry point explains a timed-out ceremony', async () => {
+  for (const page of ['pages/Login.vue', 'pages/ForcedMfaSetup.vue', 'pages/Passkeys.vue', 'pages/ApiTokens.vue']) {
+    const source = await readFile(new URL(page, root), 'utf8')
+    assert.match(source, /webAuthnErrorKey/, page)
+  }
+})
+
+test('passkey management honours the server MFA policy instead of guessing', async () => {
+  const page = await readFile(new URL('pages/Passkeys.vue', root), 'utf8')
+
+  // Bez čtení politiky nabízela stránka operace, které API vzápětí odmítlo:
+  // registraci při vypnutých passkeys (403) i TOTP step-up při vypnutém TOTP (400).
+  assert.match(page, /const passkeyAllowed = computed\(\(\) => auth\.allowedMfaMethods\.includes\('passkey'\)\)/)
+  assert.match(page, /const totpAllowed = computed\(\(\) => auth\.allowedMfaMethods\.includes\('totp'\)\)/)
+  assert.match(page, /const totpUsable = computed\(\(\) => hasTotp\.value && totpAllowed\.value\)/)
+  assert.match(page, /v-if="passkeyAllowed"/)
+  assert.match(page, /v-if="!passkeyAllowed"[\s\S]*method_not_allowed/)
+  // TOTP pole jen když je TOTP reálně použitelné, ne jen aktivní.
+  assert.match(page, /v-if="totpUsable"/)
+})
+
+test('revoking the last strong factor is blocked before the step-up, not after it', async () => {
+  const page = await readFile(new URL('pages/Passkeys.vue', root), 'utf8')
+  const blocked = page.match(/const revokeBlocked = computed\(\(\) =>([\s\S]*?)\r?\n\)/)?.[1] || ''
+
+  // Dřív se uživatel o 409 last_mfa_factor dozvěděl až POTÉ, co prošel celou
+  // ceremonií nebo spotřeboval jednorázový TOTP kód.
+  assert.match(blocked, /auth\.requireMfa/)
+  assert.match(blocked, /list\.value\.length === 1/)
+  assert.match(blocked, /totpAllowed\.value && hasTotp\.value/)
+  assert.match(page, /:disabled="busy \|\| revokeBlocked \|\| stepUpMethods\.length === 0"/)
+  assert.match(page, /revoke_last_factor/)
+})
+
+test('the revoke row explains which factor confirms the removal', async () => {
+  const page = await readFile(new URL('pages/Passkeys.vue', root), 'utf8')
+  const cs = JSON.parse(await readFile(new URL('i18n/cs.json', root), 'utf8'))
+
+  // Jádro stížnosti: mazání vyžadovalo step-up, TOTP kód byl použitelná alternativa,
+  // a u tlačítka Odebrat o tom nestálo nic.
+  assert.match(page, /revoke_hint_totp/)
+  assert.match(page, /revoke_hint_passkey/)
+  assert.match(page, /revoke_no_method/)
+  assert.match(cs.passkeys.revoke_hint_totp, /TOTP/)
+  // Pole s kódem se už netváří jako nepovinná ozdoba.
+  assert.doesNotMatch(cs.passkeys.totp_label, /volitelně/i)
+  assert.doesNotMatch(cs.passkeys.totp_optional, /volitelná/i)
+})
+
+test('a cancelled ceremony during revoke points at the TOTP alternative', async () => {
+  const page = await readFile(new URL('pages/Passkeys.vue', root), 'utf8')
+  const revoke = page.match(/async function revoke\(item: PasskeyCredential\) \{([\s\S]*?)\r?\n\}/)?.[1] || ''
+
+  // Zrušený dialog není „operace se nepodařila" — uživatel typicky klíč nemá.
+  assert.match(revoke, /webAuthnErrorKey\(e\)/)
+  assert.match(revoke, /revoke_totp_fallback/)
+  assert.match(revoke, /revoke_needs_totp/)
+  // Zapomenutý kód z minulého pokusu nesmí tiše přepnout metodu ověření.
+  assert.match(page, /if \(totpCodeValid\.value && totpUsable\.value\)/)
 })
