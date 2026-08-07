@@ -88,3 +88,19 @@ Levnější než vlastní implementace ve forku: když je autor přijme, získá
 
 Sklady, mzdy, dlouhodobý majetek, plné podvojné účetnictví — jiná liga produktu,
 rozbilo by jednoduchost systému.
+
+## Odloženo z auditu 2026-08-07 (DDKPZ § 37a v cizí měně)
+
+- [ ] **§ 37a: záporný rozdíl v cizí měně přepočítán kurzem konečné faktury místo
+  kurzu zálohy** (MEDIUM, nález auditu). `PurchaseSettlementService::link` páruje
+  v libovolné měně a odpočtové řádky ukládá v měně dokladu; `VatLedgerService`
+  pak VŠECHNY řádky konečné faktury (vč. odpočtů z DDKPZ) přepočítá jediným
+  kurzem konečné faktury. Podle § 37a odst. 2 písm. b má být odpočet zálohy
+  přepočten kurzem ZÁLOHY. Chyba dopadá na PŘEPLATKY (záporný rozdíl) a smíšené
+  vícesazbové případy; kladný rozdíl (doplatek) je kurzem DUZP správně.
+  **Proč odloženo:** správná oprava vyžaduje, aby odpočtové řádky nesly vlastní
+  kurz (kurz zálohy) a ledger je konvertoval ODDĚLENĚ od zbytku faktury — to je
+  schématická + ledger změna, ne bezpečná stejnodenní úprava daňového kódu.
+  Úzký případ (cizoměnová záloha + pohyb kurzu + přeplatek). Vyžaduje vlastní
+  návrh a ověření na reálných datech. Ostatních 5 DDKPZ nálezů auditu opraveno
+  v commitu fix/audit-2026-08-07.

@@ -34,6 +34,7 @@ final class PaymentTaxDocumentCreator
         private readonly Connection $db,
         private readonly InvoiceRepository $repo,
         private readonly InvoiceCalculator $calc,
+        private readonly \MyInvoice\Service\Currency\ExchangeRateApplier $exchangeRate,
     ) {}
 
     /**
@@ -194,11 +195,15 @@ final class PaymentTaxDocumentCreator
                 (string) $payment['paid_on'],   // tax_date = DUZP = den přijetí úplaty
                 (string) $payment['paid_on'],   // due_date — uhrazeno, jen formální údaj
                 (int) $proforma['currency_id'],
-                // Kurz dědíme z proformy — cizoměnový doklad nesmí do VAT ledgeru
-                // spadnout s COALESCE(exchange_rate, 1) = 1. (Lazy ExchangeRateApplier
-                // běží až při zobrazení, bankovní párování ho nevolá.)
-                $proforma['exchange_rate'] ?? null,
-                $proforma['exchange_rate_date'] ?? null,
+                // Audit 2026-08-07: kurz se NEDĚDÍ z proformy. DPH z úplaty vzniká
+                // ke DNI PLATBY (§ 4/8, § 20a/2 ZDPH), ne ke dni vystavení proformy —
+                // zděděný kurz podhodnocoval výstupní DPH, když se kurz mezi vystavením
+                // a platbou pohnul. Vkládáme NULL a hned pod insertem doplníme kurz
+                // pro DUZP = den platby přes ExchangeRateApplier (týž mechanismus jako
+                // u ostatních cizoměnových vystavených dokladů). NULL by jinak ledger
+                // detekoval (exchange_rate_missing, #238) a export bezpečně zastavil.
+                null,
+                null,
                 $proforma['language'],
                 $noteAbove,
                 // Přijatá platba kryje doklad celý → amount_to_pay = 0 (auto-paid při vystavení).
@@ -246,6 +251,17 @@ final class PaymentTaxDocumentCreator
         }
 
         $this->calc->recompute($taxDocId);
+
+        // Kurz ke dni platby (DUZP DDKPZ) — až po commitu, je to metadata pro
+        // výkazy, ne součást atomicity vzniku dokladu. CZK nechá NULL, chybějící
+        // kurz taky (export ho pak bezpečně odchytí přes exchange_rate_missing).
+        try {
+            $this->exchangeRate->applyToInvoice($taxDocId);
+        } catch (\Throwable) {
+            // Doplnění kurzu nesmí shodit vznik dokladu — zůstane NULL a doplní se
+            // později (lazy filler / ruční zadání). Fail-safe, ne fail-hard.
+        }
+
         return $taxDocId;
     }
 }

@@ -246,7 +246,13 @@ final class PurchaseSettlementService
                     $this->applyGrossTargets($finalId, $supplierId, $final['vat_overrides'] ?? null, $targets);
                     $this->repo->restoreItemTotals($rowSnapshot);
                     $this->pinAllSettlementRows($finalId, $supplierId, false);
-                    $this->syncRoundingRows($finalId, $supplierId, $targets);
+                    // Audit 2026-08-07: deleteSettlementRoundingRows smazal řádky VŠECH
+                    // sazeb, ale $targets pokrývá jen sazby ODPOJOVANÉHO dokladu — sazba
+                    // nesená pouze zbývajícím DDKPZ by přišla o zaokrouhlovací řádek
+                    // a rozešla se s vat_overrides. Resync proto podle CELÉ výsledné
+                    // rekapitulace (post-applyGrossTargets), ne jen podle odpojovaného.
+                    $this->syncRoundingRows($finalId, $supplierId,
+                        $this->targetsFromRecap($finalId, $supplierId, $targets));
                 }
             }
 
@@ -351,6 +357,37 @@ final class PurchaseSettlementService
      *
      * @param array<string, array{rate:float, gross:float}> $targets
      */
+    /**
+     * Cíle pro sync zaokrouhlovacích řádků z CELÉ výsledné rekapitulace dokladu.
+     *
+     * Po unlinku drží `vat_overrides` cílovou rekapitulaci pro všechny zbývající
+     * sazby; zaokrouhlovací řádek musí existovat pro každou z nich, ne jen pro
+     * sazby odpojeného DDKPZ. `$fallback` (targets odpojeného dokladu) drží
+     * hodnoty i pro sazbu, která už v recap není (její řádky mizí — rounding = 0).
+     *
+     * @param array<string,array{rate:float,gross:float}> $fallback
+     * @return array<string,array{rate:float,gross:float}>
+     */
+    private function targetsFromRecap(int $finalId, int $supplierId, array $fallback): array
+    {
+        $fresh = $this->repo->find($finalId, $supplierId);
+        $recap = is_array($fresh['vat_overrides'] ?? null) ? $fresh['vat_overrides'] : [];
+
+        $out = $fallback;
+        foreach ($recap as $o) {
+            if (!isset($o['rate'])) {
+                continue;
+            }
+            $key = number_format((float) $o['rate'], 2, '.', '');
+            $out[$key] = [
+                'rate'  => (float) $o['rate'],
+                'gross' => round((float) ($o['base'] ?? 0) + (float) ($o['vat'] ?? 0), 2),
+            ];
+        }
+
+        return $out;
+    }
+
     private function syncRoundingRows(int $finalId, int $supplierId, array $targets): void
     {
         $fresh = $this->repo->find($finalId, $supplierId);
