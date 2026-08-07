@@ -449,7 +449,7 @@ onMounted(async () => {
                 exact-active-class=""
                 class="flex items-center gap-2.5 px-3 py-2 rounded-full text-sm transition-colors leading-tight"
                 :class="[
-                  isActive(item.to)
+                  isActive(item)
                     ? 'bg-(--primary) text-white font-medium'
                     : 'text-white/70 hover:text-white hover:bg-white/[0.08]',
                   item.newTo && auth.canWrite ? 'pr-8' : '',
