@@ -139,4 +139,4 @@ php tools/exportManualToPdf.php
 - Drž se stylu okolního kódu (pojmenování, idiomy, hustota komentářů). Nepřidávej komentáře, které kód jen opakují.
 - Commit messages česky, conventional-commits styl: `feat(scope): …`, `fix(scope): …`, `release: X.Y.Z — …` (viz `git log`).
 - Změny v `CHANGELOG.md` a `VERSION` dělá maintainer při release — v běžném PR na ně nesahej.
-- Necommituj vygenerované artefakty. `manual/generated/` je jediná zavedená výjimka — `dist/` výjimka **není** (je v `.gitignore`).
+- Necommituj vygenerované artefakty — ani `manual/generated/` (dřívější verze tohoto řádku tvrdila opak; v gitu nikdy nebyl, staví ho Dockerfile.alpine při buildu image), ani `dist/` (je v `.gitignore`).
