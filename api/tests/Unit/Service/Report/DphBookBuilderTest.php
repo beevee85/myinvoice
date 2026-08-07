@@ -119,7 +119,8 @@ final class DphBookBuilderTest extends TestCase
             id INTEGER PRIMARY KEY, purchase_invoice_id INTEGER NOT NULL, vat_rate_id INTEGER,
             vat_rate_snapshot REAL NOT NULL,
             description TEXT NULL, total_without_vat REAL NOT NULL, total_vat REAL NOT NULL,
-            vat_classification_code TEXT NULL, is_fixed_asset INTEGER NOT NULL DEFAULT 0
+            vat_classification_code TEXT NULL, is_fixed_asset INTEGER NOT NULL DEFAULT 0,
+            settlement_source_purchase_invoice_id INTEGER NULL
         )");
         $this->pdo->exec("CREATE TABLE invoices (
             id INTEGER PRIMARY KEY, supplier_id INTEGER NOT NULL, client_id INTEGER NULL, varsymbol TEXT NULL,
