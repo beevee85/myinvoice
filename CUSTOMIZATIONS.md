@@ -1594,3 +1594,58 @@ klienta, náklad bez záloh, marže, participants, cizí zakázka odmítnuta).
 **Jak ověřit po merge upstreamu:** /projects má tlačítko Nová zakázka a formulář
 bez klienta neredirectuje; detail zakázky s doklady obou stran ukazuje marži;
 přijatý doklad má select Zakázka; phpunit vč. ProjectCrossSideTest zelený.
+
+## 2026-08-08 (noc) — SPRINT 2.5: pokladna v2 (více pokladen, kniha, storno)
+
+Migrace **0924** (cash_registers). Doplněk H (Dokument 2, H3–H7)
+s korekcemi Dokumentů 5/6 (R2/R3/A8, časové pravidlo blokací).
+
+**Datový model (0924):** cash_registers (více pokladen, výchozí „Hlavní
+pokladna" per tenant, backfill existujících dokladů), cash_documents +
+cash_register_id (řada PPD/VPD-rok-pořadí nově per POKLADNA+druh+rok),
+counterparty_client_id/ico/address (autofill z karty klienta),
+accounting_date (okamžik uskutečnění), status active/storno + storno_of_id,
+is_tax_document + vat_breakdown (JSON), issued_by/received_by/approved_by
+(identifikační záznam dle § 33a/10 — R3, žádné skeny podpisů), note;
+cash_register_inventories (inventarizace, prokazování 5 let dle § 29/3 ZoÚ).
+
+**Pravidla (CashDocumentAction v2):**
+- H7: DELETE vždy 409 — doklad se NIKDY nemaže (dřív šlo smazat poslední
+  v řadě). Storno = protidoklad se ZÁPORNOU částkou v téže řadě
+  (POST /{id}/storno, důvod povinný, originál viditelný jako „storno").
+- H3/VB2: doklad hradící fakturu NESMÍ nést rozpis DPH (409 — dvojí
+  vykázání daně); zjednodušený daňový doklad § 30a jen PPD bez vazby.
+- VB4: limit § 30a (10 000 vč. daně) z LegalConstants K ROZHODNÉMU DATU
+  (valueAt(accounting_date) — Dokument 9); rozpad DPH musí sedět na částku.
+- VB8 + časové pravidlo Dokumentu 5: výdaj do záporu s dnešním/budoucím
+  datem = BLOK; zpětný záznam projde s warningem (trvalý příznak doplní
+  ComplianceFlag sprint). Zůstatek NELZE editovat přímo — jen doklady.
+
+**CashRegisterAction (H4):** GET/POST /api/cash-registers, kniha
+GET /{id}/book(?year&month) — počáteční zůstatek, chronologické pohyby
+s průběžným zůstatkem (záporný červeně), konečný zůstatek; tisk
+GET /{id}/book/pdf (CashBookPdfRenderer, A4, patička „strana X z Y");
+inventarizace POST /{id}/inventory — zjištěný stav vs. stav dle dokladů,
+rozdíl volitelně vypořádá PPD (přebytek) / VPD (manko). RoleMiddleware
+rozšířen o /api/cash-registers. XLSX export knihy ODLOŽEN (jen PDF).
+
+**PDF dokladu (H6):** protistrana s IČO+adresou, datum vyhotovení i
+uskutečnění, odkaz na přijatou fakturu, poznámka, rozpis DPH u § 30a
+dokladu, STORNO označení, TŘI podpisové záznamy (vystavil/schválil/přijal)
+se jmény dle § 33a/10. Částka slovy zůstává (R2 — doporučená, neblokuje).
+
+**FE (CashDocuments.vue v2):** výběr pokladny se zůstatkem + založení nové,
+záložky Doklady/Pokladní kniha, rozšířený formulář (uskutečnění, protistrana
+s autofill vazbou, § 30a checkbox s rozpadem shora 21/12, podpisy, poznámka),
+storno modal místo mazání, kniha s průběžným zůstatkem + tisk + inventarizace.
+Nabídky PPD/VPD z mark-paid dialogů fungují beze změny (backend doplní
+výchozí pokladnu).
+
+**Testy:** CashDocumentTest rozšířen — mazání 409 vždy, storno protidoklad
+(záporná částka, táž řada, storno storna 409), VB2/VB4, VB8 dopředně blok /
+zpětně warning. Cleanup dvoufázově (FK storno_of_id RESTRICT).
+
+**Jak ověřit po merge upstreamu:** /cash-documents má výběr pokladny a záložku
+Pokladní kniha; smazání dokladu vrací 409; storno vytvoří záporný protidoklad;
+PPD s vazbou na fakturu odmítne rozpis DPH; kniha sedí (počáteční + příjmy −
+výdaje = konečný); phpunit CashDocumentTest zelený.
