@@ -178,7 +178,8 @@ final class CarRepository
             $this->nullableStr($data['model'] ?? null),
             $this->nullableStr($data['vin'] ?? null),
             // FORK 0921 (R7): účel pořízení — rozlišuje zboží k prodeji vs. dlouhodobý
-            // majetek (strop odpočtu § 72/4 platí jen pro majetek). NULL = neurčeno.
+            // majetek (strop odpočtu § 72/3 platí jen pro majetek, def. § 72/10).
+            // NULL = neurčeno.
             in_array($data['acquisition_purpose'] ?? '', ['goods_for_resale', 'fixed_asset'], true)
                 ? $data['acquisition_purpose'] : null,
             $fuel,

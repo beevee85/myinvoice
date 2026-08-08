@@ -791,6 +791,11 @@ final class PurchaseInvoiceRepository
             $where[] = 'pi.vendor_id = ?';
             $params[] = (int) $filters['vendor_id'];
         }
+        // FORK 0922 (C8): skrýt doklady zahrnuté ve vyúčtování — zůstanou jen
+        // konečné faktury a samostatné doklady (zálohy/DDKPZ případu se schovají).
+        if (!empty($filters['hide_settled'])) {
+            $where[] = "(pi.settlement_group_id IS NULL OR pi.settlement_role = 'final')";
+        }
         if (!empty($filters['year'])) {
             $where[] = 'YEAR(pi.issue_date) = ?';
             $params[] = (int) $filters['year'];
@@ -868,6 +873,7 @@ final class PurchaseInvoiceRepository
                        pi.deleted_at, pi.delete_reason, du.name AS deleted_by_name,
                        c.company_name AS vendor_company_name, c.ic AS vendor_ic,
                        pi.advance_purchase_invoice_id, pi.settled_by_purchase_invoice_id,
+                       pi.settlement_group_id, pi.settlement_role,
                        lc.id AS relation_consumer_id, lc.document_kind AS relation_consumer_kind,
                        CASE
                            WHEN pi.document_kind = 'tax_document' THEN fin.varsymbol
@@ -2587,7 +2593,8 @@ final class PurchaseInvoiceRepository
         foreach (['id', 'supplier_id', 'vendor_id', 'currency_id', 'payment_currency_id',
                   'created_by', 'pdf_size_bytes', 'source_size_bytes', 'expense_category_id',
                   'advance_purchase_invoice_id', 'advance_link_suggested_id',
-                  'settled_by_purchase_invoice_id', 'relation_consumer_id'] as $f) {
+                  'settled_by_purchase_invoice_id', 'relation_consumer_id',
+                  'settlement_group_id'] as $f) {
             if (isset($row[$f]) && $row[$f] !== null) $row[$f] = (int) $row[$f];
         }
         $row['reverse_charge'] = isset($row['reverse_charge']) ? (bool) $row['reverse_charge'] : false;

@@ -336,6 +336,11 @@ final class Routes
         $app->delete('/api/projects/{id:[0-9]+}/work-report-link',            [WorkReportLinkAction::class, 'revokeProject']);
 
         // Invoices (M3 — draft + editor + sumace; vystavení/odeslání/PDF přijde v M4)
+        // FORK 0922 — vyúčtovací skupiny (režim „Podle vyúčtování", Dokument 1 C1–C3)
+        $app->get    ('/api/invoices/settlement-groups',
+            \MyInvoice\Action\Settlement\SettlementGroupsAction::class)->setArgument('direction', 'sale');
+        $app->get    ('/api/invoices/{id:[0-9]+}/settlement-chain',
+            \MyInvoice\Action\Settlement\SettlementChainAction::class)->setArgument('direction', 'sale');
         $app->get    ('/api/invoices',              ListInvoicesAction::class);
         $app->get    ('/api/invoices/export.csv',   ExportCsvAction::class);
         $app->get    ('/api/invoices/export.pdf',   ExportSelectedPdfAction::class);
@@ -429,6 +434,11 @@ final class Routes
         $app->post   ('/api/purchase-invoices/scan-inbox',                ScanInboxAction::class);
         $app->get    ('/api/purchase-invoices/export',                     ExportPurchaseInvoicesAction::class);
         $app->get    ('/api/purchase-invoices/import-batches',             PurchaseInvoiceImportBatchesAction::class);
+        // FORK 0922 — vyúčtovací skupiny (režim „Podle vyúčtování", Dokument 1 C1–C3)
+        $app->get    ('/api/purchase-invoices/settlement-groups',
+            \MyInvoice\Action\Settlement\SettlementGroupsAction::class)->setArgument('direction', 'purchase');
+        $app->get    ('/api/purchase-invoices/{id:[0-9]+}/settlement-chain',
+            \MyInvoice\Action\Settlement\SettlementChainAction::class)->setArgument('direction', 'purchase');
         $app->get    ('/api/purchase-invoices',                           ListPurchaseInvoicesAction::class);
         $app->post   ('/api/purchase-invoices',                           CreatePurchaseInvoiceAction::class);
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}',                GetPurchaseInvoiceAction::class);

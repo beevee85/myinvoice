@@ -37,6 +37,8 @@ final class ListInvoicesAction
             'unpaid_only' => !empty($filter['unpaid_only']),
             'overdue'     => !empty($filter['overdue']),
             'trash'       => !empty($filter['trash']),
+            // FORK 0922 (C8) — skrýt doklady zahrnuté ve vyúčtování
+            'hide_settled' => !empty($filter['hide_settled']),
             'supplier_id' => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),
         ];
 

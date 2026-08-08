@@ -560,6 +560,11 @@ final class InvoiceRepository
             $where[] = 'i.client_id = ?';
             $params[] = (int) $filters['client_id'];
         }
+        // FORK 0922 (C8): skrýt doklady zahrnuté ve vyúčtování — zůstanou jen
+        // konečné faktury a samostatné doklady.
+        if (!empty($filters['hide_settled'])) {
+            $where[] = "(i.settlement_group_id IS NULL OR i.settlement_role = 'final')";
+        }
         if (!empty($filters['project_id'])) {
             $where[] = 'i.project_id = ?';
             $params[] = (int) $filters['project_id'];
@@ -644,6 +649,7 @@ final class InvoiceRepository
         }
 
         $sql = "SELECT i.id, i.varsymbol, i.invoice_type, i.parent_invoice_id, i.recurring_template_id,
+                       i.settlement_group_id, i.settlement_role,
                        i.client_id, i.project_id, i.supplier_id,
                        i.issue_date, i.tax_date, i.due_date,
                        i.currency_id, cur.code AS currency, cur.symbol AS currency_symbol, cur.decimals AS currency_decimals,
@@ -1374,6 +1380,9 @@ final class InvoiceRepository
         }
         if (array_key_exists('relation_has_tax_doc', $row)) {
             $row['relation_has_tax_doc'] = (bool) $row['relation_has_tax_doc'];
+        }
+        if (array_key_exists('settlement_group_id', $row)) {
+            $row['settlement_group_id'] = $row['settlement_group_id'] !== null ? (int) $row['settlement_group_id'] : null;
         }
         // Odvozený platební stav (#89) — unpaid/partially_paid/paid/overpaid; NULL pro draft/cancelled.
         if (array_key_exists('paid_total', $row) && array_key_exists('amount_to_pay', $row) && array_key_exists('status', $row)) {

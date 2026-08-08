@@ -43,6 +43,8 @@ final class ListPurchaseInvoicesAction
             'overdue'       => !empty($filter['overdue']),
             'needs_review'  => !empty($filter['needs_review']),
             'trash'         => !empty($filter['trash']),
+            // FORK 0922 (C8) — skrýt doklady zahrnuté ve vyúčtování
+            'hide_settled'  => !empty($filter['hide_settled']),
             'payment_ordered' => $filter['payment_ordered'] ?? null,
             'import_batch_id' => $filter['import_batch_id'] ?? null,
             'supplier_id'   => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),
