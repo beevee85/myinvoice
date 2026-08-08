@@ -97,6 +97,8 @@ interface NavItem {
   external?: boolean
   /** Cílová route pro rychlé „+" (vytvořit nový) vpravo u položky. Jen pro zapisující. */
   newTo?: string
+  /** FORK 0925 — číslo v kroužku (počet NEODBAVENÝCH compliance příznaků). */
+  badge?: number
 }
 interface NavSection {
   /** Hlavička sekce; pokud chybí, položky jsou bez visual grouping */
@@ -216,6 +218,15 @@ const navSections = computed<NavSection[]>(() => {
         ...(ossEnabled ? [{ to: '/reports/oss', label: t('nav.reports_oss'), icon: ICONS.tax_shv }] : []),
         { to: '/reports/submissions', label: t('nav.reports_submissions'), icon: ICONS.tax_archive },
         { to: '/reports/monthly-export', label: t('nav.reports_monthly_export'), icon: ICONS.exports },
+      ],
+    },
+    // FORK 0925 — samostatná sekce mezi Daněmi a Systémem (Dokument 7 §1):
+    // AML a limity hotovosti NEJSOU daňová agenda; pod Daněmi by je účetní přeskočila.
+    {
+      title: t('nav.section_compliance'),
+      items: [
+        { to: '/compliance', label: t('nav.compliance_overview'), icon: ICONS.approvals,
+          badge: complianceBadge.value > 0 ? complianceBadge.value : undefined },
       ],
     },
   ]
@@ -348,6 +359,24 @@ const versionInfo = ref<PublicVersion | null>(null)
 onMounted(async () => {
   try { versionInfo.value = await updateApi.publicVersion() } catch {}
 })
+
+// FORK 0925 — badge Přehledu rizik: jen NEODBAVENÉ (Dokument 7 §1); červený,
+// existuje-li aspoň jeden HIGH. Načítá se na mount + při změně routy na /compliance
+// (odbavení badge sníží). Selhání je tiché — badge je doplněk.
+const complianceBadge = ref(0)
+const complianceHasHigh = ref(false)
+async function loadComplianceBadge() {
+  try {
+    const { complianceApi } = await import('@/api/compliance')
+    const s = await complianceApi.summary()
+    complianceBadge.value = s.open_high + s.open_medium + s.open_low
+    complianceHasHigh.value = s.open_high > 0
+  } catch {
+    complianceBadge.value = 0
+  }
+}
+onMounted(loadComplianceBadge)
+watch(() => route.path, p => { if (p.startsWith('/compliance')) loadComplianceBadge() })
 </script>
 
 <template>
@@ -463,6 +492,11 @@ onMounted(async () => {
                   <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
                 </svg>
                 {{ item.label }}
+                <!-- FORK 0925 — badge počtu neodbavených rizik (červený při HIGH) -->
+                <span v-if="item.badge" class="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center"
+                  :class="complianceHasHigh ? 'bg-danger-500 text-white' : 'bg-warning-500 text-white'">
+                  {{ item.badge }}
+                </span>
               </RouterLink>
               <!-- Rychlé „+" (vytvořit nový) — skryté, odhalí se až při hoveru nad položkou -->
               <RouterLink

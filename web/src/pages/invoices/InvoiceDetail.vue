@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import SettlementStepper from '@/components/documents/SettlementStepper.vue'
+import ComplianceAckModal from '@/components/compliance/ComplianceAckModal.vue'
+import { extractComplianceChecks, type ComplianceAck, type ComplianceCheck } from '@/api/compliance'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -266,6 +268,13 @@ const partialNote = ref('')
 const partialCreateTaxDoc = ref(false)
 // FORK 0920 (H1): způsob úhrady — předvyplněný z hlavičky dokladu
 const partialMethod = ref<PaymentMethod>('bank_transfer')
+// FORK 0925 — modal vynuceného rozhodnutí (hotovost nad limit / strukturování)
+const ackChecks = ref<ComplianceCheck[] | null>(null)
+const ackRetry = ref<((ack: ComplianceAck) => void) | null>(null)
+function requestAck(checks: ComplianceCheck[], retry: (ack: ComplianceAck) => void) {
+  ackChecks.value = checks
+  ackRetry.value = retry
+}
 
 // Daňový doklad k přijaté platbě dává smysl jen u zálohy plátce DPH bez reverse
 // charge — a jen dokud neexistuje finál (jeho § 37a odpočty jsou zafixované,
@@ -292,7 +301,7 @@ function openPartialPayment() {
   partialOpen.value = true
 }
 
-async function submitPartialPayment() {
+async function submitPartialPayment(complianceAck?: ComplianceAck) {
   if (!invoice.value) return
   const amount = Number(String(partialAmount.value).replace(',', '.'))
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -308,6 +317,7 @@ async function submitPartialPayment() {
       bank_reference: partialRef.value.trim() || null,
       note: partialNote.value.trim() || null,
       payment_method: partialMethod.value,
+      compliance_ack: complianceAck,
     })
     invoice.value = r.invoice
     payments.value = r.payments
@@ -322,6 +332,9 @@ async function submitPartialPayment() {
     }
     invoicesApi.activity(invoice.value.id).then(a => { activity.value = a }).catch(() => {})
   } catch (e: any) {
+    // FORK 0925 — riziko vyžaduje volbu uživatele (modal), pak se úhrada zopakuje s ack
+    const checks = extractComplianceChecks(e)
+    if (checks) { requestAck(checks, a => submitPartialPayment(a)); return }
     toast.error(e?.response?.data?.error?.message || t('invoice.operation_failed'))
   } finally {
     busy.value = null
@@ -754,7 +767,7 @@ function openMarkPaid() {
 }
 watch(isCashInvoice, cash => { if (markPaidOpen.value) createCashDoc.value = cash })
 
-async function markPaid() {
+async function markPaid(complianceAck?: ComplianceAck) {
   if (!invoice.value) return
   busy.value = 'paid'
   const cashAmount = invoice.value.amount_to_pay
@@ -762,6 +775,7 @@ async function markPaid() {
     invoice.value = await invoicesApi.markPaid(invoice.value.id, paidAtInput.value, {
       sendThanks: thanksEnabled.value && sendThanks.value,
       paymentMethod: markPaidMethod.value,
+      complianceAck,
     })
     if (createCashDoc.value && cashAmount > 0) {
       try {
@@ -787,6 +801,9 @@ async function markPaid() {
     else if (pt?.status === 'failed') toast.warning(t('invoice.payment_thanks_failed'))
     else if (pt?.status === 'skipped' && pt.reason === 'no_recipient') toast.warning(t('invoice.payment_thanks_no_recipient'))
   } catch (e: any) {
+    // FORK 0925 — riziko vyžaduje volbu uživatele (modal), pak se akce zopakuje s ack
+    const checks = extractComplianceChecks(e)
+    if (checks) { requestAck(checks, a => markPaid(a)); return }
     toast.error( e?.response?.data?.error?.message || t('invoice.operation_failed'))
   } finally {
     busy.value = null
@@ -1594,13 +1611,18 @@ const invoiceActions = computed<ActionItem[]>(() => {
         </label>
         <div class="flex justify-end gap-2">
           <button @click="markPaidOpen = false" class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50">{{ t('common.cancel') }}</button>
-          <button @click="markPaid" :disabled="busy !== null"
+          <button @click="markPaid()" :disabled="busy !== null"
             class="cursor-pointer px-4 h-9 text-sm bg-success-500 hover:bg-success-600 disabled:bg-neutral-300 text-white font-medium rounded-md">
             {{ busy === 'paid' ? '…' : t('common.confirm') }}
           </button>
         </div>
       </div>
     </div>
+
+    <!-- FORK 0925 — modal vynuceného rozhodnutí (compliance) -->
+    <ComplianceAckModal v-if="ackChecks" :checks="ackChecks"
+      @cancel="ackChecks = null; ackRetry = null"
+      @confirm="a => { const r = ackRetry; ackChecks = null; ackRetry = null; r?.(a) }" />
 
     <!-- Modal web faktury (trvalý veřejný odkaz) -->
     <div v-if="publicLinkOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
@@ -1688,7 +1710,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
         </label>
         <div class="flex justify-end gap-2">
           <button @click="partialOpen = false" class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50">{{ t('common.cancel') }}</button>
-          <button @click="submitPartialPayment" :disabled="busy !== null"
+          <button @click="submitPartialPayment()" :disabled="busy !== null"
             class="cursor-pointer px-4 h-9 text-sm bg-amber-500 hover:bg-amber-600 disabled:bg-neutral-300 text-white font-medium rounded-md">
             {{ busy === 'partial-payment' ? '…' : t('common.confirm') }}
           </button>

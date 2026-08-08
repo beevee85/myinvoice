@@ -7,6 +7,8 @@ import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { purchaseInvoicesApi, type PurchaseInvoice, type PurchaseInvoiceStatus, type PurchaseInvoiceBrief, type PaymentQrResponse } from '@/api/purchaseInvoices'
 import { cashDocumentsApi } from '@/api/cashDocuments'
+import ComplianceAckModal from '@/components/compliance/ComplianceAckModal.vue'
+import { extractComplianceChecks, type ComplianceAck, type ComplianceCheck } from '@/api/compliance'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
@@ -300,14 +302,18 @@ function openMarkPaid() {
   markPaidOpen.value = true
 }
 
-async function transition(target: PurchaseInvoiceStatus, paidDate?: string) {
+// FORK 0925 — modal vynuceného rozhodnutí (hotovost nad limit / strukturování)
+const ackChecks = ref<ComplianceCheck[] | null>(null)
+const ackRetry = ref<((ack: ComplianceAck) => void) | null>(null)
+
+async function transition(target: PurchaseInvoiceStatus, paidDate?: string, complianceAck?: ComplianceAck) {
   if (!invoice.value) return
   if (target === 'paid' && !paidDate) { openMarkPaid(); return }
   if (target === 'cancelled' && !confirm(t('purchase_invoice.confirm.cancel'))) return
   acting.value = true
   try {
     const method = target === 'paid' ? markPaidMethod.value : undefined
-    invoice.value = await purchaseInvoicesApi.transition(invoice.value.id, target, paidDate, method)
+    invoice.value = await purchaseInvoicesApi.transition(invoice.value.id, target, paidDate, method, complianceAck)
     // H2: přijatá faktura uhrazená hotově → výdajový pokladní doklad (VPD)
     if (target === 'paid' && method === 'cash' && createCashDoc.value && invoice.value) {
       try {
@@ -329,6 +335,9 @@ async function transition(target: PurchaseInvoiceStatus, paidDate?: string) {
     toast.success(t(`purchase_invoice.transition.success_${target}`))
     purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
   } catch (e) {
+    // FORK 0925 — riziko vyžaduje volbu uživatele (modal), pak se akce zopakuje s ack
+    const checks = extractComplianceChecks(e)
+    if (checks) { ackChecks.value = checks; ackRetry.value = a => transition(target, paidDate, a); return }
     toast.error(apiErrorMessage(e))
   } finally {
     acting.value = false
@@ -1405,6 +1414,11 @@ const purchaseActions = computed<ActionItem[]>(() => {
         </div>
       </div>
     </div>
+
+    <!-- FORK 0925 — modal vynuceného rozhodnutí (compliance) -->
+    <ComplianceAckModal v-if="ackChecks" :checks="ackChecks"
+      @cancel="ackChecks = null; ackRetry = null"
+      @confirm="a => { const r = ackRetry; ackChecks = null; ackRetry = null; r?.(a) }" />
 
     <LinkedDocumentsPanel v-if="invoice" class="mt-4 block" entity-type="purchase_invoice" :entity-id="invoice.id" />
 

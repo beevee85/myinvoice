@@ -46,6 +46,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'bank/:id(\\d+)',         name: 'bank-detail',     component: () => import('@/pages/bank/StatementDetail.vue') },
       // FORK (beevee85): pokladní doklady
       { path: 'cash-documents',         name: 'cash-documents',  component: () => import('@/pages/cash/CashDocuments.vue') },
+      // FORK 0925 — přehled compliance rizik (Dokument 7)
+      { path: 'compliance',             name: 'compliance',      component: () => import('@/pages/compliance/ComplianceOverview.vue') },
       // Admin (M6)
       { path: 'admin/activity-log',     name: 'activity-log',   component: () => import('@/pages/admin/ActivityLog.vue'), meta: { adminOnly: true } },
       { path: 'admin/sent-emails',      name: 'sent-emails',    component: () => import('@/pages/admin/SentEmails.vue'), meta: { adminOnly: true } },

@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { ComplianceAck } from './compliance'
 
 export type PurchaseInvoiceStatus = 'draft' | 'received' | 'booked' | 'paid' | 'cancelled'
 export type PurchaseDocumentKind = 'invoice' | 'receipt' | 'credit_note' | 'advance' | 'tax_document'
@@ -525,12 +526,14 @@ export const purchaseInvoicesApi = {
       rate, rate_date: rateDate, source,
     }).then(r => r.data),
 
-  transition: (id: number, target: PurchaseInvoiceStatus, paidDate?: string, paymentMethod?: string) =>
+  transition: (id: number, target: PurchaseInvoiceStatus, paidDate?: string, paymentMethod?: string, complianceAck?: ComplianceAck) =>
     api.post<PurchaseInvoice>(`/purchase-invoices/${id}/transition`, {
       target,
       ...(target === 'paid' ? { paid_date: paidDate || new Date().toISOString().slice(0, 10) } : {}),
       // FORK 0920 (H1) — způsob úhrady při označení jako uhrazené
       ...(target === 'paid' && paymentMethod ? { payment_method: paymentMethod } : {}),
+      // FORK 0925 — volby k rizikům (modal vynuceného rozhodnutí)
+      ...(complianceAck ? { compliance_ack: complianceAck } : {}),
     }).then(r => r.data),
 
   dismissExtractionWarning: (id: number) =>

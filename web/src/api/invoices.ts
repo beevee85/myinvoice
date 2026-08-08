@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { ComplianceAck } from './compliance'
 
 export type InvoiceType = 'invoice' | 'proforma' | 'credit_note' | 'cancellation' | 'tax_document'
 export type InvoiceStatus = 'draft' | 'issued' | 'sent' | 'reminded' | 'paid' | 'cancelled'
@@ -552,11 +553,12 @@ export const invoicesApi = {
    * (admin only, funguje i u vystaveného dokladu; částky/stav/číslo se nemění).
    */
   rebuildSnapshots: (id: number) => api.post<Invoice>(`/invoices/${id}/rebuild-snapshots`).then(r => r.data),
-  markPaid: (id: number, paidAt?: string, opts?: { sendThanks?: boolean; thanksTrigger?: 'manual' | 'bulk'; paymentMethod?: PaymentMethod }) =>
+  markPaid: (id: number, paidAt?: string, opts?: { sendThanks?: boolean; thanksTrigger?: 'manual' | 'bulk'; paymentMethod?: PaymentMethod; complianceAck?: ComplianceAck }) =>
     api.post<Invoice>(`/invoices/${id}/mark-paid`, {
       paid_at: paidAt || new Date().toISOString().slice(0, 10),
       ...(opts?.sendThanks ? { send_payment_thanks: true, thanks_trigger: opts.thanksTrigger || 'manual' } : {}),
       ...(opts?.paymentMethod ? { payment_method: opts.paymentMethod } : {}),
+      ...(opts?.complianceAck ? { compliance_ack: opts.complianceAck } : {}),
     }).then(r => r.data),
   unmarkPaid: (id: number) =>
     api.post<Invoice>(`/invoices/${id}/unmark-paid`, {}).then(r => r.data),
@@ -572,6 +574,8 @@ export const invoicesApi = {
     send_payment_thanks?: boolean
     /** FORK 0920 (H1) — způsob úhrady; bez hodnoty backend předvyplní z hlavičky. */
     payment_method?: PaymentMethod
+    /** FORK 0925 — volby uživatele k zjištěným rizikům (modal vynuceného rozhodnutí). */
+    compliance_ack?: ComplianceAck
   }) =>
     api.post<{
       invoice: Invoice

@@ -14,6 +14,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { useHotkey } from '@/composables/useHotkey'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
+import ComplianceAckModal from '@/components/compliance/ComplianceAckModal.vue'
+import { extractComplianceChecks, type ComplianceAck, type ComplianceCheck } from '@/api/compliance'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -152,7 +154,11 @@ const taxBreakdown = computed(() => {
   return [{ rate, base, vat: Math.round((amount - base) * 100) / 100 }]
 })
 
-async function save() {
+// FORK 0925 — modal vynuceného rozhodnutí
+const ackChecks = ref<ComplianceCheck[] | null>(null)
+const ackRetry = ref<((ack: ComplianceAck) => void) | null>(null)
+
+async function save(complianceAck?: ComplianceAck) {
   error.value = ''
   try {
     if (form.id === null) {
@@ -171,6 +177,7 @@ async function save() {
         received_by: form.received_by || undefined,
         approved_by: form.approved_by || undefined,
         note: form.note || undefined,
+        compliance_ack: complianceAck,
       })
       toast.success(t('cash.created', { number: created.number }))
       for (const w of created.warnings ?? []) toast.warning(w.message)
@@ -188,6 +195,8 @@ async function save() {
     showForm.value = false
     await Promise.all([load(), loadRegisters(), loadBook()])
   } catch (e: any) {
+    const checks = extractComplianceChecks(e)
+    if (checks) { ackChecks.value = checks; ackRetry.value = a => save(a); return }
     error.value = e?.response?.data?.error?.message || t('common.error')
   }
 }
@@ -550,10 +559,15 @@ const monthOptions = computed(() =>
 
         <div class="flex justify-end gap-2 mt-4">
           <button @click="showForm = false" class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50">{{ t('common.cancel') }}</button>
-          <button @click="save" class="cursor-pointer px-4 h-9 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md">{{ t('common.save') }}</button>
+          <button @click="save()" class="cursor-pointer px-4 h-9 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md">{{ t('common.save') }}</button>
         </div>
       </div>
     </div>
+
+    <!-- FORK 0925 — modal vynuceného rozhodnutí (compliance) -->
+    <ComplianceAckModal v-if="ackChecks" :checks="ackChecks"
+      @cancel="ackChecks = null; ackRetry = null"
+      @confirm="a => { const r = ackRetry; ackChecks = null; ackRetry = null; r?.(a) }" />
 
     <!-- ═══ Modal: storno (H7) ═══ -->
     <div v-if="stornoDoc" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">

@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { ComplianceAck } from './compliance'
 
 // FORK (beevee85): pokladní doklady (PPD/VPD) — v2 (0924): pokladny, storno,
 // pokladní kniha, náležitosti H3/H6 (protistrana, daňový doklad § 30a, podpisy).
@@ -70,6 +71,8 @@ export interface CashDocumentPayload {
   invoice_id?: number
   purchase_invoice_id?: number
   project_id?: number
+  /** FORK 0925 — volby uživatele k zjištěným rizikům. */
+  compliance_ack?: ComplianceAck
 }
 
 export interface CashRegister {
