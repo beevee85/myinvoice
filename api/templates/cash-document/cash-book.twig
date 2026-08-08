@@ -1,0 +1,62 @@
+{# FORK 0924 (H4) — pokladní kniha: hlavička s firmou/IČO/obdobím, chronologické
+   pohyby s průběžným zůstatkem, souhrn. Stránkování řeší mPDF footer. #}
+<style>
+  body { font-family: sans-serif; font-size: 9pt; color: #1a1a1a; }
+  h1 { font-size: 14pt; margin: 0 0 2mm 0; }
+  .meta { font-size: 8pt; color: #555; margin-bottom: 4mm; }
+  table.book { width: 100%; border-collapse: collapse; }
+  table.book th { background: #f0f0f0; border-bottom: 0.4mm solid #999; padding: 1.5mm 1mm; font-size: 8pt; text-transform: uppercase; text-align: left; }
+  table.book td { border-bottom: 0.1mm solid #ddd; padding: 1.2mm 1mm; }
+  .num { text-align: right; font-family: monospace; }
+  .storno { color: #b00020; }
+  .totals td { border-top: 0.4mm solid #999; font-weight: bold; }
+  .opening td { background: #fafafa; font-style: italic; }
+</style>
+
+<h1>Pokladní kniha — {{ book.register.name }} ({{ book.register.currency }})</h1>
+<div class="meta">
+  {{ supplier.company_name }}{% if supplier.ic %} · IČO {{ supplier.ic }}{% endif %}{% if supplier.dic %} · DIČ {{ supplier.dic }}{% endif %}<br>
+  Období: {{ book.from|cz_date }} – {{ book.to|cz_date }} · Vygenerováno: {{ generated_at }} · Záznamů: {{ book.entries|length }}
+</div>
+
+<table class="book">
+  <thead>
+    <tr>
+      <th style="width: 18mm;">Datum</th>
+      <th style="width: 26mm;">Doklad</th>
+      <th>Protistrana / účel</th>
+      <th class="num" style="width: 24mm;">Příjem</th>
+      <th class="num" style="width: 24mm;">Výdaj</th>
+      <th class="num" style="width: 26mm;">Zůstatek</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="opening">
+      <td>{{ book.from|cz_date }}</td>
+      <td colspan="2">Počáteční zůstatek</td>
+      <td class="num"></td>
+      <td class="num"></td>
+      <td class="num">{{ book.opening_balance|cz_money }}</td>
+    </tr>
+    {% for e in book.entries %}
+      <tr{% if e.status == 'storno' or e.storno_of_id %} class="storno"{% endif %}>
+        <td>{{ e.accounting_date|cz_date }}</td>
+        <td>{{ e.number }}{% if e.status == 'storno' %} (stornováno){% endif %}</td>
+        <td>
+          {{ e.counterparty }}{% if e.counterparty and e.description %} — {% endif %}{{ e.description }}
+          {%- if e.invoice_varsymbol %} · faktura {{ e.invoice_varsymbol }}{% endif %}
+          {%- if e.purchase_varsymbol %} · přijatá {{ e.purchase_varsymbol }}{% endif %}
+        </td>
+        <td class="num">{% if e.signed_amount >= 0 %}{{ e.signed_amount|cz_money }}{% endif %}</td>
+        <td class="num">{% if e.signed_amount < 0 %}{{ (-e.signed_amount)|cz_money }}{% endif %}</td>
+        <td class="num">{{ e.running_balance|cz_money }}</td>
+      </tr>
+    {% endfor %}
+    <tr class="totals">
+      <td colspan="3">Součty za období / konečný zůstatek</td>
+      <td class="num">{{ book.income_total|cz_money }}</td>
+      <td class="num">{{ book.expense_total|cz_money }}</td>
+      <td class="num">{{ book.closing_balance|cz_money }}</td>
+    </tr>
+  </tbody>
+</table>

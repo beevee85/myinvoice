@@ -497,6 +497,14 @@ final class Routes
         $app->put    ('/api/cash-documents/{id:[0-9]+}',      [CashDocumentAction::class, 'update']);
         $app->delete ('/api/cash-documents/{id:[0-9]+}',      [CashDocumentAction::class, 'delete']);
         $app->get    ('/api/cash-documents/{id:[0-9]+}/pdf',  [CashDocumentAction::class, 'pdf']);
+        // FORK 0924 (H7): storno protidokladem — mazání je zakázané
+        $app->post   ('/api/cash-documents/{id:[0-9]+}/storno', [CashDocumentAction::class, 'storno']);
+        // FORK 0924 (H4): pokladny + pokladní kniha + inventarizace
+        $app->get    ('/api/cash-registers',                       [\MyInvoice\Action\CashDocument\CashRegisterAction::class, 'list']);
+        $app->post   ('/api/cash-registers',                       [\MyInvoice\Action\CashDocument\CashRegisterAction::class, 'create']);
+        $app->get    ('/api/cash-registers/{id:[0-9]+}/book',      [\MyInvoice\Action\CashDocument\CashRegisterAction::class, 'book']);
+        $app->get    ('/api/cash-registers/{id:[0-9]+}/book/pdf',  [\MyInvoice\Action\CashDocument\CashRegisterAction::class, 'bookPdf']);
+        $app->post   ('/api/cash-registers/{id:[0-9]+}/inventory', [\MyInvoice\Action\CashDocument\CashRegisterAction::class, 'inventory']);
 
         // Pravidelné fakturace (recurring templates)
         $app->get    ('/api/recurring',                       [RecurringTemplateAction::class, 'list']);

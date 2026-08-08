@@ -98,6 +98,7 @@ final class RoleMiddleware implements MiddlewareInterface
         '* #^/api/logbook(/|$)#',
         // FORK (beevee85): pokladní doklady — účetní smí plnou CRUD
         '* #^/api/cash-documents(/|$)#',
+        '* #^/api/cash-registers(/|$)#',
         // Codebooks read-only přes API (admin endpointy mají zvláštní cestu /api/admin/codebooks)
         'GET #^/api/codebooks(/|$)#',
         'GET #^/api/price-list-items(/|$)#',
@@ -143,6 +144,7 @@ final class RoleMiddleware implements MiddlewareInterface
         'GET #^/api/logbook(/|$)#',
         // FORK (beevee85): pokladní doklady — čtení pro readonly
         'GET #^/api/cash-documents(/|$)#',
+        'GET #^/api/cash-registers(/|$)#',
         'GET #^/api/suppliers(/|$)#',
         'GET #^/api/search$#',
         // Dashboardy / CRM / reporty / daňový optimalizátor (čtení)

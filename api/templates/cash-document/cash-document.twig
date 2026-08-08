@@ -33,7 +33,15 @@
             </td>
             <td>
                 <div class="doc-number">{{ doc.number }}</div>
-                <div style="text-align: right;">Datum: <strong>{{ doc.issue_date|cz_date }}</strong></div>
+                <div style="text-align: right;">Vyhotoveno: <strong>{{ doc.issue_date|cz_date }}</strong></div>
+                {% if doc.accounting_date and doc.accounting_date != doc.issue_date %}
+                <div style="text-align: right; font-size: 8pt;">Uskutečněno: {{ doc.accounting_date|cz_date }}</div>
+                {% endif %}
+                {% if doc.status == 'storno' %}
+                <div style="text-align: right; color: #b00020; font-weight: bold;">STORNOVÁNO{% if doc.storno_by_number %} dokladem {{ doc.storno_by_number }}{% endif %}</div>
+                {% elseif doc.storno_of_number %}
+                <div style="text-align: right; color: #b00020; font-weight: bold;">STORNO dokladu {{ doc.storno_of_number }}</div>
+                {% endif %}
             </td>
         </tr>
     </table>
@@ -41,12 +49,22 @@
     <table class="body-table">
         <tr>
             <td class="field-label">{{ is_income ? 'Přijato od' : 'Vyplaceno komu' }}</td>
-            <td>{{ doc.counterparty ?: '—' }}</td>
+            <td>
+                {{ doc.counterparty ?: '—' }}
+                {%- if doc.counterparty_ico %} · IČO {{ doc.counterparty_ico }}{% endif %}
+                {% if doc.counterparty_address %}<br><span style="font-size: 8pt; color: #555;">{{ doc.counterparty_address }}</span>{% endif %}
+            </td>
         </tr>
         <tr>
             <td class="field-label">Účel platby</td>
-            <td>{{ doc.description ?: '—' }}{% if doc.invoice_varsymbol %} (faktura VS {{ doc.invoice_varsymbol }}){% endif %}</td>
+            <td>{{ doc.description ?: '—' }}{% if doc.invoice_varsymbol %} (faktura VS {{ doc.invoice_varsymbol }}){% endif %}{% if doc.purchase_varsymbol %} (přijatá faktura {{ doc.purchase_varsymbol }}){% endif %}</td>
         </tr>
+        {% if doc.note %}
+        <tr>
+            <td class="field-label">Poznámka</td>
+            <td style="font-size: 8.5pt;">{{ doc.note }}</td>
+        </tr>
+        {% endif %}
         <tr>
             <td class="field-label">Částka</td>
             <td class="amount-cell">{{ doc.amount|cz_money }} {{ doc.currency }}</td>
@@ -55,12 +73,34 @@
             <td class="field-label">Slovy</td>
             <td class="words">{{ amount_words }}</td>
         </tr>
+        {% if doc.is_tax_document and doc.vat_breakdown %}
+        <tr>
+            <td class="field-label">Rozpis DPH<br><span style="font-size: 7pt;">(zjednodušený daňový doklad, § 30a ZDPH)</span></td>
+            <td>
+                <table style="border-collapse: collapse; width: 90mm; font-size: 8.5pt;">
+                    <tr>
+                        <td style="color:#777; border-bottom: 0.2pt solid #ccc;">Sazba</td>
+                        <td style="color:#777; border-bottom: 0.2pt solid #ccc; text-align: right;">Základ</td>
+                        <td style="color:#777; border-bottom: 0.2pt solid #ccc; text-align: right;">DPH</td>
+                    </tr>
+                    {% for b in doc.vat_breakdown %}
+                    <tr>
+                        <td>{{ b.rate }} %</td>
+                        <td style="text-align: right;">{{ b.base|cz_money }}</td>
+                        <td style="text-align: right;">{{ b.vat|cz_money }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </td>
+        </tr>
+        {% endif %}
     </table>
 
     <table class="sign-table">
         <tr>
-            <td><div class="sign-line">{{ is_income ? 'Podpis příjemce (pokladník)' : 'Podpis výplatce (pokladník)' }}</div></td>
-            <td><div class="sign-line">{{ is_income ? 'Podpis plátce' : 'Podpis příjemce' }}</div></td>
+            <td style="width: 33%;"><div class="sign-line">Vystavil{% if doc.issued_by %}<br><strong>{{ doc.issued_by }}</strong>{% endif %}</div></td>
+            <td style="width: 33%;"><div class="sign-line">Schválil{% if doc.approved_by %}<br><strong>{{ doc.approved_by }}</strong>{% endif %}</div></td>
+            <td style="width: 33%;"><div class="sign-line">{{ is_income ? 'Přijal' : 'Vydal / přijal' }}{% if doc.received_by %}<br><strong>{{ doc.received_by }}</strong>{% endif %}</div></td>
         </tr>
     </table>
 </body>
