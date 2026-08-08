@@ -33,10 +33,13 @@ final class CreateProjectAction
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
 
-        // Klient musí existovat A patřit aktuálnímu supplier
-        if (!SupplierGuard::owns($request, $this->clients->find((int) $body['client_id']))) {
+        // FORK 0923 (B2): klient je nepovinný. Je-li uveden, musí existovat
+        // a patřit aktuálnímu supplierovi; jinak tenant určí middleware.
+        $clientId = isset($body['client_id']) && (int) $body['client_id'] > 0 ? (int) $body['client_id'] : null;
+        if ($clientId !== null && !SupplierGuard::owns($request, $this->clients->find($clientId))) {
             return Json::error($response, 'client_not_found', 'Klient neexistuje.', 400);
         }
+        $body['supplier_id'] = SupplierGuard::currentId($request);
 
         try {
             $id = $this->repo->create($body);
@@ -47,7 +50,7 @@ final class CreateProjectAction
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('project.created', $user['id'] ?? null, 'project', $id, [
-            'client_id' => $body['client_id'],
+            'client_id' => $clientId,
             'name'      => $body['name'],
         ], $ip, $request->getHeaderLine('User-Agent'));
 

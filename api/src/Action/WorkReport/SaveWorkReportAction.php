@@ -79,7 +79,9 @@ final class SaveWorkReportAction
                     'Zakázka neexistuje nebo nepatří k aktuálnímu dodavateli.', 400);
             }
             // Belt-and-braces: project musí patřit i ke stejnému klientovi jako faktura.
-            if ((int) ($project['client_id'] ?? 0) !== (int) ($invoice['client_id'] ?? 0)) {
+            // FORK 0923 (B2): zakázka bez klienta (obchodní případ) se nekontroluje.
+            if (($project['client_id'] ?? null) !== null
+                && (int) $project['client_id'] !== (int) ($invoice['client_id'] ?? 0)) {
                 return Json::error($response, 'validation_failed',
                     'Zakázka nepatří k odběrateli této faktury.', 400);
             }

@@ -6,6 +6,7 @@ namespace MyInvoice\Action\PurchaseInvoice;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Repository\ProjectRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -20,6 +21,7 @@ final class GetPurchaseInvoiceAction
 {
     public function __construct(
         private readonly PurchaseInvoiceRepository $repo,
+        private readonly ProjectRepository $projects,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -32,6 +34,11 @@ final class GetPurchaseInvoiceAction
         $invoice = $this->repo->find($id, SupplierGuard::currentId($request));
         if ($invoice === null) {
             return Json::error($response, 'not_found', 'Přijatá faktura nenalezena.', 404);
+        }
+
+        // FORK 0923 (D5): obchodní případ — nákup/prodej/marže zakázky dokladu.
+        if (!empty($invoice['project_id'])) {
+            $invoice['case_summary'] = $this->projects->caseSummary((int) $invoice['project_id']);
         }
 
         return Json::ok($response, $invoice);

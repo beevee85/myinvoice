@@ -45,6 +45,8 @@ final class ListPurchaseInvoicesAction
             'trash'         => !empty($filter['trash']),
             // FORK 0922 (C8) — skrýt doklady zahrnuté ve vyúčtování
             'hide_settled'  => !empty($filter['hide_settled']),
+            // FORK 0923 (B2) — doklady jedné zakázky
+            'project_id'    => $filter['project_id'] ?? null,
             'payment_ordered' => $filter['payment_ordered'] ?? null,
             'import_batch_id' => $filter['import_batch_id'] ?? null,
             'supplier_id'   => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),

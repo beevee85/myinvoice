@@ -49,8 +49,11 @@ final class InvoiceDefaults
             );
             $stmt->execute([$projectId]);
             $project = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
-            // MS-P1-1: project musí patřit zadanému klientovi
-            if ($project !== null && (int) $project['client_id'] !== $clientId) {
+            // MS-P1-1: project musí patřit zadanému klientovi.
+            // FORK 0923 (B2): zakázka bez klienta (obchodní případ) je přípustná
+            // pro libovolného odběratele téhož tenanta — kontrola se přeskočí.
+            if ($project !== null && $project['client_id'] !== null
+                && (int) $project['client_id'] !== $clientId) {
                 throw new \InvalidArgumentException("Zakázka #$projectId nepatří klientovi #$clientId.");
             }
         }

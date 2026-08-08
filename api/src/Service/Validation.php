@@ -61,8 +61,11 @@ final class Validation
     {
         $err = [];
 
-        if (empty($data['client_id']) || !is_numeric($data['client_id'])) {
-            $err['client_id'][] = 'Klient je povinný';
+        // FORK 0923 (B2): klient je NEPOVINNÝ — zakázka (obchodní případ) může
+        // začít nákupní stranou. Je-li uveden, musí být číselný.
+        if (isset($data['client_id']) && $data['client_id'] !== null && $data['client_id'] !== ''
+            && !is_numeric($data['client_id'])) {
+            $err['client_id'][] = 'Neplatný klient';
         }
         if (empty($data['name']) || trim((string) $data['name']) === '') {
             $err['name'][] = 'Název zakázky je povinný';

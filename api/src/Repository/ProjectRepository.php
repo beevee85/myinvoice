@@ -13,12 +13,17 @@ final class ProjectRepository
 
     public function find(int $id): ?array
     {
+        // FORK 0923 (B2): client_id je nepovinné → LEFT JOIN; tenant nese
+        // projects.supplier_id (COALESCE = fallback pro řádky před backfillem).
         $stmt = $this->db->pdo()->prepare(
             'SELECT p.*, c.company_name AS client_company_name, c.main_email AS client_main_email,
-                    c.supplier_id AS supplier_id,
-                    cur.code AS currency
+                    COALESCE(p.supplier_id, c.supplier_id) AS supplier_id,
+                    cur.code AS currency,
+                    car.registration AS car_registration, car.vin AS car_vin,
+                    car.name AS car_name, car.brand AS car_brand, car.model AS car_model
                FROM projects p
-               JOIN clients   c   ON c.id   = p.client_id
+          LEFT JOIN clients   c   ON c.id   = p.client_id
+          LEFT JOIN cars      car ON car.id = p.car_id
                JOIN currencies cur ON cur.id = p.currency_id
               WHERE p.id = ?'
         );
@@ -28,6 +33,7 @@ final class ProjectRepository
 
         $row = $this->cast($row);
         $row['billing_emails'] = $this->billingEmailsFor($id);
+        $row['participants'] = $this->participantsFor($id);
         return $row;
     }
 
@@ -54,7 +60,8 @@ final class ProjectRepository
         $params = [];
 
         if (!empty($filters['supplier_id'])) {
-            $where[] = 'c.supplier_id = ?';
+            // FORK 0923 (B2): tenant přes projects.supplier_id (fallback clients).
+            $where[] = 'COALESCE(p.supplier_id, c.supplier_id) = ?';
             $params[] = (int) $filters['supplier_id'];
         }
         if (!empty($filters['status'])) {
@@ -68,7 +75,7 @@ final class ProjectRepository
 
         $whereSql = implode(' AND ', $where);
 
-        $stmt = $this->db->pdo()->prepare("SELECT COUNT(*) FROM projects p JOIN clients c ON c.id = p.client_id WHERE $whereSql");
+        $stmt = $this->db->pdo()->prepare("SELECT COUNT(*) FROM projects p LEFT JOIN clients c ON c.id = p.client_id WHERE $whereSql");
         $stmt->execute($params);
         $total = (int) $stmt->fetchColumn();
 
@@ -85,11 +92,13 @@ final class ProjectRepository
         $sql = "SELECT p.*, c.company_name AS client_company_name,
                        c.main_email AS client_main_email,
                        cur.code AS currency,
+                       car.registration AS car_registration, car.vin AS car_vin,
                        COALESCE(prc.revenue, 0) AS revenue,
                        prc.last_invoice_date,
                        COALESCE(prc.invoice_count, 0) AS invoice_count
                   FROM projects p
-                  JOIN clients   c   ON c.id   = p.client_id
+             LEFT JOIN clients   c   ON c.id   = p.client_id
+             LEFT JOIN cars      car ON car.id = p.car_id
                   JOIN currencies cur ON cur.id = p.currency_id
              LEFT JOIN project_revenue_cache prc ON prc.project_id = p.id AND prc.currency_id = p.currency_id
                  WHERE $whereSql
@@ -125,25 +134,39 @@ final class ProjectRepository
     public function create(array $data): int
     {
         $pdo = $this->db->pdo();
-        $clientId = (int) $data['client_id'];
-        // Currency lookup scope: supplier_id z klienta projektu
-        $stmt = $pdo->prepare('SELECT supplier_id FROM clients WHERE id = ?');
-        $stmt->execute([$clientId]);
-        $supplierId = (int) $stmt->fetchColumn();
+        // FORK 0923 (B2): client_id je nepovinné — zakázka může začít nákupní
+        // stranou (obchodní případ s vozidlem). Tenant nese projects.supplier_id:
+        // buď explicitně z akce (middleware), nebo odvozený z klienta.
+        $clientId = isset($data['client_id']) && (int) $data['client_id'] > 0 ? (int) $data['client_id'] : null;
+        $supplierId = (int) ($data['supplier_id'] ?? 0);
+        if ($clientId !== null) {
+            $stmt = $pdo->prepare('SELECT supplier_id FROM clients WHERE id = ?');
+            $stmt->execute([$clientId]);
+            $clientSupplier = (int) $stmt->fetchColumn();
+            if ($clientSupplier === 0) {
+                throw new \InvalidArgumentException("Client #$clientId nenalezen.");
+            }
+            if ($supplierId !== 0 && $supplierId !== $clientSupplier) {
+                throw new \InvalidArgumentException('Klient nepatří aktivnímu dodavateli.');
+            }
+            $supplierId = $clientSupplier;
+        }
         if ($supplierId === 0) {
-            throw new \InvalidArgumentException("Client #$clientId nenalezen.");
+            throw new \InvalidArgumentException('Zakázka bez klienta vyžaduje supplier_id.');
         }
 
         $pdo->beginTransaction();
         try {
             $sql = 'INSERT INTO projects
-                (client_id, name, payment_due_days, payment_due_unit, project_number, contract_number,
+                (supplier_id, client_id, car_id, name, payment_due_days, payment_due_unit, project_number, contract_number,
                  budget_total, budget_yearly, budget_monthly, hourly_rate, currency_id, status,
                  requires_work_report_approval, note, default_revenue_category_id, billing_emails_mode)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
             $stmt = $pdo->prepare($sql);
             $stmt->execute([
+                $supplierId,
                 $clientId,
+                $this->carIdFor($data, $supplierId),
                 (string) $data['name'],
                 (int) ($data['payment_due_days'] ?? 7),
                 $this->nullablePaymentDueUnit($data, 'payment_due_unit'),
@@ -163,6 +186,9 @@ final class ProjectRepository
             $id = (int) $pdo->lastInsertId();
 
             $this->saveBillingEmails($id, $data['billing_emails'] ?? []);
+            if ($clientId !== null) {
+                $this->upsertParticipant($id, $clientId, 'customer');
+            }
 
             $pdo->commit();
             return $id;
@@ -179,9 +205,10 @@ final class ProjectRepository
     public function update(int $id, array $data): int
     {
         $pdo = $this->db->pdo();
-        // Supplier lookup pro currency scope + aktuální default kategorie tržby (přes client projektu — nemění se)
-        $stmt = $pdo->prepare('SELECT c.supplier_id, p.default_revenue_category_id
-                                 FROM projects p JOIN clients c ON c.id = p.client_id WHERE p.id = ?');
+        // Supplier lookup pro currency scope + aktuální default kategorie tržby.
+        // FORK 0923: tenant z projects.supplier_id (fallback klient), LEFT JOIN.
+        $stmt = $pdo->prepare('SELECT COALESCE(p.supplier_id, c.supplier_id) AS supplier_id, p.default_revenue_category_id
+                                 FROM projects p LEFT JOIN clients c ON c.id = p.client_id WHERE p.id = ?');
         $stmt->execute([$id]);
         $cur = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
         $supplierId = (int) ($cur['supplier_id'] ?? 0);
@@ -196,7 +223,7 @@ final class ProjectRepository
         $pdo->beginTransaction();
         try {
             $sql = 'UPDATE projects SET
-                    name = ?, payment_due_days = ?, payment_due_unit = ?, project_number = ?, contract_number = ?,
+                    name = ?, car_id = ?, payment_due_days = ?, payment_due_unit = ?, project_number = ?, contract_number = ?,
                     budget_total = ?, budget_yearly = ?, budget_monthly = ?, hourly_rate = ?,
                     currency_id = ?, status = ?, requires_work_report_approval = ?, note = ?,
                     default_revenue_category_id = ?, billing_emails_mode = ?
@@ -204,6 +231,7 @@ final class ProjectRepository
             $stmt = $pdo->prepare($sql);
             $stmt->execute([
                 (string) $data['name'],
+                $this->carIdFor($data, $supplierId),
                 (int) ($data['payment_due_days'] ?? 7),
                 $this->nullablePaymentDueUnit($data, 'payment_due_unit'),
                 $this->nullable($data, 'project_number'),
@@ -336,10 +364,137 @@ final class ProjectRepository
         }
     }
 
+    // ── FORK 0923 (B2): zakázka napříč nákupem a prodejem ────────────────
+
+    /** Vozidlo případu — validace tenanta; NULL/0 = bez vozidla. */
+    private function carIdFor(array $data, int $supplierId): ?int
+    {
+        $raw = $data['car_id'] ?? null;
+        if ($raw === null || $raw === '' || (int) $raw === 0) {
+            return null;
+        }
+        $carId = (int) $raw;
+        $check = $this->db->pdo()->prepare('SELECT 1 FROM cars WHERE id = ? AND supplier_id = ?');
+        $check->execute([$carId, $supplierId]);
+        if (!$check->fetchColumn()) {
+            throw new \InvalidArgumentException("Vozidlo #$carId nepatří tomuto tenantovi.");
+        }
+        return $carId;
+    }
+
+    /** Protistrana zakázky (customer/vendor); INSERT IGNORE = idempotentní. */
+    public function upsertParticipant(int $projectId, int $clientId, string $role): void
+    {
+        if (!in_array($role, ['customer', 'vendor'], true)) {
+            return;
+        }
+        $this->db->pdo()->prepare(
+            'INSERT IGNORE INTO project_participants (project_id, client_id, role) VALUES (?, ?, ?)'
+        )->execute([$projectId, $clientId, $role]);
+    }
+
+    /**
+     * Protistrany zakázky — evidované + živě dopočtené z přiřazených dokladů
+     * (dodavatelé z přijatých faktur, odběratelé z vydaných). Dopočtené se
+     * zároveň idempotentně zapíší, ať tabulka drží krok s realitou.
+     *
+     * @return list<array{client_id:int, role:string, company_name:string}>
+     */
+    public function participantsFor(int $projectId): array
+    {
+        $pdo = $this->db->pdo();
+        // Živá derivace z dokladů → upsert (INSERT IGNORE, levné a idempotentní).
+        $pdo->prepare(
+            "INSERT IGNORE INTO project_participants (project_id, client_id, role)
+             SELECT DISTINCT i.project_id, i.client_id, 'customer'
+               FROM invoices i WHERE i.project_id = ? AND i.deleted_at IS NULL"
+        )->execute([$projectId]);
+        $pdo->prepare(
+            "INSERT IGNORE INTO project_participants (project_id, client_id, role)
+             SELECT DISTINCT pi.project_id, pi.vendor_id, 'vendor'
+               FROM purchase_invoices pi WHERE pi.project_id = ? AND pi.deleted_at IS NULL"
+        )->execute([$projectId]);
+
+        $stmt = $pdo->prepare(
+            'SELECT pp.client_id, pp.role, c.company_name
+               FROM project_participants pp
+               JOIN clients c ON c.id = pp.client_id
+              WHERE pp.project_id = ?
+              ORDER BY pp.role, c.company_name'
+        );
+        $stmt->execute([$projectId]);
+        return array_map(static fn (array $r): array => [
+            'client_id'    => (int) $r['client_id'],
+            'role'         => (string) $r['role'],
+            'company_name' => (string) $r['company_name'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * D5 — obchodní případ: nákladová a výnosová strana zakázky + marže.
+     *
+     * Náklad: přijaté doklady zakázky mimo koš, mimo draft/cancelled a VŽDY mimo
+     * zálohy (advance nese jen platební rovinu — náklad nese DDKPZ/konečná;
+     * shodné s měsíčními součty a dashboardem, migrace 0906).
+     * Výnos: vydané faktury/dobropisy/DD k platbě mimo koš ve stavech
+     * issued/sent/reminded/paid (shodné s obratem seznamu).
+     * Marže se počítá z částek bez DPH (skutečný výsledek plátce) a pro
+     * kontrolu se vrací i vč. DPH (tak ji uvádí zadání D5).
+     *
+     * @return array{purchase_without_vat:float, purchase_with_vat:float,
+     *               sale_without_vat:float, sale_with_vat:float,
+     *               margin_without_vat:float, margin_with_vat:float,
+     *               margin_pct:?float, purchase_count:int, sale_count:int}
+     */
+    public function caseSummary(int $projectId): array
+    {
+        $pdo = $this->db->pdo();
+        $p = $pdo->prepare(
+            "SELECT COALESCE(SUM(total_without_vat), 0) AS net,
+                    COALESCE(SUM(total_with_vat + COALESCE(rounding, 0)), 0) AS gross,
+                    COUNT(*) AS n
+               FROM purchase_invoices
+              WHERE project_id = ? AND deleted_at IS NULL
+                AND status NOT IN ('draft', 'cancelled')
+                AND document_kind <> 'advance'"
+        );
+        $p->execute([$projectId]);
+        $purchase = $p->fetch(PDO::FETCH_ASSOC) ?: ['net' => 0, 'gross' => 0, 'n' => 0];
+
+        $s = $pdo->prepare(
+            "SELECT COALESCE(SUM(total_without_vat), 0) AS net,
+                    COALESCE(SUM(total_with_vat), 0) AS gross,
+                    COUNT(*) AS n
+               FROM invoices
+              WHERE project_id = ? AND deleted_at IS NULL
+                AND status IN ('issued', 'sent', 'reminded', 'paid')
+                AND invoice_type IN ('invoice', 'credit_note', 'tax_document')"
+        );
+        $s->execute([$projectId]);
+        $sale = $s->fetch(PDO::FETCH_ASSOC) ?: ['net' => 0, 'gross' => 0, 'n' => 0];
+
+        $purchaseNet = round((float) $purchase['net'], 2);
+        $saleNet = round((float) $sale['net'], 2);
+        $marginNet = round($saleNet - $purchaseNet, 2);
+
+        return [
+            'purchase_without_vat' => $purchaseNet,
+            'purchase_with_vat'    => round((float) $purchase['gross'], 2),
+            'sale_without_vat'     => $saleNet,
+            'sale_with_vat'        => round((float) $sale['gross'], 2),
+            'margin_without_vat'   => $marginNet,
+            'margin_with_vat'      => round((float) $sale['gross'] - (float) $purchase['gross'], 2),
+            'margin_pct'           => $purchaseNet > 0 ? round($marginNet / $purchaseNet * 100, 1) : null,
+            'purchase_count'       => (int) $purchase['n'],
+            'sale_count'           => (int) $sale['n'],
+        ];
+    }
+
     private function cast(array $row): array
     {
         if (isset($row['id']))               $row['id'] = (int) $row['id'];
-        if (isset($row['client_id']))        $row['client_id'] = (int) $row['client_id'];
+        if (isset($row['client_id']))        $row['client_id'] = $row['client_id'] !== null ? (int) $row['client_id'] : null;
+        if (array_key_exists('car_id', $row)) $row['car_id'] = $row['car_id'] !== null ? (int) $row['car_id'] : null;
         if (isset($row['supplier_id']))      $row['supplier_id'] = (int) $row['supplier_id'];
         if (isset($row['payment_due_days'])) $row['payment_due_days'] = (int) $row['payment_due_days'];
         if (isset($row['hourly_rate']))      $row['hourly_rate'] = (float) $row['hourly_rate'];

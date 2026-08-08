@@ -62,7 +62,7 @@ final class ActivityLogger
         $sql = match ($entityType) {
             'invoice'  => 'SELECT supplier_id FROM invoices WHERE id = ?',
             'client'   => 'SELECT supplier_id FROM clients  WHERE id = ?',
-            'project'  => 'SELECT c.supplier_id FROM projects p JOIN clients c ON c.id = p.client_id WHERE p.id = ?',
+            'project'  => 'SELECT COALESCE(p.supplier_id, c.supplier_id) FROM projects p LEFT JOIN clients c ON c.id = p.client_id WHERE p.id = ?',
             'supplier' => 'SELECT id FROM supplier WHERE id = ?',
             default    => null,
         };

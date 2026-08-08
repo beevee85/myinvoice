@@ -31,6 +31,12 @@ final class GetProjectAction
         $stmt->execute([$id]);
         $project['invoices_count'] = (int) $stmt->fetchColumn();
 
+        // FORK 0923 (B2/D5): nákladová strana + marže obchodního případu.
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM purchase_invoices WHERE project_id = ? AND deleted_at IS NULL');
+        $stmt->execute([$id]);
+        $project['purchase_invoices_count'] = (int) $stmt->fetchColumn();
+        $project['case_summary'] = $this->repo->caseSummary($id);
+
         // VAT-aware obrat — plátci DPH vidí čísla bez DPH (relevantní pro DPH limit),
         // neplátci s DPH (fakturované částky odpovídají reálnému inkasu).
         $vatStmt = $pdo->prepare('SELECT is_vat_payer FROM supplier WHERE id = ?');

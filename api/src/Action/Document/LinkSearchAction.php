@@ -167,15 +167,15 @@ final class LinkSearchAction
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
-    /** Projekty dle názvu / čísla projektu (scope přes klienta — projects nemá supplier_id). */
+    /** Projekty dle názvu / čísla projektu (FORK 0923: tenant z projects.supplier_id, fallback klient). */
     private function searchProjects(string $q, int $sid): array
     {
         $esc = addcslashes($q, '%_\\');
         $stmt = $this->db->pdo()->prepare(
             'SELECT p.id, p.name, p.project_number, c.company_name
                FROM projects p
-               JOIN clients c ON c.id = p.client_id
-              WHERE c.supplier_id = ? AND p.archived_at IS NULL
+          LEFT JOIN clients c ON c.id = p.client_id
+              WHERE COALESCE(p.supplier_id, c.supplier_id) = ? AND p.archived_at IS NULL
                 AND (p.name LIKE ? OR p.project_number LIKE ?)
               ORDER BY p.name
               LIMIT 8'

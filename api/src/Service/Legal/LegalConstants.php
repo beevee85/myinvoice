@@ -41,18 +41,32 @@ final class LegalConstants
      */
     private const DEFAULTS = [
         // § 47 odst. 1 ZDPH — POUZE platné sazby daně (žádná „0 %", viz hlavička).
-        // Do 31. 12. 2023: 21/15/10; od 1. 1. 2024 (konsolidační balíček): 21/12.
+        // 2022–2023: 21/15/10; od 1. 1. 2024 (konsolidační balíček): 21/12.
+        // Starší verze (16 znění, Dokument 9 E10) NEOVĚŘENY → před 1. 1. 2022
+        // resolver vrací null a validace sazeb se neprovede.
         'VAT_RATES' => [
-            ['from' => null,         'to' => '2023-12-31', 'value' => [21, 15, 10]],
+            ['from' => '2022-01-01', 'to' => '2023-12-31', 'value' => [21, 15, 10]],
             ['from' => '2024-01-01', 'to' => null,         'value' => [21, 12]],
         ],
 
-        // § 4 odst. 1 zák. č. 254/2004 Sb. (ZOPH), znění od 1. 7. 2017.
+        // § 4 odst. 1 zák. č. 254/2004 Sb. (ZOPH).
+        // KOREKCE K1/K2 (Dokument 9): limit 270 000 Kč je účinný od 1. 12. 2014
+        // (novela 261/2014 Sb.) — datum 1. 7. 2017 z dřívějších dokumentů byla
+        // novela přestupků, ne § 4. 27. 5. 2011 – 30. 11. 2014: 350 000 Kč
+        // (tehdy s přepočtem na EUR). Před 27. 5. 2011 NEOVĚŘENO (E9) → null,
+        // validace se neprovede. Sankce § 5/3 (od 1. 7. 2017): FO do 500 000 Kč,
+        // PO/podnikající FO do 5 000 000 Kč — viz CASH_LIMIT_FINE_*.
         // ⚠ Od 10. 7. 2027 (AMLR, nařízení (EU) 2024/1624) limit 10 000 EUR
         //   — viz AMLR_SWITCH_DATE a cashPaymentLimit().
         'CASH_PAYMENT_LIMIT_CZK' => [
-            ['from' => '2017-07-01', 'to' => null, 'value' => 270000],
+            ['from' => '2011-05-27', 'to' => '2014-11-30', 'value' => 350000],
+            ['from' => '2014-12-01', 'to' => null,         'value' => 270000],
         ],
+
+        // § 5 odst. 3 ZOPH (znění od 1. 7. 2017) — maximální pokuty za překročení
+        // limitu; do hlášek VB3a/VB3b dle typu osoby z profilu firmy (K3).
+        'CASH_LIMIT_FINE_INDIVIDUAL_CZK' => 500000,
+        'CASH_LIMIT_FINE_COMPANY_CZK' => 5000000,
 
         // § 4 odst. 4 ZOPH — sčítají se všechny platby mezi týmiž účastníky
         // v jednom kalendářním dni, v CZK i cizí měně.
@@ -84,13 +98,20 @@ final class LegalConstants
         // daňový doklad do 15 dnů + povinnost vynaložit úsilí o doručení.
         'CORRECTIVE_DOC_DEADLINE_DAYS' => 15,
 
-        // § 73 odst. 3 ZDPH — nárok na odpočet NELZE uplatnit po uplynutí DRUHÉHO
-        // KALENDÁŘNÍHO ROKU bezprostředně následujícího po roce vzniku nároku.
-        // POZOR: počítá se na KONCE ROKŮ (deadline = 31. 12. (rok_vzniku + N)),
-        // ne „N let od data" (Dokument 6, A6). Do 31. 12. 2024 N=3, od 2025 N=2
-        // (novela 461/2024 Sb.) — proto časová platnost dle roku vzniku nároku.
+        // § 73 odst. 3 ZDPH — lhůta pro uplatnění odpočtu. DVĚ GENERACE VÝPOČTU
+        // (Dokument 9 §3; přechodné ust. čl. II bod 1 z. 461/2024 Sb. — rozhodné
+        // je datum VZNIKU NÁROKU, ne dnešek):
+        //  - od 1. 1. 2025: konec DRUHÉHO kalendářního roku po roce vzniku
+        //    (deadline = 31. 12. (rok_vzniku + 2)),
+        //  - 1. 7. 2017 – 31. 12. 2024: 3 roky od PRVNÍHO DNE MĚSÍCE po
+        //    zdaňovacím období vzniku (JINÝ algoritmus, ne konec roku!),
+        //  - před 1. 7. 2017: 6 starších znění NEOVĚŘENO (E8) → null,
+        //    aplikace lhůtu nepočítá („nutno posoudit ručně").
+        // Výpočet dělá vatDeductionDeadline(); tato konstanta nese jen počty let.
+        // POZOR též § 73 odst. 4: ČÁSTEČNÝ odpočet (§ 75/§ 76) má kratší lhůtu —
+        // konec kalendářního roku prvního možného uplatnění (Dokument 8 §1.2).
         'VAT_DEDUCTION_CLAIM_YEARS' => [
-            ['from' => null,         'to' => '2024-12-31', 'value' => 3],
+            ['from' => '2017-07-01', 'to' => '2024-12-31', 'value' => 3],
             ['from' => '2025-01-01', 'to' => null,         'value' => 2],
         ],
 
@@ -212,8 +233,10 @@ final class LegalConstants
      * Hodnota konstanty platná K DANÉMU DATU (výchozí dnes).
      *
      * Override v cfg (`legal.<nazev_malymi>`) může být buď skalár (platí vždy),
-     * nebo stejný list období jako v DEFAULTS. Neznámý název je programátorská
-     * chyba → výjimka, ne tiché null.
+     * nebo stejný list období jako v DEFAULTS. Neznámý NÁZEV je programátorská
+     * chyba → výjimka. Datum MIMO ověřená období (staré doklady, E8–E10) vrací
+     * NULL — volající validaci přeskočí („neurčeno"), nikdy nesmí sáhnout po
+     * dnešní hodnotě (Dokument 9: rozhodné datum, ne datum výpočtu).
      */
     public function valueAt(string $name, ?\DateTimeInterface $onDate = null): mixed
     {
@@ -260,16 +283,35 @@ final class LegalConstants
     }
 
     /**
-     * Poslední den, kdy lze uplatnit odpočet z nároku vzniklého $claimArose.
+     * Poslední den, kdy lze uplatnit PLNÝ odpočet z nároku vzniklého $claimArose
+     * (§ 73 odst. 3; u částečného odpočtu platí kratší § 73/4 — řeší volající).
      *
-     * § 73 odst. 3: konec druhého (do 2024: třetího) kalendářního roku
-     * bezprostředně následujícího po roce vzniku nároku — počítá se na konce
-     * roků, ne „N let od data" (Dokument 6, A6).
+     * Dvě generace výpočtu (Dokument 9 §3, čl. II bod 1 z. 461/2024 Sb.):
+     *  - nárok od 1. 1. 2025: 31. 12. (rok_vzniku + 2),
+     *  - nárok 1. 7. 2017 – 31. 12. 2024: 3 roky od prvního dne měsíce
+     *    následujícího po zdaňovacím období vzniku, konec = start + 3 roky − 1 den
+     *    ($quarterlyPayer posouvá start za konec čtvrtletí),
+     *  - starší nárok: null — znění neověřeno (E8), posoudit ručně.
      */
-    public function vatDeductionDeadline(\DateTimeInterface $claimArose): \DateTimeImmutable
+    public function vatDeductionDeadline(\DateTimeInterface $claimArose, bool $quarterlyPayer = false): ?\DateTimeImmutable
     {
-        $years = (int) $this->valueAt('VAT_DEDUCTION_CLAIM_YEARS', $claimArose);
-        return new \DateTimeImmutable(sprintf('%d-12-31', (int) $claimArose->format('Y') + $years));
+        $years = $this->valueAt('VAT_DEDUCTION_CLAIM_YEARS', $claimArose);
+        if ($years === null) {
+            return null;
+        }
+        $day = new \DateTimeImmutable($claimArose->format('Y-m-d'));
+        if ($claimArose->format('Y-m-d') >= '2025-01-01') {
+            return new \DateTimeImmutable(sprintf('%d-12-31', (int) $day->format('Y') + (int) $years));
+        }
+        // Staré znění: start = 1. den po konci zdaňovacího období vzniku nároku.
+        if ($quarterlyPayer) {
+            $q = intdiv((int) $day->format('n') - 1, 3);           // 0..3
+            $start = new \DateTimeImmutable(sprintf('%d-%02d-01', (int) $day->format('Y'), $q * 3 + 1));
+            $start = $start->modify('+3 months');
+        } else {
+            $start = $day->modify('first day of next month');
+        }
+        return $start->modify('+' . (int) $years . ' years')->modify('-1 day');
     }
 
     /** § 30 odst. 1 ZDPH — limit zjednodušeného daňového dokladu vč. daně. */
@@ -311,6 +353,7 @@ final class LegalConstants
                 return $period['value'];
             }
         }
-        throw new \RuntimeException("Právní konstanta nemá hodnotu platnou k {$day}.");
+        // Mimo ověřená období (E8–E10): „neurčeno" — validace se neprovede.
+        return null;
     }
 }

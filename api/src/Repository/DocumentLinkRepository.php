@@ -49,7 +49,7 @@ final class DocumentLinkRepository
             'client'           => 'SELECT 1 FROM clients WHERE id = ? AND supplier_id = ? LIMIT 1',
             'invoice'          => 'SELECT 1 FROM invoices WHERE id = ? AND supplier_id = ? LIMIT 1',
             'purchase_invoice' => 'SELECT 1 FROM purchase_invoices WHERE id = ? AND supplier_id = ? LIMIT 1',
-            'project'          => 'SELECT 1 FROM projects p JOIN clients c ON c.id = p.client_id WHERE p.id = ? AND c.supplier_id = ? LIMIT 1',
+            'project'          => 'SELECT 1 FROM projects p LEFT JOIN clients c ON c.id = p.client_id WHERE p.id = ? AND COALESCE(p.supplier_id, c.supplier_id) = ? LIMIT 1',
         };
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$id, $supplierId]);
@@ -116,11 +116,11 @@ final class DocumentLinkRepository
                     $num = (string) ($r['varsymbol'] ?: $r['vendor_invoice_number'] ?: '');
                     return $this->invoiceLabel($num, (string) $r['company_name'], $r['issue_date'], $r['total_with_vat'], (string) $r['currency'], $id);
                 case 'project':
-                    // projects nemá supplier_id — scope přes klienta.
+                    // FORK 0923: tenant z projects.supplier_id (fallback klient).
                     $stmt = $pdo->prepare(
                         'SELECT p.name, p.project_number, c.company_name
-                           FROM projects p JOIN clients c ON c.id = p.client_id
-                          WHERE p.id = ? AND c.supplier_id = ?'
+                           FROM projects p LEFT JOIN clients c ON c.id = p.client_id
+                          WHERE p.id = ? AND COALESCE(p.supplier_id, c.supplier_id) = ?'
                     );
                     $stmt->execute([$id, $supplierId]);
                     $r = $stmt->fetch(PDO::FETCH_ASSOC);

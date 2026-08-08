@@ -79,7 +79,7 @@ final class ProjectStatsAction
                     COUNT(i.id) AS invoice_count
                FROM invoices i
                JOIN projects p ON p.id = i.project_id
-               JOIN clients  c ON c.id = p.client_id
+          LEFT JOIN clients  c ON c.id = p.client_id
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
                 AND i.deleted_at IS NULL
@@ -131,7 +131,7 @@ final class ProjectStatsAction
                     COUNT(i.id) AS invoice_count
                FROM invoices i
                JOIN projects p ON p.id = i.project_id
-               JOIN clients  c ON c.id = p.client_id
+          LEFT JOIN clients  c ON c.id = p.client_id
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
                 AND i.deleted_at IS NULL
@@ -196,8 +196,8 @@ final class ProjectStatsAction
         $stmt = $pdo->prepare(
             "SELECT p.status, COUNT(*) AS cnt
                FROM projects p
-               JOIN clients c ON c.id = p.client_id
-              WHERE p.archived_at IS NULL AND c.supplier_id = ?
+          LEFT JOIN clients c ON c.id = p.client_id
+              WHERE p.archived_at IS NULL AND COALESCE(p.supplier_id, c.supplier_id) = ?
            GROUP BY p.status"
         );
         $stmt->execute([$sid]);

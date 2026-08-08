@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Invoice;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Repository\ProjectRepository;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -16,6 +17,7 @@ final class GetInvoiceAction
     public function __construct(
         private readonly InvoiceRepository $repo,
         private readonly ExchangeRateApplier $rateApplier,
+        private readonly ProjectRepository $projects,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -34,6 +36,11 @@ final class GetInvoiceAction
         ) {
             $this->rateApplier->ensureRate($id);
             $invoice = $this->repo->find($id);
+        }
+
+        // FORK 0923 (D5): obchodní případ — nákup/prodej/marže zakázky dokladu.
+        if (!empty($invoice['project_id'])) {
+            $invoice['case_summary'] = $this->projects->caseSummary((int) $invoice['project_id']);
         }
 
         return Json::ok($response, $invoice);

@@ -44,12 +44,14 @@ final class PurchaseInvoiceRepository
                     c.main_email AS vendor_main_email, c.language AS vendor_language,
                     cur.code AS currency, cur.symbol AS currency_symbol, cur.decimals AS currency_decimals,
                     pcur.code AS payment_currency, pcur.symbol AS payment_currency_symbol,
-                    ec.label AS expense_category_label, ec.code AS expense_category_code
+                    ec.label AS expense_category_label, ec.code AS expense_category_code,
+                    p.name AS project_name, p.project_number
                FROM purchase_invoices pi
                JOIN clients c        ON c.id   = pi.vendor_id
                JOIN currencies cur   ON cur.id = pi.currency_id
           LEFT JOIN currencies pcur  ON pcur.id = pi.payment_currency_id
           LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id
+          LEFT JOIN projects p       ON p.id = pi.project_id
               WHERE pi.id = ? AND pi.supplier_id = ?'
         );
         $stmt->execute([$id, $supplierId]);
@@ -796,6 +798,11 @@ final class PurchaseInvoiceRepository
         if (!empty($filters['hide_settled'])) {
             $where[] = "(pi.settlement_group_id IS NULL OR pi.settlement_role = 'final')";
         }
+        // FORK 0923 (B2): doklady jedné zakázky (nákladová strana na kartě zakázky).
+        if (!empty($filters['project_id'])) {
+            $where[] = 'pi.project_id = ?';
+            $params[] = (int) $filters['project_id'];
+        }
         if (!empty($filters['year'])) {
             $where[] = 'YEAR(pi.issue_date) = ?';
             $params[] = (int) $filters['year'];
@@ -1067,8 +1074,8 @@ final class PurchaseInvoiceRepository
              paid_amount_payment_ccy, paid_amount_invoice_ccy, exchange_diff_base,
              payment_account_number, payment_bank_code, payment_iban, payment_bic,
              payment_variable_symbol, payment_account_source, payment_account_checked_at,
-             status, vat_classification_code, vat_deduction, vat_deduction_percent, tax_deductible, is_fixed_asset, expense_category_id, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?, ?, ?, ?, ?)';
+             status, vat_classification_code, vat_deduction, vat_deduction_percent, tax_deductible, is_fixed_asset, expense_category_id, project_id, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?, ?, ?, ?, ?, ?)';
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
@@ -1108,6 +1115,8 @@ final class PurchaseInvoiceRepository
             (array_key_exists('tax_deductible', $data) && !$data['tax_deductible']) ? 0 : 1,
             !empty($data['is_fixed_asset']) ? 1 : 0,
             $expenseCategoryId,
+            // FORK 0923 (B2): zakázka — nákladová strana obchodního případu.
+            $this->projectIdFor($data, $supplierId),
             $userId,
         ]);
 
@@ -1320,7 +1329,7 @@ final class PurchaseInvoiceRepository
                 advance_paid_amount = ?,
                 payment_currency_id = ?, payment_exchange_rate = ?,
                 paid_amount_payment_ccy = ?, paid_amount_invoice_ccy = ?, exchange_diff_base = ?,
-                vat_classification_code = ?, vat_deduction = ?, vat_deduction_percent = ?, tax_deductible = ?, is_fixed_asset = ?, expense_category_id = ?'
+                vat_classification_code = ?, vat_deduction = ?, vat_deduction_percent = ?, tax_deductible = ?, is_fixed_asset = ?, expense_category_id = ?, project_id = ?'
               . ($hasVendorVatPayer ? ', vendor_is_vat_payer = ?' : '')
               . $paymentSet
               . ($hasVarsymbol ? ', varsymbol = ?' : '')
@@ -1355,6 +1364,8 @@ final class PurchaseInvoiceRepository
             (array_key_exists('tax_deductible', $data) && !$data['tax_deductible']) ? 0 : 1,
             !empty($data['is_fixed_asset']) ? 1 : 0,
             isset($data['expense_category_id']) && $data['expense_category_id'] ? (int) $data['expense_category_id'] : null,
+            // FORK 0923 (B2): zakázka — nákladová strana obchodního případu.
+            $this->projectIdFor($data, $supplierId),
         ];
         if ($hasVendorVatPayer) $params[] = $vendorIsVatPayer;
         if ($hasPayment) {
@@ -2588,13 +2599,32 @@ final class PurchaseInvoiceRepository
         return array_values($buckets);
     }
 
+    /** FORK 0923 (B2): validace zakázky z payloadu proti tenantovi. NULL/0 = bez zakázky. */
+    private function projectIdFor(array $data, int $supplierId): ?int
+    {
+        $raw = $data['project_id'] ?? null;
+        if ($raw === null || $raw === '' || (int) $raw === 0) {
+            return null;
+        }
+        $projectId = (int) $raw;
+        $check = $this->db->pdo()->prepare(
+            'SELECT 1 FROM projects p LEFT JOIN clients c ON c.id = p.client_id
+              WHERE p.id = ? AND COALESCE(p.supplier_id, c.supplier_id) = ?'
+        );
+        $check->execute([$projectId, $supplierId]);
+        if (!$check->fetchColumn()) {
+            throw new \InvalidArgumentException("Zakázka #$projectId nepatří tomuto tenantovi.");
+        }
+        return $projectId;
+    }
+
     private function castInvoice(array $row): array
     {
         foreach (['id', 'supplier_id', 'vendor_id', 'currency_id', 'payment_currency_id',
                   'created_by', 'pdf_size_bytes', 'source_size_bytes', 'expense_category_id',
                   'advance_purchase_invoice_id', 'advance_link_suggested_id',
                   'settled_by_purchase_invoice_id', 'relation_consumer_id',
-                  'settlement_group_id'] as $f) {
+                  'settlement_group_id', 'project_id'] as $f) {
             if (isset($row[$f]) && $row[$f] !== null) $row[$f] = (int) $row[$f];
         }
         $row['reverse_charge'] = isset($row['reverse_charge']) ? (bool) $row['reverse_charge'] : false;
