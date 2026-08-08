@@ -1407,3 +1407,83 @@ testForeignCurrencySettlementRowUsesAdvanceRate mutačně ověřen. Sada 2515 ze
 Rollback: myinvoice:pred-fx37a, /root/backup-myinvoice-db-2026-08-07-pred-fx37a.zip
 
 TÍM JSOU VYČERPÁNY VŠECHNY NÁLEZY AUDITU (22: 21 opraveno+nasazeno, 1 vyvrácen).
+
+## 2026-08-08 — SPRINT 1: propojení souvisejících dokladů + způsob úhrady plateb
+
+Zadání uživatele „Propojení a přehlednost souvisejících dokladů" (Dokumenty 1–5,
+právní rešerše k 8. 8. 2026). Sprint 1 = quick wins A1–A6, C4, C7, D2, H1 + revize
+R4–R7 a základ právních konstant. Migrace **0920** (payment_method) a **0921**
+(cars.acquisition_purpose), obě aditivní a idempotentní.
+
+**Seznamy dokladů (web/src/pages/*/InvoiceList.vue + repozitáře):**
+- A1: hlavička sloupce stavu v /purchase-invoices byla `purchase_invoice.status.draft`
+  („Koncept") → nový klíč `purchase_invoice.fields.status` („Stav").
+- A3: terminologie sjednocena na „Zálohová faktura" (`type.proforma`,
+  `purchase_invoice.document_kind.advance`) + štítek „nedaňový doklad"
+  (tooltip § 20a) v seznamech i detailech obou stran.
+- A4: DUZP zálohy v seznamu nákupu = „nevzniká" s tooltipem místo „—".
+- C4: chip „Vazba" (🔗 součást <konečná> / ⚠ chybí daňový doklad / ⚠ nezúčtováno).
+  Nákup: LEFT JOIN přes advance_purchase_invoice_id (kdo zálohu čerpá) +
+  settled_by_purchase_invoice_id → relation_consumer_*/relation_final_varsymbol
+  v payloadu listGroupedByMonth. Prodej: subselecty přes parent_invoice_id
+  (konečná/DD míří na proformu) + EXISTS invoice_payments.tax_document_invoice_id
+  → relation_final_varsymbol/relation_parent_varsymbol/relation_has_tax_doc.
+- C7: měsíční součty — nový klíč `advance_with_vat` v totals_per_currency (obě strany;
+  FE merge při stránkování ho sčítá) + vysvětlivka „zálohové faktury (X) nezapočítány".
+
+**Detaily dokladů:**
+- A2: detail vydané faktury měl load() bez try/catch → neexistující ID viselo
+  v „Načítám…". Nyní loadError + hláška + odkaz zpět; timeout 15 s na obou
+  detailových GET; na přijaté straně doplněn odkaz zpět do error větve.
+- D2: box „Rekapitulace vyúčtování záloh" (hodnota plnění / uhrazeno zálohami /
+  zbývá) na konečné faktuře. Nákup: z řádků settlement_source_purchase_invoice_id
+  (bez is_settlement_rounding — ten je rozdíl rozpisů, ne záloha); TS typ položky
+  doplněn o is_settlement_rounding (backend ho posílal, FE ignoroval). Prodej:
+  z advance_paid_amount + odpočtových řádků dle prefixu popisu
+  (FinalFromProformaCreator nemá flag sloupec — až bude, přepnout).
+
+**Menu „Vytvořit" (A5+R6, AppLayout.vue):** + Dobropis, + Daňový doklad k přijaté
+platbě (`/invoices/new?type=tax_document` — editor i PreviewVarsymbolAction rozšířeny
+o tax_document, číselnou řadu už uměl VarsymbolGenerator), + PPD/VPD
+(`/cash-documents?new=income|expense`, CashDocuments.vue čte query jako logbook).
+
+**R4/B3:** typ „Daňový doklad k přijaté platbě" na prodejní straně UŽ EXISTOVAL
+od upstreamu (0108, PaymentTaxDocumentCreator, checkbox v částečné úhradě) —
+chyběla viditelnost: doplněn do filtru typů seznamu, do editoru a do menu.
+B3 tedy NENÍ funkční díra, jen byla skrytá.
+
+**H1 (migrace 0920):** `invoice_payments.payment_method` ENUM(bank_transfer|card|
+cash|other) NULL + `purchase_invoices.payment_method` (nákup platby neeviduje,
+úhrada je stavový přechod). Select „Způsob úhrady" v dialozích: Částečná úhrada,
+Označit zaplaceno (prodej), Označit jako uhrazené (nákup) — předvyplněno z hlavičky.
+recordPayment/CreatePaymentAction/MarkPaidAction/TransitionPurchaseInvoiceStatusAction
++ PurchaseInvoiceRepository::setStatus přenášejí hodnotu. Nabídka pokladního dokladu
+u hotovosti se řídí ZVOLENOU hodnotou (ne hlavičkou); na nákupní straně nově
+checkbox „Vystavit VPD" (protějšek prodejního PPD, vazba purchase_invoice_id).
+
+**R5 — PROVĚŘENO (žádná oprava potřeba):** řádek „Zaokrouhlení § 37a" je vyrovnávací
+položka mezi rozpisem faktury a Σ DDKPZ; na PF2606003 ověřeno z dat: obchodní řádky
+413 719,01/86 880,99 + odpočty −413 719,00/−86 881,00 + rounding −0,01/+0,01 →
+čistý vliv konečné faktury na ř. 40 přesně 0,00/0,00 a celkový odpočet případu =
+přesně Σ daní z DDKPZ. Doplněn regresní test
+PurchaseSettlementRoundingTest::testLedgerNetVatMatchesAdvanceTaxExactly
+(invariant přes VatLedgerService).
+
+**R7 (migrace 0921):** `cars.acquisition_purpose` ENUM(goods_for_resale|fixed_asset)
+NULL + select v CarsTab s vysvětlením § 72/4 (strop 420 000 Kč jen u majetku).
+A6: VIN u vozidel už existoval (0109) → B4 subject_identifier se řešit nebude,
+nositelem identifikátoru případu bude entita vozidla.
+
+**Právní konstanty (Dokument 3 sekce 1 + Dokument 4 sekce 3):**
+`api/src/Service/Legal/LegalConstants.php` — všechny konstanty s právním základem
+v komentářích, override přes cfg klíč `legal.*` (nic není zadrátováno inline),
+vč. AML prahů (253/2008 Sb.) a přepnutí na 10 000 EUR od 10. 7. 2027 (AMLR,
+metoda cashPaymentLimit()). Validace na modul teprve napojíme (compliance sprint
+dle Dokumentu 5 — ComplianceFlag, WARN+POTVRZENÍ vs. BLOK dle času úkonu).
+
+**Jak ověřit po merge upstreamu:** sloupec „Stav" v /purchase-invoices; /invoices/999999
+vrátí „Faktura nenalezena." + odkaz zpět; chipy vazeb u případů TUkas/Direct auto;
+měsíční pruh 06/2026 nákup ukazuje „zálohové faktury (450 600,00 Kč) nezapočítány";
+D2 box na PF2606003 (500 600 / −500 600 / 0); menu Vytvořit má 11 položek;
+mark-paid dialogy mají select způsobu úhrady; phpunit zelený vč.
+testLedgerNetVatMatchesAdvanceTaxExactly.
