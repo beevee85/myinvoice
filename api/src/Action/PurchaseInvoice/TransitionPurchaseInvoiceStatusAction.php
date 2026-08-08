@@ -50,6 +50,7 @@ final class TransitionPurchaseInvoiceStatusAction
         private readonly PurchaseInvoiceRepository $repo,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly \MyInvoice\Service\Compliance\ComplianceService $compliance,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -123,6 +124,37 @@ final class TransitionPurchaseInvoiceStatusAction
             // plateb v hotovosti. Neznámá hodnota se tiše zahodí (NULL = neurčeno).
             $pm = (string) ($body['payment_method'] ?? '');
             $paymentMethod = in_array($pm, ['bank_transfer', 'card', 'cash', 'other'], true) ? $pm : null;
+
+            // FORK 0925 — hotovost: limit ZOPH + strukturování (VB3a/VB3b/VW-AML1).
+            $paidAmount = round((float) ($existing['amount_to_pay'] ?? 0) + (float) ($existing['rounding'] ?? 0), 2);
+            if ($paymentMethod === 'cash' && $paidAmount > 0) {
+                $subject = [
+                    'subject_type' => 'purchase_invoice',
+                    'subject_id'   => $id,
+                    'doc_number'   => $existing['varsymbol'] ?? null,
+                    'project_id'   => $existing['project_id'] ?? null,
+                ];
+                $vendorId = (int) ($existing['vendor_id'] ?? 0) ?: null;
+                $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+                $check = $this->compliance->checkCashPayment($supplierId, $vendorId, $paidDate, $paidAmount, $subject);
+                if ($check['block'] !== null) {
+                    return Json::error($response, $check['block']['code'], $check['block']['message'], 409);
+                }
+                if ($check['checks'] !== []) {
+                    $ack = (array) ($body['compliance_ack'] ?? []);
+                    if ($ack === []) {
+                        return Json::error($response, 'compliance_ack_required',
+                            'Úhrada vyžaduje rozhodnutí — viz zjištěná rizika.', 409,
+                            ['checks' => $check['checks']]);
+                    }
+                    $err = $this->compliance->applyAcknowledgements(
+                        $supplierId, $check['checks'], $ack, $subject, $vendorId,
+                        (int) ($user['id'] ?? 0), (string) ($user['role'] ?? ''));
+                    if ($err !== null) {
+                        return Json::error($response, 'compliance_ack_invalid', $err, 400, ['checks' => $check['checks']]);
+                    }
+                }
+            }
         }
 
         // Při přechodu draft→received vygenerujeme varsymbol pokud chybí

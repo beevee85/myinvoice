@@ -45,6 +45,8 @@ final class CashDocumentAction
         private readonly IpMatcher $ipMatcher,
         private readonly CashDocumentPdfRenderer $pdf,
         private readonly LegalConstants $legal,
+        private readonly \MyInvoice\Service\Compliance\ComplianceService $compliance,
+        private readonly \MyInvoice\Repository\ComplianceFlagRepository $flags,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -170,6 +172,29 @@ final class CashDocumentAction
         $counterparty = $this->resolveCounterparty($sid, $b);
         $user = $this->user($request);
 
+        // FORK 0925 — hotovost: limit ZOPH + strukturování i pro samostatné
+        // pokladní doklady (doklad s vazbou na fakturu řeší platební akce —
+        // dvojí kontrola by tutéž platbu počítala dvakrát).
+        if ($counterparty['client_id'] !== null && $linkedInvoice === null && $linkedPurchase === null) {
+            $check = $this->compliance->checkCashPayment($sid, $counterparty['client_id'], $accountingDate,
+                round((float) $b['amount'], 2),
+                ['subject_type' => 'cash_document', 'subject_id' => 0, 'doc_number' => null]);
+            if ($check['block'] !== null) {
+                return Json::error($response, $check['block']['code'], $check['block']['message'], 409);
+            }
+            if ($check['checks'] !== []) {
+                $ack = (array) ($b['compliance_ack'] ?? []);
+                if ($ack === []) {
+                    return Json::error($response, 'compliance_ack_required',
+                        'Doklad vyžaduje rozhodnutí — viz zjištěná rizika.', 409,
+                        ['checks' => $check['checks']]);
+                }
+                // subject_id doplníme po INSERTu (viz níže) — ack se validuje teď.
+                $ackChecks = $check['checks'];
+                $ackData = $ack;
+            }
+        }
+
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
@@ -209,6 +234,28 @@ final class CashDocumentAction
             $pdo->rollBack();
             throw $e;
         }
+        // FORK 0925 — trvalé příznaky s volbou uživatele (subject_id až po INSERTu).
+        if (isset($ackChecks, $ackData)) {
+            $err = $this->compliance->applyAcknowledgements(
+                $sid, $ackChecks, $ackData,
+                ['subject_type' => 'cash_document', 'subject_id' => $id, 'doc_number' => $number],
+                $counterparty['client_id'], $user['id'], (string) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['role'] ?? ''));
+            if ($err !== null) {
+                // Ack nevalidní — doklad už existuje (minulá skutečnost se nemaže);
+                // založí se OTEVŘENÝ příznak a chyba se vrátí ve warnings.
+                foreach ($ackChecks as $c) {
+                    $this->flags->create($sid, [
+                        'type' => (string) $c['type'],
+                        'subject_type' => 'cash_document', 'subject_id' => $id,
+                        'client_id' => $counterparty['client_id'],
+                        'message' => (string) $c['message'],
+                        'context' => (array) ($c['context'] ?? []),
+                    ]);
+                }
+                $warnings[] = ['code' => 'compliance_ack_invalid', 'message' => $err];
+            }
+        }
+
         $this->log($request, 'cash_document.created', $id, ['number' => $number, 'kind' => $kind]);
         $out = $this->fetch($sid, $id);
         if ($warnings !== []) {

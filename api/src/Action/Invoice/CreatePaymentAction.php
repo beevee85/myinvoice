@@ -10,6 +10,7 @@ use MyInvoice\Http\TrashGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Compliance\ComplianceService;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Mail\PaymentThanksMailer;
@@ -33,6 +34,7 @@ final class CreatePaymentAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly PaymentThanksMailer $paymentThanks,
+        private readonly ComplianceService $compliance,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -55,6 +57,39 @@ final class CreatePaymentAction
         $paidOn = (string) ($body['paid_on'] ?? date('Y-m-d'));
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+
+        // FORK 0925 — hotovost: limit ZOPH + strukturování (VB3a/VB3b/VW-AML1).
+        // BLOK jen u dnešní/budoucí platby; zpětný záznam vyžaduje volbu uživatele
+        // (compliance_ack) a nechává trvalý příznak. Časové pravidlo Dokumentu 5.
+        $method = (string) ($body['payment_method'] ?? ($invoice['payment_method'] ?? ''));
+        if ($method === 'cash') {
+            $subject = [
+                'subject_type' => 'invoice',
+                'subject_id'   => $id,
+                'doc_number'   => $invoice['varsymbol'] ?? null,
+                'project_id'   => $invoice['project_id'] ?? null,
+            ];
+            $clientId = (int) ($invoice['client_id'] ?? 0) ?: null;
+            $check = $this->compliance->checkCashPayment(
+                SupplierGuard::currentId($request), $clientId, $paidOn, $amount, $subject);
+            if ($check['block'] !== null) {
+                return Json::error($response, $check['block']['code'], $check['block']['message'], 409);
+            }
+            if ($check['checks'] !== []) {
+                $ack = (array) ($body['compliance_ack'] ?? []);
+                if ($ack === []) {
+                    return Json::error($response, 'compliance_ack_required',
+                        'Úhrada vyžaduje rozhodnutí — viz zjištěná rizika.', 409,
+                        ['checks' => $check['checks']]);
+                }
+                $err = $this->compliance->applyAcknowledgements(
+                    SupplierGuard::currentId($request), $check['checks'], $ack, $subject,
+                    $clientId, (int) ($user['id'] ?? 0), (string) ($user['role'] ?? ''));
+                if ($err !== null) {
+                    return Json::error($response, 'compliance_ack_invalid', $err, 400, ['checks' => $check['checks']]);
+                }
+            }
+        }
 
         try {
             $result = $this->payments->recordPayment($id, $amount, $paidOn, [

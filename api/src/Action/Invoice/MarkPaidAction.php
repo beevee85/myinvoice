@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Compliance\ComplianceService;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Mail\PaymentThanksMailer;
@@ -31,6 +32,7 @@ final class MarkPaidAction
         private readonly InvoicePdfRenderer $pdf,
         private readonly PaymentThanksMailer $paymentThanks,
         private readonly InvoicePaymentService $payments,
+        private readonly ComplianceService $compliance,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -63,6 +65,38 @@ final class MarkPaidAction
         // zůstává konzistentní (paid_total = amount_to_pay) a označení lze vrátit
         // smazáním platby. Status flip + PDF invalidace + stats řeší service.
         $remaining = round((float) ($invoice['amount_to_pay'] ?? 0) - (float) ($invoice['paid_total'] ?? 0), 2);
+
+        // FORK 0925 — hotovost: limit ZOPH + strukturování (VB3a/VB3b/VW-AML1).
+        $method = (string) ($body['payment_method'] ?? ($invoice['payment_method'] ?? ''));
+        if ($method === 'cash' && $remaining > 0) {
+            $subject = [
+                'subject_type' => 'invoice',
+                'subject_id'   => $id,
+                'doc_number'   => $invoice['varsymbol'] ?? null,
+                'project_id'   => $invoice['project_id'] ?? null,
+            ];
+            $clientId = (int) ($invoice['client_id'] ?? 0) ?: null;
+            $sid = (int) ($invoice['supplier_id'] ?? 0);
+            $check = $this->compliance->checkCashPayment($sid, $clientId, $paidAt, $remaining, $subject);
+            if ($check['block'] !== null) {
+                return Json::error($response, $check['block']['code'], $check['block']['message'], 409);
+            }
+            if ($check['checks'] !== []) {
+                $ack = (array) ($body['compliance_ack'] ?? []);
+                if ($ack === []) {
+                    return Json::error($response, 'compliance_ack_required',
+                        'Úhrada vyžaduje rozhodnutí — viz zjištěná rizika.', 409,
+                        ['checks' => $check['checks']]);
+                }
+                $err = $this->compliance->applyAcknowledgements(
+                    $sid, $check['checks'], $ack, $subject, $clientId,
+                    (int) ($user['id'] ?? 0), (string) ($user['role'] ?? ''));
+                if ($err !== null) {
+                    return Json::error($response, 'compliance_ack_invalid', $err, 400, ['checks' => $check['checks']]);
+                }
+            }
+        }
+
         if ($remaining > 0) {
             try {
                 $this->payments->recordPayment($id, $remaining, $paidAt, [

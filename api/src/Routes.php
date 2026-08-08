@@ -499,6 +499,10 @@ final class Routes
         $app->get    ('/api/cash-documents/{id:[0-9]+}/pdf',  [CashDocumentAction::class, 'pdf']);
         // FORK 0924 (H7): storno protidokladem — mazání je zakázané
         $app->post   ('/api/cash-documents/{id:[0-9]+}/storno', [CashDocumentAction::class, 'storno']);
+        // FORK 0925: compliance — přehled rizik (Dokument 7); hromadné odbavení neexistuje
+        $app->get    ('/api/compliance/summary',  [\MyInvoice\Action\Compliance\ComplianceAction::class, 'summary']);
+        $app->get    ('/api/compliance/flags',    [\MyInvoice\Action\Compliance\ComplianceAction::class, 'list']);
+        $app->post   ('/api/compliance/flags/{id:[0-9]+}/acknowledge', [\MyInvoice\Action\Compliance\ComplianceAction::class, 'acknowledge']);
         // FORK 0924 (H4): pokladny + pokladní kniha + inventarizace
         $app->get    ('/api/cash-registers',                       [\MyInvoice\Action\CashDocument\CashRegisterAction::class, 'list']);
         $app->post   ('/api/cash-registers',                       [\MyInvoice\Action\CashDocument\CashRegisterAction::class, 'create']);
