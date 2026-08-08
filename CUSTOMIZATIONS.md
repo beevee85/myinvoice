@@ -1487,3 +1487,60 @@ měsíční pruh 06/2026 nákup ukazuje „zálohové faktury (450 600,00 Kč) n
 D2 box na PF2606003 (500 600 / −500 600 / 0); menu Vytvořit má 11 položek;
 mark-paid dialogy mají select způsobu úhrady; phpunit zelený vč.
 testLedgerNetVatMatchesAdvanceTaxExactly.
+
+## 2026-08-08 (odpoledne) — SPRINT 2: vyúčtovací skupiny + režim „Podle vyúčtování" + korekce Dokumentu 6
+
+Migrace **0922** (settlement_groups + settlement_group_id/settlement_role na obou
+tabulkách dokladů). Dokumenty 6 a 7 od uživatele (právní parametry ověřené
+na Beck-online + spec obrazovky /compliance).
+
+**Korekce právních odkazů (Dokument 6, sekce A) v už nasazeném kódu:**
+- `LegalConstants` PŘEPSÁN: žádná „nulová sazba" (§ 47/1 zná jen 21+12; 0 % NENÍ
+  sazba — osvobození/PDP/§ 90/mimo předmět jsou jiné instituty, nesené kódy
+  číselníku vat_rates), hodnoty s ČASOVOU PLATNOSTÍ (valueAt(); sazby 21/15/10
+  do 2023, lhůta odpočtu 3→2 roky od 2025), § 28 odst. 8 (ne 5) + nové odst. 9
+  počítadlo od konce měsíce, § 42 odst. 5+8 (ne § 45), § 72 odst. 3+10 (ne 4),
+  § 19 u nového dopravního prostředku (48 cm³ / 7,2 kW / NAJETO NEJVÝŠE 6 000 km),
+  § 73/3 na KONCE ROKŮ (vatDeductionDeadline), inventarizace: „4× ročně" v zákoně
+  NENÍ (default 1×/rok, § 29/3 prokazování 5 let, § 30/6 okno 4+2 měsíce),
+  KH limit 10 000 = pokyn GFŘ (E1, necitovat jako zákon), § 90/14 tři povinné
+  texty. Výjimka ZTP u 420k vypuštěna (E3 — nepotvrzena).
+- i18n: doc_tax_document_hint § 28/8, acquisition_purpose_hint § 72/3+10.
+
+**B1 — SettlementGroup (0922 + `Service/Settlement/SettlementGroupService`):**
+skupina = obchodní případ, staví se z vazeb union-findem (nákup:
+advance_purchase_invoice_id + settled_by_purchase_invoice_id + settlement_source
+na položkách; prodej: parent_invoice_id + invoice_payments.tax_document_invoice_id).
+REBUILD NA ČTENÍ (self-healing, žádné hooky do zapisovacích cest), recyklace id
+skupin dle členů, label/external_ref se nikdy nepřepisují (label_is_manual).
+external_ref: auto-detekce VIN regexem z poznámky. Status open/settled/mismatch
+(mismatch = Σ odpočtů ≠ Σ DDKPZ). total_amount = hodnota plnění vč. DPH
+(Σ DDKPZ + zbytek konečné) — hlavní řádek NIKDY nula (C2).
+Endpointy: GET (purchase-invoices|invoices)/settlement-groups a
+{id}/settlement-chain (akce v Action/Settlement, direction přes setArgument).
+Test: `tests/Integration/Settlement/SettlementGroupServiceTest.php`.
+
+**C1–C3, C5 — UI:** `components/documents/SettlementGroupList.vue` (sdílená pro
+oba směry), přepínač SegmentedControl [Podle vyúčtování | Chronologicky]
+(výchozí vyúčtování, volba per modul v localStorage `mi_view_purchase/sale`;
+koš vždy chronologicky). Skupiny řazené dle data konečné (bez ní dle nejnovějšího
+členu, stav Otevřeno), rozbalovací, hlavní řádek tučně s celkovou hodnotou
+plnění + „K úhradě", podřízené odsazené: záloha světlejší s přerušovaným levým
+okrajem + „nedaňový doklad", DDKPZ s obdobím DPH, dobropis červeně, ikony typů.
+
+**C6:** nákup má nově sloupec „K úhradě", prodej „Celkem s DPH" (oba moduly oba).
+**C8:** checkbox „Skrýt doklady zahrnuté ve vyúčtování" (filter[hide_settled]
+→ WHERE settlement_group_id IS NULL OR settlement_role='final') v obou modulech.
+**D1:** `components/documents/SettlementStepper.vue` — vodorovný stepper řetězce
+na detailu obou stran (kroky = členové skupiny, aktuální zvýrazněný, klikací,
+datum+částka+✓ úhrady). Stávající bannery s akcemi (odpojení) ZŮSTÁVAJÍ —
+nesou akce a § 37a varování, stepper je navigační nadstavba.
+
+**Dokument 7 (obrazovka /compliance) zaznamenán do plánu** — prerekvizita B2
+(zakázky s VIN a celým řetězcem) půjde před ním; výchozí pohled Podle zakázek,
+zákaz hromadného odbavení, ComplianceFlag nemazatelný.
+
+**Jak ověřit po merge upstreamu:** /purchase-invoices default zobrazí 2 skupiny
+případů (TUkas 500 600, Direct auto 475 992) + samostatné doklady; přepínač
+Chronologicky vrací původní seznam; detail DZ2606002 má stepper s 5 kroky;
+phpunit vč. SettlementGroupServiceTest zelený.
