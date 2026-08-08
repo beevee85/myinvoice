@@ -23,6 +23,8 @@ import IconButton from '@/components/ui/IconButton.vue'
 import Badge from '@/components/ui/Badge.vue'
 import StatusDot from '@/components/ui/StatusDot.vue'
 import TabsNav from '@/components/ui/TabsNav.vue'
+import SegmentedControl from '@/components/ui/SegmentedControl.vue'
+import SettlementGroupList from '@/components/documents/SettlementGroupList.vue'
 import Modal from '@/components/ui/Modal.vue'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import DocumentTrashModal, { type TrashModalDoc } from '@/components/invoices/DocumentTrashModal.vue'
@@ -73,11 +75,22 @@ const activeFilterCount = computed(() => {
   if (dateFrom.value || dateTo.value) n++
   if (overdueOnly.value) n++
   if (unpaidOnly.value) n++
+  if (hideSettled.value) n++
   return n
 })
 
 // FORK 0905 — režim koše: samostatný tab, list jede s filter[trash]=1.
 const trashOnly = ref(false)
+
+// FORK 0922 (C1) — přepínač zobrazení; výchozí „Podle vyúčtování" (per modul v localStorage).
+const VIEW_KEY = 'mi_view_sale'
+const viewMode = ref<'groups' | 'chrono'>(
+  (localStorage.getItem(VIEW_KEY) as 'groups' | 'chrono') || 'groups')
+watch(viewMode, v => localStorage.setItem(VIEW_KEY, v))
+const groupedView = computed(() => viewMode.value === 'groups' && !trashOnly.value)
+// FORK 0922 (C8) — chronologický režim: skrýt doklady zahrnuté ve vyúčtování.
+const hideSettled = ref(false)
+watch(hideSettled, () => load())
 
 // ─── Taby stavů = presety existujících filtrů (žádná nová API sémantika) ───
 const statusTabs = computed(() => [
@@ -641,6 +654,7 @@ async function load(reset = true) {
       overdue: overdueOnly.value || undefined,
       unpaid_only: unpaidOnly.value || undefined,
       trash: trashOnly.value || undefined,
+      hide_settled: hideSettled.value || undefined,
       page: page.value,
     })
     if (reset) {
@@ -848,6 +862,22 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
       <Button v-if="auth.canWrite" variant="primary" to="/invoices/new">+ {{ t('invoice.new') }}</Button>
     </div>
 
+    <!-- FORK 0922 (C1) — přepínač Chronologicky / Podle vyúčtování -->
+    <div v-if="!trashOnly" class="mb-3">
+      <SegmentedControl
+        :model-value="viewMode"
+        @update:model-value="v => viewMode = v as 'groups' | 'chrono'"
+        :options="[
+          { value: 'groups', label: t('doc_relations.view_groups') },
+          { value: 'chrono', label: t('doc_relations.view_chrono') },
+        ]"
+      />
+    </div>
+
+    <!-- ═══ Režim „Podle vyúčtování" (C2/C3/C5) ═══ -->
+    <SettlementGroupList v-if="groupedView" direction="sale" />
+
+    <template v-else>
     <!-- Taby stavů (presety filtrů) -->
     <TabsNav :model-value="activeTab" :tabs="statusTabs" class="mb-4" @update:model-value="setTab" />
 
@@ -997,6 +1027,8 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
       <div class="flex items-center gap-6 mt-3">
         <Checkbox v-model="overdueOnly" :label="t('invoice.overdue_only')" />
         <Checkbox v-model="unpaidOnly" :label="t('invoice.unpaid_only')" />
+        <!-- FORK 0922 (C8) -->
+        <Checkbox v-model="hideSettled" :label="t('doc_relations.hide_settled')" />
       </div>
     </div>
 
@@ -1077,6 +1109,8 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
                 <th>Typ</th>
                 <th>DUZP / Vystaveno</th>
                 <th v-if="!trashOnly">Splatnost</th>
+                <!-- FORK 0922 (C6) — Celkem s DPH vedle K úhradě (sjednocení s nákupem) -->
+                <th class="num">{{ t('purchase_invoice.totals.with_vat') }}</th>
                 <th class="num">{{ t('invoice.amount_to_pay') }}</th>
                 <th v-if="!trashOnly">Stav</th>
                 <th v-if="trashOnly">{{ t('doc_trash.col_deleted') }}</th>
@@ -1130,6 +1164,10 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
                   <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : 'text-neutral-600'">
                     {{ formatDate(inv.due_date) }}
                   </span>
+                </td>
+                <!-- FORK 0922 (C6) -->
+                <td class="num text-xs text-neutral-600">
+                  {{ formatMoney(inv.total_with_vat, inv.currency) }}
                 </td>
                 <td class="num font-medium">
                   {{ formatMoney(inv.amount_to_pay ?? inv.total_with_vat, inv.currency) }}
@@ -1280,6 +1318,7 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
         </Button>
       </div>
     </div>
+    </template>
 
     <!-- Hromadný PDF export -->
     <Modal v-if="bulkPdfOpen" :title="t('invoice.bulk_pdf_title')" width-class="max-w-md" @close="bulkPdfOpen = false">

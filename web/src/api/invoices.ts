@@ -402,6 +402,8 @@ export interface ListFilters {
   overdue?: boolean
   /** FORK 0905 — true = jen doklady v koši (jinak koš vždy vynechán). */
   trash?: boolean
+  /** FORK 0922 (C8) — skrýt doklady zahrnuté ve vyúčtování (zůstanou konečné + samostatné). */
+  hide_settled?: boolean
   q?: string
   page?: number
   per_page?: number
@@ -434,6 +436,7 @@ export const invoicesApi = {
     if (filters.unpaid_only) params['filter[unpaid_only]'] = 1
     if (filters.overdue)     params['filter[overdue]']     = 1
     if (filters.trash)       params['filter[trash]']       = 1
+    if (filters.hide_settled) params['filter[hide_settled]'] = 1
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
     return api.get<{ data: MonthGroup[]; meta: InvoiceListMeta }>('/invoices', { params }).then(r => r.data)

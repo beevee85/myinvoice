@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import SettlementStepper from '@/components/documents/SettlementStepper.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
@@ -753,6 +754,9 @@ const purchaseActions = computed<ActionItem[]>(() => {
         <span v-if="invoice.vendor_dic">{{ t('common.dic') }} {{ invoice.vendor_dic }}</span>
       </div>
     </div>
+
+    <!-- ═══ FORK 0922 (D1) — vodorovný stepper řetězce vyúčtování ═══ -->
+    <SettlementStepper direction="purchase" :document-id="invoice.id" />
 
     <!-- ═══ Propojení se zálohou — banner pod headerem (sjednoceno s vydanou fakturou) ═══ -->
     <!-- Tento doklad JE záloha → odkaz na vyúčtovací fakturu (+ odpojení) -->

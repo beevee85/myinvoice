@@ -23,6 +23,8 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar from '@/components/ui/FilterBar.vue'
 import DocumentTrashModal, { type TrashModalDoc } from '@/components/invoices/DocumentTrashModal.vue'
+import SegmentedControl from '@/components/ui/SegmentedControl.vue'
+import SettlementGroupList from '@/components/documents/SettlementGroupList.vue'
 import { clientsApi, type Client } from '@/api/clients'
 
 const { t, locale } = useI18n()
@@ -62,6 +64,15 @@ const importBatches = ref<ImportBatch[]>([])
 // FORK 0905 — režim koše (?trash=1): list jede s filter[trash]=1, jiné bulk akce.
 const trashOnly = ref(false)
 
+// FORK 0922 (C1) — přepínač zobrazení; výchozí „Podle vyúčtování" (per modul v localStorage).
+const VIEW_KEY = 'mi_view_purchase'
+const viewMode = ref<'groups' | 'chrono'>(
+  (localStorage.getItem(VIEW_KEY) as 'groups' | 'chrono') || 'groups')
+watch(viewMode, v => localStorage.setItem(VIEW_KEY, v))
+const groupedView = computed(() => viewMode.value === 'groups' && !trashOnly.value)
+// FORK 0922 (C8) — chronologický režim: skrýt doklady zahrnuté ve vyúčtování.
+const hideSettled = ref(false)
+
 // Počet aktivních filtrů pro odznáček na mobilním tlačítku „Filtry" (rok i hledání se nepočítají)
 const activeFilterCount = computed(() => {
   let n = 0
@@ -73,6 +84,7 @@ const activeFilterCount = computed(() => {
   if (overdueOnly.value) n++
   if (unpaidOnly.value) n++
   if (needsReviewOnly.value) n++
+  if (hideSettled.value) n++
   if (paymentOrderedFilter.value) n++
   if (importBatchFilter.value) n++
   return n
@@ -149,7 +161,7 @@ function syncFiltersToUrl() {
 
 watch([statusFilter, kindFilter, yearFilter, monthFilter, dateFrom, dateTo,
        overdueOnly, unpaidOnly, needsReviewOnly, paymentOrderedFilter, currencyFilter, vendorFilter,
-       importBatchFilter, trashOnly], () => {
+       importBatchFilter, trashOnly, hideSettled], () => {
   syncFiltersToUrl()
   load()
 })
@@ -237,6 +249,7 @@ async function load(reset = true) {
       payment_ordered: paymentOrderedFilter.value || undefined,
       import_batch_id: importBatchFilter.value || undefined,
       trash:         trashOnly.value    || undefined,
+      hide_settled:  hideSettled.value  || undefined,
       q:             search.value       || undefined,
       page: page.value,
     })
@@ -645,6 +658,22 @@ async function bulkSetKind() {
       </div>
     </div>
 
+    <!-- FORK 0922 (C1) — přepínač Chronologicky / Podle vyúčtování -->
+    <div v-if="!trashOnly" class="mb-3">
+      <SegmentedControl
+        :model-value="viewMode"
+        @update:model-value="v => viewMode = v as 'groups' | 'chrono'"
+        :options="[
+          { value: 'groups', label: t('doc_relations.view_groups') },
+          { value: 'chrono', label: t('doc_relations.view_chrono') },
+        ]"
+      />
+    </div>
+
+    <!-- ═══ Režim „Podle vyúčtování" (C2/C3/C5) ═══ -->
+    <SettlementGroupList v-if="groupedView" direction="purchase" />
+
+    <template v-else>
     <!-- ═══ Filtry v boxu ═══ -->
     <FilterBar :active-count="activeFilterCount">
       <template #primary>
@@ -702,6 +731,11 @@ async function bulkSetKind() {
         <label class="flex items-center gap-1.5 text-sm text-warning-700 px-2">
           <input v-model="needsReviewOnly" type="checkbox" class="rounded border-neutral-300 text-warning-600" />
           {{ t('purchase_invoice.filters.needs_review') }}
+        </label>
+        <!-- FORK 0922 (C8) -->
+        <label class="flex items-center gap-1.5 text-sm text-neutral-700 px-2">
+          <input v-model="hideSettled" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+          {{ t('doc_relations.hide_settled') }}
         </label>
         <select v-model="paymentOrderedFilter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm"
           :title="t('purchase_invoice.filters.payment_ordered')">
@@ -791,6 +825,7 @@ async function bulkSetKind() {
                   <th class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.tax_date') }}</th>
                   <th v-if="!trashOnly" class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.due_date') }}</th>
                   <th class="text-right px-4 py-2 font-medium">{{ t('purchase_invoice.totals.with_vat') }}</th>
+                  <th v-if="!trashOnly" class="text-right px-4 py-2 font-medium">{{ t('purchase_invoice.totals.to_pay') }}</th>
                   <th v-if="!trashOnly" class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.status') }}</th>
                   <th v-if="trashOnly" class="text-left px-4 py-2 font-medium">{{ t('doc_trash.col_deleted') }}</th>
                   <th v-if="trashOnly" class="text-left px-4 py-2 font-medium">{{ t('doc_trash.col_reason') }}</th>
@@ -861,6 +896,11 @@ async function bulkSetKind() {
                   </td>
                   <td class="px-4 py-2.5 text-right font-mono">
                     {{ formatMoney(inv.total_with_vat, inv.currency) }}
+                  </td>
+                  <!-- FORK 0922 (C6) — K úhradě vedle Celkem s DPH (sjednocení s prodejem) -->
+                  <td v-if="!trashOnly" class="px-4 py-2.5 text-right font-mono text-xs"
+                    :class="inv.status === 'paid' ? 'text-success-600' : 'text-neutral-600'">
+                    {{ inv.status === 'paid' ? formatMoney(0, inv.currency) : formatMoney(inv.amount_to_pay ?? inv.total_with_vat, inv.currency) }}
                   </td>
                   <!-- FORK 0905 — koš: kdo a kdy smazal + důvod + akce -->
                   <td v-if="trashOnly" class="px-4 py-2.5 text-xs text-neutral-600">
@@ -982,6 +1022,7 @@ async function bulkSetKind() {
         </button>
       </div>
     </div>
+    </template>
 
     <!-- FORK 0905 — potvrzovací dialog koše / trvalého smazání / vysypání -->
     <DocumentTrashModal

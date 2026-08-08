@@ -389,6 +389,8 @@ export interface PurchaseListFilters {
   payment_ordered?: '1' | '0'
   /** Filtr na dávku hromadného AI importu (#232). */
   import_batch_id?: string
+  /** FORK 0922 (C8) — skrýt doklady zahrnuté ve vyúčtování (zůstanou konečné + samostatné). */
+  hide_settled?: boolean
   q?: string
   page?: number
   per_page?: number
@@ -447,6 +449,7 @@ export const purchaseInvoicesApi = {
     if (filters.overdue)      params['filter[overdue]']      = 1
     if (filters.needs_review) params['filter[needs_review]'] = 1
     if (filters.trash)        params['filter[trash]']        = 1
+    if (filters.hide_settled) params['filter[hide_settled]'] = 1
     if (filters.payment_ordered) params['filter[payment_ordered]'] = filters.payment_ordered
     if (filters.import_batch_id) params['filter[import_batch_id]'] = filters.import_batch_id
     if (filters.page)        params.page                   = filters.page

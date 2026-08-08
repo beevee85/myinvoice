@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import SettlementStepper from '@/components/documents/SettlementStepper.vue'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -1827,6 +1828,9 @@ const invoiceActions = computed<ActionItem[]>(() => {
 
     <!-- Cross-link na související doklad: proforma → vystavený daňový doklad; doklad → rodič -->
     <!-- Proforma propojená s daňovým dokladem → odkaz + zrušení propojení -->
+    <!-- ═══ FORK 0922 (D1) — vodorovný stepper řetězce vyúčtování ═══ -->
+    <SettlementStepper direction="sale" :document-id="invoice.id" class="mb-4" />
+
     <div v-if="isProforma && invoice.final_invoice"
       class="flex items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm mb-4">
       <span class="text-primary-700 min-w-0">
