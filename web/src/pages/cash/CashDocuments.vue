@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { cashDocumentsApi, type CashDocument, type CashDocumentKind } from '@/api/cashDocuments'
 import { clientsApi } from '@/api/clients'
 import { useAuthStore } from '@/stores/auth'
@@ -10,6 +11,8 @@ import { useHotkey } from '@/composables/useHotkey'
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 
 const docs = ref<CashDocument[]>([])
 const loading = ref(false)
@@ -64,6 +67,18 @@ function openCreate(kind: CashDocumentKind) {
   error.value = ''
   showForm.value = true
 }
+
+// Deep-link z menu „Vytvořit": /cash-documents?new=income|expense (vzor: /logbook?new=trip).
+// Query se po otevření formuláře vyčistí, aby refresh neotvíral modal znovu.
+function handleNewQuery() {
+  const q = route.query.new
+  if ((q === 'income' || q === 'expense') && canWrite.value) {
+    openCreate(q)
+    router.replace({ query: { ...route.query, new: undefined } })
+  }
+}
+onMounted(handleNewQuery)
+watch(() => route.query.new, handleNewQuery)
 function openEdit(d: CashDocument) {
   Object.assign(form, {
     id: d.id, kind: d.kind, issue_date: d.issue_date.slice(0, 10),

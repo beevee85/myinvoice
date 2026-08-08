@@ -202,6 +202,7 @@ function mergeGroups(existing: PurchaseMonthGroup[], incoming: PurchaseMonthGrou
         found.without_vat = (found.without_vat ?? 0) + (t.without_vat ?? 0)
         found.vat = (found.vat ?? 0) + (t.vat ?? 0)
         found.with_vat = (found.with_vat ?? 0) + (t.with_vat ?? 0)
+        found.advance_with_vat = (found.advance_with_vat ?? 0) + (t.advance_with_vat ?? 0)
       } else {
         cur.totals_per_currency.push({ ...t })
       }
@@ -285,6 +286,45 @@ const statusBadgeClass = (s: PurchaseInvoiceStatus): string => ({
   paid:      'bg-success-50 text-success-600 border border-success-500/40',
   cancelled: 'bg-danger-50 text-danger-500 border border-danger-500/40',
 }[s])
+
+// Chip „Vazba" — vizualizace řetězce záloha → DDKPZ → konečná faktura.
+// Zdroj: advance_purchase_invoice_id (kdo zálohu čerpá) + settled_by_purchase_invoice_id (§ 37a).
+type RelationChip = { label: string; cls: string; tooltip: string }
+const relationChip = (inv: PurchaseInvoiceListItem): RelationChip | null => {
+  if (inv.status === 'cancelled') return null
+  if (inv.document_kind === 'advance') {
+    if (inv.relation_final_varsymbol) {
+      return {
+        label: `🔗 ${t('doc_relations.link_part_of', { number: inv.relation_final_varsymbol })}`,
+        cls: 'bg-primary-50 text-primary-700 border border-primary-500/30',
+        tooltip: t('doc_relations.link_part_of_tooltip', { number: inv.relation_final_varsymbol }),
+      }
+    }
+    if (inv.status === 'paid' && !inv.relation_consumer_id) {
+      return {
+        label: `⚠ ${t('doc_relations.link_missing_tax_doc')}`,
+        cls: 'bg-warning-50 text-warning-600 border border-warning-500/40',
+        tooltip: t('doc_relations.link_missing_tax_doc_tooltip'),
+      }
+    }
+    return null
+  }
+  if (inv.document_kind === 'tax_document') {
+    if (inv.relation_final_varsymbol) {
+      return {
+        label: `🔗 ${t('doc_relations.link_part_of', { number: inv.relation_final_varsymbol })}`,
+        cls: 'bg-primary-50 text-primary-700 border border-primary-500/30',
+        tooltip: t('doc_relations.link_part_of_tooltip', { number: inv.relation_final_varsymbol }),
+      }
+    }
+    return {
+      label: `⚠ ${t('doc_relations.link_unsettled')}`,
+      cls: 'bg-warning-50 text-warning-600 border border-warning-500/40',
+      tooltip: t('doc_relations.link_unsettled_tooltip'),
+    }
+  }
+  return null
+}
 
 // Row class — soft red background pro overdue, soft gray pro cancelled,
 // soft yellow pro faktury s AI extraction_warning (vyžadují kontrolu)
@@ -715,11 +755,17 @@ async function bulkSetKind() {
             <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-700">{{ formatMonth(g.month) }}</h2>
             <span class="text-xs text-neutral-500">{{ g.count }}</span>
           </div>
-          <div class="flex items-center gap-3 text-xs">
-            <span v-for="tc in g.totals_per_currency" :key="tc.currency" class="font-mono">
-              <span class="text-neutral-500">{{ tc.currency }}:</span>
-              <span class="font-semibold text-neutral-900 ml-1">{{ formatMoney(tc.with_vat, tc.currency) }}</span>
-            </span>
+          <div class="flex flex-col items-end gap-0.5 text-xs">
+            <div class="flex items-center gap-3">
+              <span v-for="tc in g.totals_per_currency" :key="tc.currency" class="font-mono">
+                <span class="text-neutral-500">{{ tc.currency }}:</span>
+                <span class="font-semibold text-neutral-900 ml-1">{{ formatMoney(tc.with_vat, tc.currency) }}</span>
+              </span>
+            </div>
+            <div v-for="tc in g.totals_per_currency.filter(x => (x.advance_with_vat ?? 0) > 0)" :key="`adv-${tc.currency}`"
+              class="text-[11px] text-neutral-500" :title="t('doc_relations.non_tax_tooltip')">
+              · {{ t('doc_relations.month_advances_excluded', { amount: formatMoney(tc.advance_with_vat!, tc.currency) }) }}
+            </div>
           </div>
         </header>
 
@@ -745,7 +791,7 @@ async function bulkSetKind() {
                   <th class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.tax_date') }}</th>
                   <th v-if="!trashOnly" class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.due_date') }}</th>
                   <th class="text-right px-4 py-2 font-medium">{{ t('purchase_invoice.totals.with_vat') }}</th>
-                  <th v-if="!trashOnly" class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.status.draft') }}</th>
+                  <th v-if="!trashOnly" class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.status') }}</th>
                   <th v-if="trashOnly" class="text-left px-4 py-2 font-medium">{{ t('doc_trash.col_deleted') }}</th>
                   <th v-if="trashOnly" class="text-left px-4 py-2 font-medium">{{ t('doc_trash.col_reason') }}</th>
                   <th v-if="trashOnly" class="px-4 py-2 w-24"></th>
@@ -790,9 +836,23 @@ async function bulkSetKind() {
                       <span>{{ inv.vendor_invoice_number }}</span>
                     </div>
                   </td>
-                  <td class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ t(`purchase_invoice.document_kind.${inv.document_kind}`) }}</td>
+                  <td class="px-4 py-2.5 text-center text-xs text-neutral-600">
+                    <div>{{ t(`purchase_invoice.document_kind.${inv.document_kind}`) }}</div>
+                    <span v-if="inv.document_kind === 'advance'" :title="t('doc_relations.non_tax_tooltip')"
+                      class="inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 border border-neutral-200">
+                      {{ t('doc_relations.non_tax_badge') }}
+                    </span>
+                    <div v-if="relationChip(inv)" class="mt-0.5">
+                      <span class="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap"
+                        :class="relationChip(inv)!.cls" :title="relationChip(inv)!.tooltip">
+                        {{ relationChip(inv)!.label }}
+                      </span>
+                    </div>
+                  </td>
                   <td class="px-4 py-2.5 text-center text-xs">
-                    <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ inv.tax_date ? formatDate(inv.tax_date) : '—' }}</span>
+                    <span v-if="inv.document_kind === 'advance' && !inv.tax_date" class="text-neutral-400 italic cursor-help"
+                      :title="t('doc_relations.non_tax_tooltip')">{{ t('doc_relations.tax_date_none') }}</span>
+                    <span v-else :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ inv.tax_date ? formatDate(inv.tax_date) : '—' }}</span>
                   </td>
                   <td v-if="!trashOnly" class="px-4 py-2.5 text-center text-xs">
                     <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : 'text-neutral-600'">
@@ -890,8 +950,20 @@ async function bulkSetKind() {
                     {{ t('purchase_invoice.payment_ordered_badge') }}
                   </span>
                 </div>
+                <div v-if="inv.document_kind === 'advance' || relationChip(inv)" class="mt-1 flex flex-wrap items-center gap-1">
+                  <span v-if="inv.document_kind === 'advance'" :title="t('doc_relations.non_tax_tooltip')"
+                    class="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 border border-neutral-200">
+                    {{ t('doc_relations.non_tax_badge') }}
+                  </span>
+                  <span v-if="relationChip(inv)" class="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap"
+                    :class="relationChip(inv)!.cls" :title="relationChip(inv)!.tooltip">
+                    {{ relationChip(inv)!.label }}
+                  </span>
+                </div>
                 <div class="flex items-center justify-between gap-2 mt-1 text-xs text-neutral-500">
-                  <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ inv.tax_date ? formatDate(inv.tax_date) : '—' }}</span>
+                  <span v-if="inv.document_kind === 'advance' && !inv.tax_date" class="text-neutral-400 italic cursor-help"
+                    :title="t('doc_relations.non_tax_tooltip')">{{ t('doc_relations.tax_date_none') }}</span>
+                  <span v-else :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ inv.tax_date ? formatDate(inv.tax_date) : '—' }}</span>
                   <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : ''">
                     {{ t('purchase_invoice.fields.due_date') }}: {{ formatDate(inv.due_date) }}
                   </span>

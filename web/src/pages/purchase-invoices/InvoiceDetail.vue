@@ -5,6 +5,7 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { purchaseInvoicesApi, type PurchaseInvoice, type PurchaseInvoiceStatus, type PurchaseInvoiceBrief, type PaymentQrResponse } from '@/api/purchaseInvoices'
+import { cashDocumentsApi } from '@/api/cashDocuments'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
@@ -286,9 +287,15 @@ function onPdfError(_code: string, message: string) {
 
 const paidAtInput = ref<string>(new Date().toISOString().slice(0, 10))
 const markPaidOpen = ref(false)
+// FORK 0920 (H1): způsob úhrady + nabídka VPD u hotovosti (H2)
+const markPaidMethod = ref<'bank_transfer' | 'card' | 'cash' | 'other'>('bank_transfer')
+const createCashDoc = ref(false)
+watch(markPaidMethod, m => { if (markPaidOpen.value) createCashDoc.value = m === 'cash' })
 
 function openMarkPaid() {
   paidAtInput.value = new Date().toISOString().slice(0, 10)
+  markPaidMethod.value = (invoice.value?.payment_method as typeof markPaidMethod.value) ?? 'bank_transfer'
+  createCashDoc.value = markPaidMethod.value === 'cash'
   markPaidOpen.value = true
 }
 
@@ -298,7 +305,25 @@ async function transition(target: PurchaseInvoiceStatus, paidDate?: string) {
   if (target === 'cancelled' && !confirm(t('purchase_invoice.confirm.cancel'))) return
   acting.value = true
   try {
-    invoice.value = await purchaseInvoicesApi.transition(invoice.value.id, target, paidDate)
+    const method = target === 'paid' ? markPaidMethod.value : undefined
+    invoice.value = await purchaseInvoicesApi.transition(invoice.value.id, target, paidDate, method)
+    // H2: přijatá faktura uhrazená hotově → výdajový pokladní doklad (VPD)
+    if (target === 'paid' && method === 'cash' && createCashDoc.value && invoice.value) {
+      try {
+        const doc = await cashDocumentsApi.create({
+          kind: 'expense',
+          issue_date: paidDate || new Date().toISOString().slice(0, 10),
+          amount: (invoice.value.amount_to_pay ?? invoice.value.total_with_vat) + (invoice.value.rounding || 0),
+          currency: invoice.value.currency,
+          counterparty: invoice.value.vendor_company_name || '',
+          description: t('purchase_invoice.cash_doc_desc', { number: invoice.value.vendor_invoice_number || invoice.value.varsymbol || '' }),
+          purchase_invoice_id: invoice.value.id,
+        })
+        toast.success(t('purchase_invoice.cash_doc_created', { number: doc.number }))
+      } catch (e) {
+        toast.error(apiErrorMessage(e))
+      }
+    }
     markPaidOpen.value = false
     toast.success(t(`purchase_invoice.transition.success_${target}`))
     purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
@@ -315,6 +340,27 @@ const trashModalMode = ref<'trash' | 'force'>('trash')
 const trashModalDocs = ref<TrashModalDoc[]>([])
 const trashBusy = ref(false)
 const inTrash = computed(() => !!invoice.value?.deleted_at)
+
+// ── D2: Rekapitulace vyúčtování záloh na konečné faktuře (§ 37a) ──
+// Odpočtové řádky nesou settlement_source_purchase_invoice_id; zaokrouhlovací řádek
+// (is_settlement_rounding) do „uhrazeno zálohami" nepatří — je to rozdíl rozpisů.
+const settlementDeductionTotal = computed(() => {
+  const items = invoice.value?.items ?? []
+  return items
+    .filter(it => it.settlement_source_purchase_invoice_id != null && !it.is_settlement_rounding)
+    .reduce((sum, it) => sum + (it.total_with_vat ?? 0), 0)
+})
+const settlementRecap = computed(() => {
+  if (!invoice.value) return null
+  const deducted = settlementDeductionTotal.value
+  if (deducted >= -0.001) return null
+  const total = invoice.value.total_with_vat + (invoice.value.rounding || 0)
+  return {
+    gross: total - deducted,              // celková hodnota plnění (deducted je záporné)
+    advances: deducted,                    // uhrazeno zálohami (záporně)
+    to_pay: (invoice.value.amount_to_pay ?? invoice.value.total_with_vat) + (invoice.value.rounding || 0),
+  }
+})
 // FORK 0905 — doklad v koši je read-only: skrývá VŠECHNY mutační prvky v detailu
 // (párování § 37a i zálohy, úprava platebního účtu, upload/mazání PDF). Backend to
 // hlídá TrashGuardem + PurchaseSettlementService, tohle je zrcadlo v UI.
@@ -618,8 +664,9 @@ const purchaseActions = computed<ActionItem[]>(() => {
 
 <template>
   <div v-if="loading" class="text-center text-neutral-500 py-12">{{ t('common.loading') }}</div>
-  <div v-else-if="error" class="max-w-5xl">
+  <div v-else-if="error" class="max-w-5xl space-y-3">
     <div class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</div>
+    <RouterLink to="/purchase-invoices" class="inline-block text-sm text-primary-700 hover:underline">{{ t('purchase_invoice.back_to_list') }}</RouterLink>
   </div>
 
   <div v-else-if="invoice" class="max-w-5xl space-y-4">
@@ -670,6 +717,10 @@ const purchaseActions = computed<ActionItem[]>(() => {
         </span>
         <span class="text-xs px-2 py-0.5 rounded font-normal bg-neutral-100 text-neutral-600">
           {{ t(`purchase_invoice.document_kind.${invoice.document_kind}`) }}
+        </span>
+        <span v-if="invoice.document_kind === 'advance'" :title="t('doc_relations.non_tax_tooltip')"
+          class="text-xs px-2 py-0.5 rounded font-normal bg-neutral-100 text-neutral-500 border border-neutral-200 cursor-help">
+          {{ t('doc_relations.non_tax_badge') }}
         </span>
         <a
           v-if="invoice.source_format"
@@ -864,6 +915,16 @@ const purchaseActions = computed<ActionItem[]>(() => {
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- ═══ D2: Rekapitulace vyúčtování záloh (konečná faktura § 37a) ═══ -->
+    <div v-if="settlementRecap" class="bg-primary-50/50 border border-primary-500/30 rounded-lg p-5 shadow-sm">
+      <h3 class="text-sm font-medium text-primary-800 mb-3">{{ t('doc_relations.recap_title') }}</h3>
+      <dl class="space-y-2 text-sm max-w-md">
+        <div class="flex justify-between"><dt class="text-neutral-700">{{ t('doc_relations.recap_gross') }}</dt><dd class="font-mono font-semibold">{{ formatMoney(settlementRecap.gross, invoice.currency) }}</dd></div>
+        <div class="flex justify-between"><dt class="text-neutral-700">{{ t('doc_relations.recap_advances') }}</dt><dd class="font-mono">{{ formatMoney(settlementRecap.advances, invoice.currency) }}</dd></div>
+        <div class="flex justify-between font-semibold border-t border-primary-500/30 pt-2"><dt>{{ t('doc_relations.recap_to_pay') }}</dt><dd class="font-mono">{{ formatMoney(settlementRecap.to_pay, invoice.currency) }}</dd></div>
+      </dl>
     </div>
 
     <!-- ═══ Totals + VAT breakdown ═══ -->
@@ -1290,6 +1351,18 @@ const purchaseActions = computed<ActionItem[]>(() => {
         <h3 class="text-lg font-semibold mb-3">{{ t('purchase_invoice.modals.mark_paid_title') }}</h3>
         <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('purchase_invoice.modals.mark_paid_date') }}</label>
         <input v-model="paidAtInput" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md mb-4" />
+        <!-- FORK 0920 (H1): způsob úhrady -->
+        <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('payment_method.label') }}</label>
+        <select v-model="markPaidMethod" class="w-full h-10 px-3 border border-neutral-300 rounded-md mb-4 bg-surface">
+          <option value="bank_transfer">{{ t('payment_method.bank_transfer') }}</option>
+          <option value="card">{{ t('payment_method.card') }}</option>
+          <option value="cash">{{ t('payment_method.cash') }}</option>
+          <option value="other">{{ t('payment_method.other') }}</option>
+        </select>
+        <label v-if="markPaidMethod === 'cash'" class="flex items-start gap-2 text-sm text-neutral-700 mb-4 cursor-pointer">
+          <input v-model="createCashDoc" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+          <span>{{ t('purchase_invoice.create_cash_doc') }}</span>
+        </label>
         <div class="flex justify-end gap-2">
           <button type="button" @click="markPaidOpen = false"
             class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50">{{ t('common.cancel') }}</button>

@@ -45,6 +45,8 @@ export interface PurchaseInvoiceItem {
   vat_classification_code?: string | null
   /** Auto-generovaný záporný odpočtový řádek § 37a — FK na zdrojový DDKPZ (tax_document). */
   settlement_source_purchase_invoice_id?: number | null
+  /** Zaokrouhlovací řádek § 37a (migrace 0910) — rozdíl rozpisu faktury a DDKPZ. */
+  is_settlement_rounding?: boolean
   vat_code?: string
   vat_label_cs?: string
   vat_label_en?: string
@@ -174,6 +176,8 @@ export interface PurchaseInvoice {
   booked_at: string | null
   paid_at: string | null
   cancelled_at: string | null
+  /** FORK 0920 (H1) — způsob úhrady; null = neurčeno. */
+  payment_method?: 'bank_transfer' | 'card' | 'cash' | 'other' | null
   /** FORK 0905 — koš dokladů: NULL = aktivní doklad, jinak čas přesunu do koše. */
   deleted_at?: string | null
   delete_reason?: string | null
@@ -290,6 +294,12 @@ export interface PurchaseInvoiceListItem {
   month_bucket: string
   extraction_warning: string | null
   payment_ordered_at: string | null
+  /** FORK — vazby řetězce záloha → DDKPZ → konečná (chip „Vazba" v seznamu). */
+  advance_purchase_invoice_id?: number | null
+  settled_by_purchase_invoice_id?: number | null
+  relation_consumer_id?: number | null
+  relation_consumer_kind?: PurchaseDocumentKind | null
+  relation_final_varsymbol?: string | null
 }
 
 export interface PurchaseMonthGroup {
@@ -300,6 +310,8 @@ export interface PurchaseMonthGroup {
     without_vat: number
     vat: number
     with_vat: number
+    /** FORK — souhrn záloh mimo měsíční součet (vysvětlivka v UI). */
+    advance_with_vat?: number
   }>
   invoices: PurchaseInvoiceListItem[]
 }
@@ -445,7 +457,8 @@ export const purchaseInvoicesApi = {
     ).then(r => r.data)
   },
 
-  get:    (id: number) => api.get<PurchaseInvoice>(`/purchase-invoices/${id}`).then(r => r.data),
+  // timeout: detail nesmí viset donekonečna v „Načítám…" — po 15 s spadne do error stavu
+  get:    (id: number) => api.get<PurchaseInvoice>(`/purchase-invoices/${id}`, { timeout: 15000 }).then(r => r.data),
   create: (payload: PurchaseInvoicePayload) =>
     api.post<PurchaseInvoice>('/purchase-invoices', payload).then(r => r.data),
   update: (id: number, payload: PurchaseInvoicePayload, force = false) =>
@@ -489,10 +502,12 @@ export const purchaseInvoicesApi = {
       rate, rate_date: rateDate, source,
     }).then(r => r.data),
 
-  transition: (id: number, target: PurchaseInvoiceStatus, paidDate?: string) =>
+  transition: (id: number, target: PurchaseInvoiceStatus, paidDate?: string, paymentMethod?: string) =>
     api.post<PurchaseInvoice>(`/purchase-invoices/${id}/transition`, {
       target,
       ...(target === 'paid' ? { paid_date: paidDate || new Date().toISOString().slice(0, 10) } : {}),
+      // FORK 0920 (H1) — způsob úhrady při označení jako uhrazené
+      ...(target === 'paid' && paymentMethod ? { payment_method: paymentMethod } : {}),
     }).then(r => r.data),
 
   dismissExtractionWarning: (id: number) =>

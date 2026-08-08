@@ -18,7 +18,7 @@ const fuelTypes: FuelType[] = ['diesel', 'petrol', 'lpg', 'cng', 'electric', 'hy
 const open = ref(false)
 const saving = ref(false)
 const draft = reactive<CarPayload & { id: number }>({
-  id: 0, registration: '', name: '', brand: '', model: '', vin: '',
+  id: 0, registration: '', name: '', brand: '', model: '', vin: '', acquisition_purpose: null,
   fuel_type: 'diesel', odometer_start: null, odometer_start_date: null,
   is_default: false, is_archived: false, note: '',
 })
@@ -34,7 +34,7 @@ watch(() => props.resetToken, () => { showArchived.value = false; load() })
 
 function newCar() {
   Object.assign(draft, {
-    id: 0, registration: '', name: '', brand: '', model: '', vin: '',
+    id: 0, registration: '', name: '', brand: '', model: '', vin: '', acquisition_purpose: null,
     fuel_type: 'diesel', odometer_start: null, odometer_start_date: null,
     is_default: cars.value.length === 0, is_archived: false, note: '',
   })
@@ -44,7 +44,8 @@ function newCar() {
 function editCar(c: Car) {
   Object.assign(draft, {
     id: c.id, registration: c.registration, name: c.name ?? '', brand: c.brand ?? '', model: c.model ?? '',
-    vin: c.vin ?? '', fuel_type: c.fuel_type ?? 'diesel', odometer_start: c.odometer_start,
+    vin: c.vin ?? '', acquisition_purpose: c.acquisition_purpose ?? null,
+    fuel_type: c.fuel_type ?? 'diesel', odometer_start: c.odometer_start,
     odometer_start_date: c.odometer_start_date, is_default: c.is_default, is_archived: c.is_archived, note: c.note ?? '',
   })
   open.value = true
@@ -56,7 +57,9 @@ async function save() {
   try {
     const payload: CarPayload = {
       registration: draft.registration.trim(), name: draft.name || null, brand: draft.brand || null,
-      model: draft.model || null, vin: draft.vin || null, fuel_type: draft.fuel_type || null,
+      model: draft.model || null, vin: draft.vin || null,
+      acquisition_purpose: draft.acquisition_purpose || null,
+      fuel_type: draft.fuel_type || null,
       odometer_start: draft.odometer_start === null || draft.odometer_start === undefined ? null : Number(draft.odometer_start),
       odometer_start_date: draft.odometer_start_date || null,
       is_default: draft.is_default, is_archived: draft.is_archived, note: draft.note || null,
@@ -207,6 +210,15 @@ function fuelLabel(f: FuelType | null): string {
             <div class="col-span-2">
               <label class="block text-sm font-medium text-neutral-700 mb-1">VIN</label>
               <input v-model="draft.vin" type="text" maxlength="40" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+            </div>
+            <div class="col-span-2">
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.acquisition_purpose') }}</label>
+              <select v-model="draft.acquisition_purpose" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
+                <option :value="null">{{ t('logbook.acquisition_purpose_unset') }}</option>
+                <option value="goods_for_resale">{{ t('logbook.acquisition_goods') }}</option>
+                <option value="fixed_asset">{{ t('logbook.acquisition_fixed_asset') }}</option>
+              </select>
+              <p class="text-xs text-neutral-500 mt-1">{{ t('logbook.acquisition_purpose_hint') }}</p>
             </div>
             <div class="col-span-2">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.note') }}</label>

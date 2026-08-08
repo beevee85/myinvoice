@@ -59,9 +59,11 @@ function confirmUnlock() {
 
 // Předvolba typu dokladu z URL (`/invoices/new?type=proforma`). Whitelist — nesmí
 // projít nic jiného než povolené typy, jinak fallback na běžnou vydanou fakturu.
-const queryDocType = computed<'proforma' | 'credit_note' | null>(() => {
+// tax_document = daňový doklad k přijaté platbě (§ 20a + § 28/5 ZDPH); typicky
+// vzniká z evidence platby, ruční vystavení je pro platby mimo zálohovou fakturu.
+const queryDocType = computed<'proforma' | 'credit_note' | 'tax_document' | null>(() => {
   const q = route.query.type
-  return q === 'proforma' || q === 'credit_note' ? q : null
+  return q === 'proforma' || q === 'credit_note' || q === 'tax_document' ? q : null
 })
 const editedStatus = ref<string>('draft')
 const editedVarsymbol = ref<string | null>(null)
@@ -197,7 +199,7 @@ const nonPayerTotalLabel = computed(() =>
   form.value.reverse_charge ? t('invoice.totals.without_vat') : t('invoice.totals.total'))
 
 const form = ref<{
-  invoice_type: 'invoice' | 'proforma' | 'credit_note'
+  invoice_type: 'invoice' | 'proforma' | 'credit_note' | 'tax_document'
   parent_invoice_id: number | null
   client_id: number | null
   project_id: number | null
@@ -1561,10 +1563,14 @@ async function confirmDeleteDraft(payload: { reason: string; override: boolean }
               <select v-model="form.invoice_type" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface">
                 <option value="invoice">{{ t('invoice.doc_invoice') }}</option>
                 <option value="proforma">{{ t('invoice.doc_proforma') }}</option>
+                <option value="tax_document">{{ t('invoice.doc_tax_document') }}</option>
                 <option value="credit_note">{{ t('invoice.doc_credit_note') }}</option>
               </select>
               <p v-if="form.invoice_type === 'credit_note'" class="text-xs text-warning-600 mt-1">
                 {{ t('invoice.credit_note_warning') }}
+              </p>
+              <p v-if="form.invoice_type === 'tax_document'" class="text-xs text-neutral-500 mt-1">
+                {{ t('invoice.doc_tax_document_hint') }}
               </p>
               <p v-if="typeWillRenumber" class="text-xs text-warning-600 mt-1">
                 {{ t('invoice.type_change_renumber', { varsymbol: editedVarsymbol ?? '' }) }}

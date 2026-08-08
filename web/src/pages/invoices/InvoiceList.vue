@@ -610,6 +610,7 @@ function mergeGroups(existing: MonthGroup[], incoming: MonthGroup[]): MonthGroup
         found.draft_without_vat = Math.round((found.draft_without_vat + t.draft_without_vat) * 100) / 100
         found.draft_vat         = Math.round((found.draft_vat         + t.draft_vat)         * 100) / 100
         found.draft_with_vat    = Math.round((found.draft_with_vat    + t.draft_with_vat)    * 100) / 100
+        found.advance_with_vat  = Math.round(((found.advance_with_vat ?? 0) + (t.advance_with_vat ?? 0)) * 100) / 100
       } else {
         cur.totals_per_currency.push({ ...t })
       }
@@ -776,6 +777,46 @@ const TYPE_BADGE: Record<string, 'primary' | 'accent' | 'purple' | 'amber' | 'ne
   cancellation: 'neutral',
 }
 
+// Chip „Vazba" — vizualizace řetězce zálohová → DD k platbě → konečná.
+// Konečná i DD míří na zálohovou přes parent_invoice_id (viz PaymentTaxDocumentCreator).
+type RelationChip = { label: string; cls: string; tooltip: string }
+function relationChip(inv: InvoiceListItem): RelationChip | null {
+  if (inv.status === 'cancelled') return null
+  if (inv.invoice_type === 'proforma') {
+    if (inv.relation_final_varsymbol) {
+      return {
+        label: `🔗 ${t('doc_relations.link_part_of', { number: inv.relation_final_varsymbol })}`,
+        cls: 'bg-primary-50 text-primary-700 border border-primary-500/30',
+        tooltip: t('doc_relations.link_part_of_tooltip', { number: inv.relation_final_varsymbol }),
+      }
+    }
+    const isPaid = inv.status === 'paid' || inv.payment_status === 'paid'
+    if (isPaid && !inv.relation_has_tax_doc) {
+      return {
+        label: `⚠ ${t('doc_relations.link_missing_tax_doc')}`,
+        cls: 'bg-warning-50 text-warning-600 border border-warning-500/40',
+        tooltip: t('doc_relations.link_missing_tax_doc_tooltip'),
+      }
+    }
+    return null
+  }
+  if (inv.invoice_type === 'tax_document') {
+    if (inv.relation_final_varsymbol) {
+      return {
+        label: `🔗 ${t('doc_relations.link_part_of', { number: inv.relation_final_varsymbol })}`,
+        cls: 'bg-primary-50 text-primary-700 border border-primary-500/30',
+        tooltip: t('doc_relations.link_part_of_tooltip', { number: inv.relation_final_varsymbol }),
+      }
+    }
+    return {
+      label: `⚠ ${t('doc_relations.link_unsettled')}`,
+      cls: 'bg-warning-50 text-warning-600 border border-warning-500/40',
+      tooltip: t('doc_relations.link_unsettled_tooltip'),
+    }
+  }
+  return null
+}
+
 /** Stav → StatusDot (text stavu jde do tooltipu; po splatnosti má přednost červená). */
 function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'muted' | 'info'; title: string } {
   const ds = displayStatus(inv.status, inv.payment_status)
@@ -915,6 +956,7 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
             { value: '', label: t('invoice.all_types') },
             { value: 'invoice', label: t('type.invoice') },
             { value: 'proforma', label: t('type.proforma') },
+            { value: 'tax_document', label: t('type.tax_document') },
             { value: 'credit_note', label: t('type.credit_note') },
           ]"
           :placeholder="t('invoice.all_types')"
@@ -998,16 +1040,22 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
             <span class="text-sm font-semibold text-neutral-800 capitalize whitespace-nowrap">{{ formatMonth(g.month) }}</span>
             <span class="text-xs text-neutral-500 whitespace-nowrap">{{ g.count }} {{ g.count === 1 ? t('invoice.doc_1') : (g.count < 5 ? t('invoice.doc_2_4') : t('invoice.doc_5plus')) }}</span>
           </div>
-          <div class="flex items-center gap-3 text-xs tabular-nums flex-wrap justify-end">
-            <span v-for="tot in g.totals_per_currency" :key="tot.currency">
-              <span class="text-neutral-500">{{ tot.currency }}:</span>
-              <span class="font-semibold text-neutral-900 ml-1">{{ formatMoney(tot.with_vat, tot.currency) }}</span>
-              <span v-if="tot.draft_with_vat !== 0" class="ml-1 text-primary-600"
-                :title="t('invoice.prediction_hint', { amount: formatMoney(tot.draft_with_vat, tot.currency) })">
-                → {{ formatMoney(tot.with_vat + tot.draft_with_vat, tot.currency) }}
-                <span class="text-[10px] text-primary-500">{{ t('invoice.prediction') }}</span>
+          <div class="flex flex-col items-end gap-0.5">
+            <div class="flex items-center gap-3 text-xs tabular-nums flex-wrap justify-end">
+              <span v-for="tot in g.totals_per_currency" :key="tot.currency">
+                <span class="text-neutral-500">{{ tot.currency }}:</span>
+                <span class="font-semibold text-neutral-900 ml-1">{{ formatMoney(tot.with_vat, tot.currency) }}</span>
+                <span v-if="tot.draft_with_vat !== 0" class="ml-1 text-primary-600"
+                  :title="t('invoice.prediction_hint', { amount: formatMoney(tot.draft_with_vat, tot.currency) })">
+                  → {{ formatMoney(tot.with_vat + tot.draft_with_vat, tot.currency) }}
+                  <span class="text-[10px] text-primary-500">{{ t('invoice.prediction') }}</span>
+                </span>
               </span>
-            </span>
+            </div>
+            <div v-for="tot in g.totals_per_currency.filter(x => (x.advance_with_vat ?? 0) > 0)" :key="`adv-${tot.currency}`"
+              class="text-[11px] text-neutral-500 tabular-nums" :title="t('doc_relations.non_tax_tooltip')">
+              · {{ t('doc_relations.month_advances_excluded', { amount: formatMoney(tot.advance_with_vat!, tot.currency) }) }}
+            </div>
           </div>
         </header>
 
@@ -1062,6 +1110,18 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
                 </td>
                 <td>
                   <Badge :color="TYPE_BADGE[inv.invoice_type] ?? 'neutral'" size="sm">{{ typeLabel(inv.invoice_type) }}</Badge>
+                  <div v-if="inv.invoice_type === 'proforma'" class="mt-0.5">
+                    <span :title="t('doc_relations.non_tax_tooltip')"
+                      class="inline-block text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 border border-neutral-200">
+                      {{ t('doc_relations.non_tax_badge') }}
+                    </span>
+                  </div>
+                  <div v-if="relationChip(inv)" class="mt-0.5">
+                    <span class="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap"
+                      :class="relationChip(inv)!.cls" :title="relationChip(inv)!.tooltip">
+                      {{ relationChip(inv)!.label }}
+                    </span>
+                  </div>
                 </td>
                 <td class="text-xs">
                   <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
@@ -1170,6 +1230,16 @@ function dotFor(inv: InvoiceListItem): { kind: 'ok' | 'danger' | 'pending' | 'mu
                     <span v-if="inv.project_name" class="text-neutral-400"> · </span>
                     <span v-if="inv.project_name" class="truncate">{{ inv.project_name }}</span>
                   </div>
+                </div>
+                <div v-if="inv.invoice_type === 'proforma' || relationChip(inv)" class="mt-1 flex flex-wrap items-center gap-1">
+                  <span v-if="inv.invoice_type === 'proforma'" :title="t('doc_relations.non_tax_tooltip')"
+                    class="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 border border-neutral-200">
+                    {{ t('doc_relations.non_tax_badge') }}
+                  </span>
+                  <span v-if="relationChip(inv)" class="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap"
+                    :class="relationChip(inv)!.cls" :title="relationChip(inv)!.tooltip">
+                    {{ relationChip(inv)!.label }}
+                  </span>
                 </div>
                 <div class="flex items-center justify-between gap-2 mt-2">
                   <div class="text-xs text-neutral-600 whitespace-nowrap">

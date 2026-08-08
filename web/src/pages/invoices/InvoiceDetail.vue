@@ -3,7 +3,7 @@ import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vu
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { invoicesApi, type Invoice, type WorkReport, type ApprovalStatus, type InvoiceAttachment, type AdvanceCandidate, type InvoicePayment, type RelatedBankTransaction } from '@/api/invoices'
+import { invoicesApi, type Invoice, type WorkReport, type ApprovalStatus, type InvoiceAttachment, type AdvanceCandidate, type InvoicePayment, type RelatedBankTransaction, type PaymentMethod } from '@/api/invoices'
 import { cashDocumentsApi } from '@/api/cashDocuments'
 import {
   settingsApi,
@@ -46,6 +46,7 @@ const router = useRouter()
 const invoice = ref<Invoice | null>(null)
 const wrModalOpen = ref(false)
 const loading = ref(true)
+const loadError = ref('')
 const busy = ref<string | null>(null)
 
 // V režimu „ceny s DPH" nese unit_price_without_vat brutto (kvůli haléřově přesnému
@@ -152,8 +153,17 @@ const signatureSelectionRows = computed(() => {
 
 async function load() {
   loading.value = true
-  invoice.value = await invoicesApi.get(Number(route.params.id))
-  loading.value = false
+  loadError.value = ''
+  // try/finally — bez něj rejected promise nechá stránku navždy v „Načítám…"
+  // (neexistující ID, výpadek API). Viz protějšek na přijaté straně.
+  try {
+    invoice.value = await invoicesApi.get(Number(route.params.id))
+  } catch (e) {
+    loadError.value = apiErrorMessage(e, t('invoice.load_failed') as string)
+    return
+  } finally {
+    loading.value = false
+  }
   if (auth.canWrite) {
     await loadSignatureProfiles()
     if (hasPdfSigningProfiles.value) loadSignatureSelection('invoice')
@@ -225,6 +235,26 @@ const remainingToPay = computed(() => {
   return Math.round(((invoice.value.amount_to_pay ?? 0) - (invoice.value.paid_total ?? 0)) * 100) / 100
 })
 
+// ── D2: Rekapitulace vyúčtování záloh na konečné faktuře ──
+// Odpočtové řádky generuje FinalFromProformaCreator s pevným prefixem popisu —
+// invoice_items nemají settlement flag (na rozdíl od přijaté strany, kde je FK).
+const SALE_DEDUCTION_PREFIXES = ['Odpočet zálohy — daňový doklad', 'Advance deduction — tax document']
+const settlementRecap = computed(() => {
+  const inv = invoice.value
+  if (!inv || inv.invoice_type !== 'invoice') return null
+  const dedSum = (inv.items ?? [])
+    .filter(it => (it.total_with_vat ?? 0) < 0
+      && SALE_DEDUCTION_PREFIXES.some(p => (it.description ?? '').startsWith(p)))
+    .reduce((s, it) => s + (it.total_with_vat ?? 0), 0) // záporné
+  const advances = dedSum - (inv.advance_paid_amount || 0) // záporné
+  if (advances >= -0.005) return null
+  return {
+    gross: inv.totals.with_vat - dedSum,
+    advances,
+    to_pay: inv.amount_to_pay,
+  }
+})
+
 // Modal částečné úhrady
 const partialOpen = ref(false)
 const partialAmount = ref<string>('')
@@ -233,6 +263,8 @@ const partialVs = ref('')
 const partialRef = ref('')
 const partialNote = ref('')
 const partialCreateTaxDoc = ref(false)
+// FORK 0920 (H1): způsob úhrady — předvyplněný z hlavičky dokladu
+const partialMethod = ref<PaymentMethod>('bank_transfer')
 
 // Daňový doklad k přijaté platbě dává smysl jen u zálohy plátce DPH bez reverse
 // charge — a jen dokud neexistuje finál (jeho § 37a odpočty jsou zafixované,
@@ -255,6 +287,7 @@ function openPartialPayment() {
   partialRef.value = ''
   partialNote.value = ''
   partialCreateTaxDoc.value = taxDocApplicable.value
+  partialMethod.value = invoice.value?.payment_method ?? 'bank_transfer'
   partialOpen.value = true
 }
 
@@ -273,6 +306,7 @@ async function submitPartialPayment() {
       variable_symbol: partialVs.value.trim() || null,
       bank_reference: partialRef.value.trim() || null,
       note: partialNote.value.trim() || null,
+      payment_method: partialMethod.value,
     })
     invoice.value = r.invoice
     payments.value = r.payments
@@ -705,14 +739,19 @@ const thanksEnabled = computed(() => supplierStore.currentSupplier?.payment_than
 const thanksHasRecipient = computed(() => !!invoice.value?.client_main_email)
 // FORK (beevee85): u hotovostní faktury nabídni vystavení příjmového pokladního dokladu
 const createCashDoc = ref(false)
-const isCashInvoice = computed(() => invoice.value?.payment_method === 'cash')
+// FORK 0920 (H1): způsob úhrady se volí v dialogu; předvyplněný z hlavičky dokladu.
+// Hotovostní režim (nabídka PPD) se řídí zvolenou hodnotou, ne jen hlavičkou.
+const markPaidMethod = ref<PaymentMethod>('bank_transfer')
+const isCashInvoice = computed(() => markPaidMethod.value === 'cash')
 function openMarkPaid() {
   paidAtInput.value = new Date().toISOString().slice(0, 10)
   sendThanks.value = thanksEnabled.value && thanksHasRecipient.value
     && (supplierStore.currentSupplier?.payment_thanks_default_checked ?? false)
+  markPaidMethod.value = invoice.value?.payment_method ?? 'bank_transfer'
   createCashDoc.value = isCashInvoice.value
   markPaidOpen.value = true
 }
+watch(isCashInvoice, cash => { if (markPaidOpen.value) createCashDoc.value = cash })
 
 async function markPaid() {
   if (!invoice.value) return
@@ -721,6 +760,7 @@ async function markPaid() {
   try {
     invoice.value = await invoicesApi.markPaid(invoice.value.id, paidAtInput.value, {
       sendThanks: thanksEnabled.value && sendThanks.value,
+      paymentMethod: markPaidMethod.value,
     })
     if (createCashDoc.value && cashAmount > 0) {
       try {
@@ -1419,6 +1459,12 @@ const invoiceActions = computed<ActionItem[]>(() => {
 <template>
   <div v-if="loading" class="text-center text-neutral-500 py-12">{{ t('common.loading') }}</div>
 
+  <!-- Error state — neexistující/nedostupný doklad nesmí skončit nekonečným „Načítám…" -->
+  <div v-else-if="loadError" class="max-w-5xl space-y-3">
+    <div class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ loadError }}</div>
+    <RouterLink to="/invoices" class="inline-block text-sm text-primary-700 hover:underline">{{ t('invoice.back_to_list') }}</RouterLink>
+  </div>
+
   <div v-else-if="invoice" class="max-w-5xl space-y-4">
     <!-- FORK 0905 — banner: doklad je v koši (read-only, jen zobrazit / obnovit / trvale smazat) -->
     <div v-if="inTrash" class="rounded-lg border border-danger-300 bg-danger-50 px-4 py-3 text-sm text-danger-700">
@@ -1451,6 +1497,10 @@ const invoiceActions = computed<ActionItem[]>(() => {
           </span>
           <span class="text-xs px-2.5 py-1 rounded-full font-medium bg-neutral-100 text-neutral-600">
             {{ typeLabel(invoice.invoice_type) }}
+          </span>
+          <span v-if="invoice.invoice_type === 'proforma'" :title="t('doc_relations.non_tax_tooltip')"
+            class="text-xs px-2.5 py-1 rounded-full font-medium bg-neutral-100 text-neutral-500 border border-neutral-200 cursor-help">
+            {{ t('doc_relations.non_tax_badge') }}
           </span>
           <span v-if="invoice.income_tax_exempt"
             class="text-xs px-2.5 py-1 rounded-full font-medium bg-amber-50 text-amber-700"
@@ -1519,6 +1569,14 @@ const invoiceActions = computed<ActionItem[]>(() => {
         <h3 class="text-lg font-semibold mb-3">{{ t('invoice.modals.mark_paid_title') }}</h3>
         <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.modals.mark_paid_date') }}</label>
         <input v-model="paidAtInput" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md mb-4" />
+        <!-- FORK 0920 (H1): způsob úhrady per platba -->
+        <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('payment_method.label') }}</label>
+        <select v-model="markPaidMethod" class="w-full h-10 px-3 border border-neutral-300 rounded-md mb-4 bg-surface">
+          <option value="bank_transfer">{{ t('payment_method.bank_transfer') }}</option>
+          <option value="card">{{ t('payment_method.card') }}</option>
+          <option value="cash">{{ t('payment_method.cash') }}</option>
+          <option value="other">{{ t('payment_method.other') }}</option>
+        </select>
         <label v-if="thanksEnabled" class="flex items-start gap-2 text-sm text-neutral-700 mb-4 cursor-pointer">
           <input v-model="sendThanks" type="checkbox" :disabled="!thanksHasRecipient" class="mt-0.5 rounded border-neutral-300 text-primary-600 disabled:opacity-50" />
           <span>
@@ -1597,6 +1655,14 @@ const invoiceActions = computed<ActionItem[]>(() => {
           class="w-full h-10 px-3 border border-neutral-300 rounded-md mb-3 font-mono" />
         <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.modals.mark_paid_date') }}</label>
         <input v-model="partialDate" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md mb-3" />
+        <!-- FORK 0920 (H1): způsob úhrady per platba -->
+        <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('payment_method.label') }}</label>
+        <select v-model="partialMethod" class="w-full h-10 px-3 border border-neutral-300 rounded-md mb-3 bg-surface">
+          <option value="bank_transfer">{{ t('payment_method.bank_transfer') }}</option>
+          <option value="card">{{ t('payment_method.card') }}</option>
+          <option value="cash">{{ t('payment_method.cash') }}</option>
+          <option value="other">{{ t('payment_method.other') }}</option>
+        </select>
         <div class="grid grid-cols-2 gap-2 mb-3">
           <div>
             <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.payments.vs') }}</label>
@@ -1958,6 +2024,16 @@ const invoiceActions = computed<ActionItem[]>(() => {
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- ═══ D2: Rekapitulace vyúčtování záloh (konečná faktura) ═══ -->
+    <div v-if="settlementRecap" class="bg-primary-50/50 border border-primary-500/30 rounded-(--radius-card) p-5">
+      <h3 class="text-sm font-medium text-primary-800 mb-3">{{ t('doc_relations.recap_title') }}</h3>
+      <dl class="space-y-2 text-sm max-w-md">
+        <div class="flex justify-between"><dt class="text-neutral-700">{{ t('doc_relations.recap_gross') }}</dt><dd class="font-mono font-semibold">{{ formatMoney(settlementRecap.gross, invoice.currency) }}</dd></div>
+        <div class="flex justify-between"><dt class="text-neutral-700">{{ t('doc_relations.recap_advances') }}</dt><dd class="font-mono">{{ formatMoney(settlementRecap.advances, invoice.currency) }}</dd></div>
+        <div class="flex justify-between font-semibold border-t border-primary-500/30 pt-2"><dt>{{ t('doc_relations.recap_to_pay') }}</dt><dd class="font-mono">{{ formatMoney(settlementRecap.to_pay, invoice.currency) }}</dd></div>
+      </dl>
     </div>
 
     <!-- Sumace — blok na --surface-muted, „Celkem" 22/700 v primary -->

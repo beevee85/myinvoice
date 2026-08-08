@@ -262,10 +262,14 @@ const navSections = computed<NavSection[]>(() => {
 const quickActions = computed(() => [
   { to: '/invoices/new',          label: t('nav.quick_invoice'),   icon: ICONS.invoices },
   { to: '/invoices/new?type=proforma', label: t('nav.quick_proforma'), icon: ICONS.proforma },
+  { to: '/invoices/new?type=tax_document', label: t('nav.quick_tax_document'), icon: ICONS.proforma },
+  { to: '/invoices/new?type=credit_note', label: t('nav.quick_credit_note'), icon: ICONS.invoices },
   { to: '/recurring/new',         label: t('nav.quick_recurring'), icon: ICONS.recurring },
   { to: '/clients/new',           label: t('nav.quick_client'),    icon: ICONS.clients },
   { to: '/clients/new?role=vendor', label: t('nav.quick_vendor'), icon: ICONS.suppliers },
   { to: '/purchase-invoices/new', label: t('nav.quick_purchase'), icon: ICONS.purchase },
+  { to: '/cash-documents?new=income',  label: t('nav.quick_cash_income'),  icon: ICONS.payment_orders },
+  { to: '/cash-documents?new=expense', label: t('nav.quick_cash_expense'), icon: ICONS.payment_orders },
   { to: '/logbook?tab=trips&new=trip', label: t('nav.quick_trip'),    icon: ICONS.logbook },
   { to: '/logbook?tab=fuel&new=fuel',  label: t('nav.quick_fueling'), icon: ICONS.fuel },
 ])

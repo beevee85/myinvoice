@@ -9,6 +9,8 @@ export interface Car {
   brand: string | null
   model: string | null
   vin: string | null
+  /** FORK 0921 (R7) — účel pořízení: zboží k prodeji vs. dlouhodobý majetek (§ 72/4 ZDPH). */
+  acquisition_purpose: 'goods_for_resale' | 'fixed_asset' | null
   fuel_type: FuelType | null
   odometer_start: number | null
   odometer_start_date: string | null
@@ -28,6 +30,7 @@ export interface CarPayload {
   brand?: string | null
   model?: string | null
   vin?: string | null
+  acquisition_purpose?: 'goods_for_resale' | 'fixed_asset' | null
   fuel_type?: FuelType | null
   odometer_start?: number | null
   odometer_start_date?: string | null
