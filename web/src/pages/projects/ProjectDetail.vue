@@ -7,6 +7,7 @@ const { t } = useI18n()
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { projectsApi, type Project } from '@/api/projects'
 import { invoicesApi, type InvoiceListItem } from '@/api/invoices'
+import { purchaseInvoicesApi, type PurchaseInvoiceListItem } from '@/api/purchaseInvoices'
 import { formatMoney, formatDate, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass } from '@/composables/useFormat'
 import MonthlyRevenueChart from '@/components/charts/MonthlyRevenueChart.vue'
 import { useToast } from '@/composables/useToast'
@@ -30,7 +31,11 @@ const invoicesTotal = ref(0)
 const invoicesPage = ref(1)
 const invoicesPages = ref(1)
 
-const canDelete = computed(() => (project.value?.invoices_count ?? 0) === 0)
+// FORK 0923 (B2): nákladová strana zakázky.
+const purchaseInvoices = ref<PurchaseInvoiceListItem[]>([])
+
+const canDelete = computed(() =>
+  (project.value?.invoices_count ?? 0) === 0 && (project.value?.purchase_invoices_count ?? 0) === 0)
 
 // Splatnost s jednotkou: měsíc → „Měsíc" / „N× měsíc", jinak „N dní".
 const dueLabel = computed(() => {
@@ -66,11 +71,13 @@ async function load() {
   invoicesLoading.value = true
   invoicesPage.value = 1
   try {
-    const [p, grouped] = await Promise.all([
+    const [p, grouped, purchases] = await Promise.all([
       projectsApi.get(id),
       invoicesApi.listGrouped({ project_id: id, page: 1 }),
+      purchaseInvoicesApi.listGrouped({ project_id: id }).catch(() => ({ data: [] as any[], meta: { total: 0 } })),
     ])
     project.value = p
+    purchaseInvoices.value = purchases.data.flatMap((g: any) => g.invoices)
     invoices.value = grouped.data.flatMap(g => g.invoices)
     invoicesTotal.value = grouped.meta.total
     invoicesPages.value = grouped.meta.pages ?? 1
@@ -100,7 +107,7 @@ async function archive() {
   if (!project.value) return
   if (!confirm(t('project.archive_confirm'))) return
   await projectsApi.archive(project.value.id)
-  router.push(`/clients/${project.value.client_id}`)
+  router.push(project.value.client_id ? `/clients/${project.value.client_id}` : '/projects')
 }
 
 async function deleteProject() {
@@ -108,7 +115,7 @@ async function deleteProject() {
   if (!confirm(t('project.delete_warning', { name: project.value.name }))) return
   try {
     await projectsApi.delete(project.value.id)
-    router.push(`/clients/${project.value.client_id}`)
+    router.push(project.value.client_id ? `/clients/${project.value.client_id}` : '/projects')
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('project.delete_failed'))
   }
@@ -121,13 +128,13 @@ const projectActions = computed<ActionItem[]>(() => {
   const w = auth.canWrite
   return [
     { key: 'new-invoice', label: t('project.new_invoice'), icon: 'plus', tier: 'primary', variant: 'primary',
-      show: p.status === 'active' && w, to: `/invoices/new?client_id=${p.client_id}&project_id=${p.id}` },
+      show: p.status === 'active' && w && !!p.client_id, to: `/invoices/new?client_id=${p.client_id}&project_id=${p.id}` },
     { key: 'edit', label: t('project.edit_project'), icon: 'edit', tier: 'secondary', variant: 'success',
       show: w, to: `/projects/${p.id}/edit` },
     { key: 'client', label: t('project.client_detail'), icon: 'user', tier: 'secondary', variant: 'warning',
-      to: `/clients/${p.client_id}` },
+      show: !!p.client_id, to: `/clients/${p.client_id}` },
     { key: 'edit-client', label: t('project.edit_client'), icon: 'edit', tier: 'overflow', variant: 'neutral',
-      show: w, to: `/clients/${p.client_id}/edit` },
+      show: w && !!p.client_id, to: `/clients/${p.client_id}/edit` },
     { key: 'wr-link', label: t('workReportTracking.button'), icon: 'link', tier: 'overflow', variant: 'primary',
       show: w, run: () => { showWrLinkModal.value = true } },
     { key: 'delete', label: t('common.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
@@ -144,8 +151,11 @@ const projectActions = computed<ActionItem[]>(() => {
   <div v-else-if="project" class="space-y-6">
     <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
       <div class="min-w-0">
-        <RouterLink :to="`/clients/${project.client_id}`" class="text-sm text-neutral-600 hover:text-neutral-900">
+        <RouterLink v-if="project.client_id" :to="`/clients/${project.client_id}`" class="text-sm text-neutral-600 hover:text-neutral-900">
           ← {{ project.client_company_name }}
+        </RouterLink>
+        <RouterLink v-else to="/projects" class="text-sm text-neutral-600 hover:text-neutral-900">
+          ← {{ t('project.title') }}
         </RouterLink>
         <h1 class="text-2xl font-semibold mt-1">{{ project.name }}</h1>
         <div class="text-sm text-neutral-500 mt-1 flex items-center gap-2 flex-wrap">
@@ -164,6 +174,58 @@ const projectActions = computed<ActionItem[]>(() => {
         </div>
       </div>
       <ActionBar :actions="projectActions" />
+    </div>
+
+    <!-- ═══ FORK 0923 (B2/D5): Obchodní případ — nákup / prodej / marže ═══ -->
+    <div v-if="project.case_summary && (project.case_summary.purchase_count > 0 || project.case_summary.sale_count > 0)"
+      class="bg-primary-50/50 border border-primary-500/30 rounded-lg p-5 shadow-sm">
+      <div class="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 class="text-sm font-medium text-primary-800 mb-3">{{ t('project.case_title') }}</h3>
+          <dl class="space-y-1.5 text-sm min-w-72">
+            <div class="flex justify-between gap-6">
+              <dt class="text-neutral-700">{{ t('project.case_purchase') }} ({{ project.case_summary.purchase_count }})</dt>
+              <dd class="font-mono">{{ formatMoney(project.case_summary.purchase_with_vat, project.currency) }}</dd>
+            </div>
+            <div class="flex justify-between gap-6">
+              <dt class="text-neutral-700">{{ t('project.case_sale') }} ({{ project.case_summary.sale_count }})</dt>
+              <dd class="font-mono">{{ formatMoney(project.case_summary.sale_with_vat, project.currency) }}</dd>
+            </div>
+            <div class="flex justify-between gap-6 font-semibold border-t border-primary-500/30 pt-1.5"
+              :class="project.case_summary.margin_with_vat >= 0 ? 'text-success-700' : 'text-danger-600'">
+              <dt>{{ t('project.case_margin') }}</dt>
+              <dd class="font-mono">
+                {{ formatMoney(project.case_summary.margin_with_vat, project.currency) }}
+                <span v-if="project.case_summary.margin_pct !== null" class="text-xs font-normal">({{ project.case_summary.margin_pct }} %)</span>
+              </dd>
+            </div>
+            <div class="flex justify-between gap-6 text-xs text-neutral-500">
+              <dt>{{ t('project.case_margin_net') }}</dt>
+              <dd class="font-mono">{{ formatMoney(project.case_summary.margin_without_vat, project.currency) }}</dd>
+            </div>
+          </dl>
+        </div>
+        <div class="text-sm space-y-2 min-w-0">
+          <div v-if="project.car_vin || project.car_registration">
+            <div class="text-xs uppercase tracking-wide text-neutral-500">{{ t('project.car') }}</div>
+            <div class="font-medium">{{ [project.car_registration, project.car_brand, project.car_model].filter(Boolean).join(' · ') }}</div>
+            <div v-if="project.car_vin" class="font-mono text-xs text-neutral-600">VIN {{ project.car_vin }}</div>
+          </div>
+          <div v-if="project.participants?.length">
+            <div class="text-xs uppercase tracking-wide text-neutral-500">{{ t('project.participants') }}</div>
+            <div class="flex flex-wrap gap-1 mt-1">
+              <RouterLink v-for="pp in project.participants" :key="`${pp.client_id}-${pp.role}`"
+                :to="`/clients/${pp.client_id}`"
+                class="text-xs px-2 py-0.5 rounded border hover:bg-neutral-50"
+                :class="pp.role === 'vendor'
+                  ? 'border-warning-500/40 text-warning-700 bg-warning-50'
+                  : 'border-primary-500/40 text-primary-700 bg-primary-50'">
+                {{ pp.company_name }} · {{ pp.role === 'vendor' ? t('client.vendor_badge') : t('invoice.client') }}
+              </RouterLink>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -358,6 +420,41 @@ const projectActions = computed<ActionItem[]>(() => {
         </button>
       </div>
     </div>
+    <!-- ═══ FORK 0923 (B2): přijaté doklady zakázky (nákladová strana) ═══ -->
+    <div v-if="purchaseInvoices.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+      <h3 class="text-sm font-medium text-neutral-700 px-4 pt-4 pb-2">
+        {{ t('project.purchase_invoices_title') }} ({{ purchaseInvoices.length }})
+      </h3>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
+            <tr>
+              <th class="text-left px-4 py-2 font-medium">{{ t('purchase_invoice.fields.varsymbol') }}</th>
+              <th class="text-left px-4 py-2 font-medium">{{ t('purchase_invoice.fields.vendor') }}</th>
+              <th class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.document_kind') }}</th>
+              <th class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.issue_date') }}</th>
+              <th class="text-right px-4 py-2 font-medium">{{ t('purchase_invoice.totals.with_vat') }}</th>
+              <th class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.status') }}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-neutral-100">
+            <tr v-for="pi in purchaseInvoices" :key="pi.id"
+              @click="router.push(`/purchase-invoices/${pi.id}`)"
+              class="cursor-pointer hover:bg-neutral-50 transition">
+              <td class="px-4 py-2 font-mono text-xs">{{ pi.varsymbol || `#${pi.id}` }}</td>
+              <td class="px-4 py-2">{{ pi.vendor_company_name }}</td>
+              <td class="px-4 py-2 text-center text-xs text-neutral-600">{{ t(`purchase_invoice.document_kind.${pi.document_kind}`) }}</td>
+              <td class="px-4 py-2 text-center text-xs">{{ formatDate(pi.issue_date) }}</td>
+              <td class="px-4 py-2 text-right font-mono">{{ formatMoney(pi.total_with_vat, pi.currency) }}</td>
+              <td class="px-4 py-2 text-center">
+                <span class="text-xs px-2 py-0.5 rounded bg-neutral-100 text-neutral-600">{{ t(`purchase_invoice.status.${pi.status}`) }}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <LinkedDocumentsPanel v-if="project" class="mt-4 block" entity-type="project" :entity-id="project.id" />
 
     <SendWorkReportLinkModal v-if="project" :open="showWrLinkModal" scope="project" :entity-id="project.id" @close="showWrLinkModal = false" />

@@ -178,6 +178,21 @@ export interface PurchaseInvoice {
   cancelled_at: string | null
   /** FORK 0920 (H1) — způsob úhrady; null = neurčeno. */
   payment_method?: 'bank_transfer' | 'card' | 'cash' | 'other' | null
+  /** FORK 0923 (B2) — zakázka (obchodní případ) + D5 marže. */
+  project_id?: number | null
+  project_name?: string | null
+  project_number?: string | null
+  case_summary?: {
+    purchase_without_vat: number
+    purchase_with_vat: number
+    sale_without_vat: number
+    sale_with_vat: number
+    margin_without_vat: number
+    margin_with_vat: number
+    margin_pct: number | null
+    purchase_count: number
+    sale_count: number
+  }
   /** FORK 0905 — koš dokladů: NULL = aktivní doklad, jinak čas přesunu do koše. */
   deleted_at?: string | null
   delete_reason?: string | null
@@ -349,6 +364,8 @@ export interface PurchaseInvoicePayload {
   exchange_diff_base?: number | null
   vat_classification_code?: string | null
   expense_category_id?: number | null
+  /** FORK 0923 (B2) — zakázka (obchodní případ). */
+  project_id?: number | null
   /** Ruční rekapitulace DPH dle dokladu (§ 73). null/[] = počítat standardně. */
   vat_overrides?: PurchaseVatOverride[] | null
   /** Platební účet dodavatele pro QR platbu (migrace 0107). */
@@ -391,6 +408,8 @@ export interface PurchaseListFilters {
   import_batch_id?: string
   /** FORK 0922 (C8) — skrýt doklady zahrnuté ve vyúčtování (zůstanou konečné + samostatné). */
   hide_settled?: boolean
+  /** FORK 0923 (B2) — doklady jedné zakázky. */
+  project_id?: number
   q?: string
   page?: number
   per_page?: number
@@ -450,6 +469,7 @@ export const purchaseInvoicesApi = {
     if (filters.needs_review) params['filter[needs_review]'] = 1
     if (filters.trash)        params['filter[trash]']        = 1
     if (filters.hide_settled) params['filter[hide_settled]'] = 1
+    if (filters.project_id)   params['filter[project_id]']   = filters.project_id
     if (filters.payment_ordered) params['filter[payment_ordered]'] = filters.payment_ordered
     if (filters.import_batch_id) params['filter[import_batch_id]'] = filters.import_batch_id
     if (filters.page)        params.page                   = filters.page

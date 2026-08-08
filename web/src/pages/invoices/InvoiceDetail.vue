@@ -1546,7 +1546,10 @@ const invoiceActions = computed<ActionItem[]>(() => {
             </RouterLink>
           </div>
           <div v-if="invoice.project_name" class="text-sm text-neutral-600">
-            {{ invoice.project_name }}
+            <!-- FORK 0923 (B2): zakázka je proklikávací na kartu obchodního případu -->
+            <RouterLink v-if="invoice.project_id" :to="`/projects/${invoice.project_id}`"
+              class="text-primary-700 hover:underline">{{ invoice.project_name }}</RouterLink>
+            <template v-else>{{ invoice.project_name }}</template>
           </div>
           <div v-if="invoice.client_main_email || invoice.project_billing_emails?.length" class="text-xs text-neutral-500 flex flex-wrap gap-x-3 gap-y-0.5">
             <span v-if="invoice.client_main_email">✉ {{ invoice.client_main_email }}</span>
@@ -2028,6 +2031,34 @@ const invoiceActions = computed<ActionItem[]>(() => {
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- ═══ FORK 0923 (D5): Obchodní případ — nákup / prodej / marže zakázky ═══ -->
+    <div v-if="invoice.case_summary && invoice.case_summary.sale_count > 0 && invoice.case_summary.purchase_count > 0"
+      class="bg-surface border border-neutral-200 rounded-(--radius-card) p-5 mb-4">
+      <h3 class="text-sm font-medium text-neutral-700 mb-3">
+        {{ t('project.case_title') }}
+        <RouterLink v-if="invoice.project_id" :to="`/projects/${invoice.project_id}`"
+          class="ml-1 font-normal text-primary-700 hover:underline">{{ invoice.project_name }}</RouterLink>
+      </h3>
+      <dl class="space-y-1.5 text-sm max-w-md">
+        <div class="flex justify-between gap-6">
+          <dt class="text-neutral-600">{{ t('project.case_purchase') }}</dt>
+          <dd class="font-mono">{{ formatMoney(invoice.case_summary.purchase_with_vat, 'CZK') }}</dd>
+        </div>
+        <div class="flex justify-between gap-6">
+          <dt class="text-neutral-600">{{ t('project.case_sale') }}</dt>
+          <dd class="font-mono">{{ formatMoney(invoice.case_summary.sale_with_vat, 'CZK') }}</dd>
+        </div>
+        <div class="flex justify-between gap-6 font-semibold border-t border-neutral-200 pt-1.5"
+          :class="invoice.case_summary.margin_with_vat >= 0 ? 'text-success-700' : 'text-danger-600'">
+          <dt>{{ t('project.case_margin') }}</dt>
+          <dd class="font-mono">
+            {{ formatMoney(invoice.case_summary.margin_with_vat, 'CZK') }}
+            <span v-if="invoice.case_summary.margin_pct !== null" class="text-xs font-normal">({{ invoice.case_summary.margin_pct }} %)</span>
+          </dd>
+        </div>
+      </dl>
     </div>
 
     <!-- ═══ D2: Rekapitulace vyúčtování záloh (konečná faktura) ═══ -->

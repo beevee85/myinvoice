@@ -16,6 +16,7 @@ import { PURCHASE_DOCUMENT_KINDS, purchaseDocumentKindLabelKey } from '@/constan
 import { vatRateLabel as sharedVatRateLabel } from '@/utils/vatRate'
 import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
+import { projectsApi, type Project } from '@/api/projects'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { settingsApi } from '@/api/settings'
 import { formatMoney } from '@/composables/useFormat'
@@ -79,6 +80,8 @@ watch(() => form.value.document_kind, (kind, prev) => {
 const currencies = ref<Currency[]>([])
 const units = ref<Unit[]>([])
 const expenseCategories = ref<ExpenseCategory[]>([])
+// FORK 0923 (B2): zakázky tenanta pro select (vč. otevřených obchodních případů)
+const projects = ref<Project[]>([])
 const vatClassifications = ref<VatClassification[]>([])
 
 const today = new Date().toISOString().slice(0, 10)
@@ -119,6 +122,7 @@ const form = ref<{
   paid_amount_invoice_ccy: number | null
   exchange_diff_base: number | null
   expense_category_id: number | null
+  project_id: number | null
   vat_classification_code: string | null
   items: PurchaseInvoiceItem[]
 }>({
@@ -157,6 +161,7 @@ const form = ref<{
   paid_amount_invoice_ccy: null,
   exchange_diff_base: null,
   expense_category_id: null,
+  project_id: null,
   vat_classification_code: null,
   items: [],
 })
@@ -384,6 +389,7 @@ async function loadCodebooks() {
     units.value = u
     expenseCategories.value = ec
     vatClassifications.value = vc
+    projects.value = (await projectsApi.list({ status: 'active', per_page: 200 }).catch(() => ({ data: [] as Project[], meta: { total: 0, page: 1, per_page: 0, pages: 0 } }))).data
   } catch (e) {
     error.value = apiErrorMessage(e)
   }
@@ -440,6 +446,7 @@ function populate(inv: PurchaseInvoice) {
   form.value.paid_amount_invoice_ccy = inv.paid_amount_invoice_ccy
   form.value.exchange_diff_base = inv.exchange_diff_base
   form.value.expense_category_id = inv.expense_category_id ?? null
+  form.value.project_id = inv.project_id ?? null
   form.value.vat_classification_code = inv.vat_classification_code ?? null
   form.value.items = inv.items.length > 0 ? inv.items : []
   extractionWarning.value = inv.extraction_warning ?? null
@@ -725,6 +732,7 @@ async function submit() {
       paid_amount_invoice_ccy: form.value.paid_amount_invoice_ccy,
       exchange_diff_base: form.value.exchange_diff_base,
       expense_category_id: form.value.expense_category_id,
+      project_id: form.value.project_id,
       vat_classification_code: form.value.vat_classification_code,
       // Ruční rekapitulace DPH dle dokladu (§ 73) — [] vyčistí případný starý override.
       vat_overrides: buildVatOverridesPayload(),
@@ -1365,6 +1373,17 @@ function fieldErr(key: string): string | null {
                 {{ t('purchase_invoice.classification.manage_categories') }}
               </RouterLink>
             </p>
+          </div>
+          <!-- FORK 0923 (B2): zakázka — nákladová strana obchodního případu -->
+          <div>
+            <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.fields.project') }}</label>
+            <select v-model="form.project_id" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+              <option :value="null">— {{ t('invoice.no_project') }} —</option>
+              <option v-for="p in projects" :key="p.id" :value="p.id">
+                {{ p.name }}{{ p.project_number ? ` (${p.project_number})` : '' }}
+              </option>
+            </select>
+            <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_invoice.fields.project_hint') }}</p>
           </div>
           <div>
             <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.classification.vat_classification') }}</label>

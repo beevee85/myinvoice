@@ -11,9 +11,36 @@ export interface BillingEmail {
   usages?: ProjectEmailUsage[] | null
 }
 
+/** FORK 0923 (B2/D5) — obchodní případ: nákup/prodej/marže zakázky. */
+export interface ProjectCaseSummary {
+  purchase_without_vat: number
+  purchase_with_vat: number
+  sale_without_vat: number
+  sale_with_vat: number
+  margin_without_vat: number
+  margin_with_vat: number
+  margin_pct: number | null
+  purchase_count: number
+  sale_count: number
+}
+
+export interface ProjectParticipant {
+  client_id: number
+  role: 'customer' | 'vendor'
+  company_name: string
+}
+
 export interface Project {
   id: number
-  client_id: number
+  /** FORK 0923 (B2) — nepovinné: zakázka může začít nákupní stranou. */
+  client_id: number | null
+  /** FORK 0923 (B2) — vozidlo případu (nositel VIN). */
+  car_id?: number | null
+  car_registration?: string | null
+  car_vin?: string | null
+  car_name?: string | null
+  car_brand?: string | null
+  car_model?: string | null
   name: string
   payment_due_days: number
   payment_due_unit?: 'days' | 'month' | null
@@ -47,10 +74,16 @@ export interface Project {
   revenue_by_month?: Array<{ month: string; currency: string; total: number }>
   revenue_by_year?:  Array<{ year: number; currency: string; total: number; count: number }>
   unpaid_summary?:   Array<{ currency: string; unpaid_total: number; unpaid_count: number; overdue_total: number; overdue_count: number }>
+  /** FORK 0923 (B2/D5) */
+  purchase_invoices_count?: number
+  case_summary?: ProjectCaseSummary
+  participants?: ProjectParticipant[]
 }
 
 export interface ProjectPayload {
-  client_id: number
+  /** FORK 0923 (B2) — nepovinné. */
+  client_id?: number | null
+  car_id?: number | null
   name: string
   payment_due_days: number
   payment_due_unit?: 'days' | 'month' | null

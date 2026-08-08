@@ -921,6 +921,34 @@ const purchaseActions = computed<ActionItem[]>(() => {
       </table>
     </div>
 
+    <!-- ═══ FORK 0923 (D5): Obchodní případ — nákup / prodej / marže zakázky ═══ -->
+    <div v-if="invoice.case_summary && invoice.case_summary.sale_count > 0 && invoice.case_summary.purchase_count > 0"
+      class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+      <h3 class="text-sm font-medium text-neutral-700 mb-3">
+        {{ t('project.case_title') }}
+        <RouterLink v-if="invoice.project_id" :to="`/projects/${invoice.project_id}`"
+          class="ml-1 font-normal text-primary-700 hover:underline">{{ invoice.project_name }}</RouterLink>
+      </h3>
+      <dl class="space-y-1.5 text-sm max-w-md">
+        <div class="flex justify-between gap-6">
+          <dt class="text-neutral-600">{{ t('project.case_purchase') }}</dt>
+          <dd class="font-mono">{{ formatMoney(invoice.case_summary.purchase_with_vat, 'CZK') }}</dd>
+        </div>
+        <div class="flex justify-between gap-6">
+          <dt class="text-neutral-600">{{ t('project.case_sale') }}</dt>
+          <dd class="font-mono">{{ formatMoney(invoice.case_summary.sale_with_vat, 'CZK') }}</dd>
+        </div>
+        <div class="flex justify-between gap-6 font-semibold border-t border-neutral-200 pt-1.5"
+          :class="invoice.case_summary.margin_with_vat >= 0 ? 'text-success-700' : 'text-danger-600'">
+          <dt>{{ t('project.case_margin') }}</dt>
+          <dd class="font-mono">
+            {{ formatMoney(invoice.case_summary.margin_with_vat, 'CZK') }}
+            <span v-if="invoice.case_summary.margin_pct !== null" class="text-xs font-normal">({{ invoice.case_summary.margin_pct }} %)</span>
+          </dd>
+        </div>
+      </dl>
+    </div>
+
     <!-- ═══ D2: Rekapitulace vyúčtování záloh (konečná faktura § 37a) ═══ -->
     <div v-if="settlementRecap" class="bg-primary-50/50 border border-primary-500/30 rounded-lg p-5 shadow-sm">
       <h3 class="text-sm font-medium text-primary-800 mb-3">{{ t('doc_relations.recap_title') }}</h3>

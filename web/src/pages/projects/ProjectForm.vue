@@ -7,6 +7,7 @@ import { projectsApi, type Project, type ProjectPayload, type BillingEmail } fro
 import { clientsApi, type Client } from '@/api/clients'
 import { codebooksApi, type Currency } from '@/api/codebooks'
 import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategories'
+import { logbookApi, type Car } from '@/api/logbook'
 import { useToast } from '@/composables/useToast'
 
 /**
@@ -38,8 +39,12 @@ const revenueCategories = ref<RevenueCategory[]>([])
 const submitting = ref(false)
 const error = ref('')
 
+// FORK 0923 (B2): vozidla pro select „Vozidlo případu" (nositel VIN).
+const cars = ref<Car[]>([])
+
 const form = ref<ProjectPayload>({
-  client_id: 0,
+  client_id: null,
+  car_id: null,
   name: '',
   payment_due_days: 7,
   payment_due_unit: null,
@@ -103,6 +108,7 @@ const projectDuePreset = computed<ProjectDuePreset>({
 onMounted(async () => {
   currencies.value = await codebooksApi.currencies()
   revenueCategories.value = await revenueCategoriesApi.list(false).catch(() => [] as RevenueCategory[])
+  cars.value = await logbookApi.listCars(false).catch(() => [] as Car[])
   if (form.value.currency_id === 0) {
     const def = currencies.value.find(c => c.is_default && c.code === 'CZK') || currencies.value[0]
     if (def) form.value.currency_id = def.id
@@ -111,7 +117,7 @@ onMounted(async () => {
   if (isEdit.value && projectId.value) {
     const p = await projectsApi.get(projectId.value)
     Object.assign(form.value, sanitize(p))
-    client.value = await clientsApi.get(p.client_id)
+    client.value = p.client_id ? await clientsApi.get(p.client_id) : null
     // Naplň billing inputy (usages null/prázdné = všechny typy zpráv)
     for (let i = 0; i < 3; i++) {
       const found = p.billing_emails.find((b) => b.position === ((i + 1) as 1 | 2 | 3))
@@ -137,15 +143,16 @@ onMounted(async () => {
       if (client.value.hourly_rate && client.value.hourly_rate > 0) {
         form.value.hourly_rate = client.value.hourly_rate
       }
-    } else if (!props.embedded) {
-      router.push('/clients')
     }
+    // FORK 0923 (B2): bez klienta se NEpřesměrovává — zakázka (obchodní případ)
+    // může začít nákupní stranou; odběratel se doplní později přes doklady.
   }
 })
 
 function sanitize(p: Project): Partial<ProjectPayload> {
   return {
     client_id: p.client_id,
+    car_id: p.car_id ?? null,
     name: p.name,
     payment_due_days: p.payment_due_days,
     payment_due_unit: p.payment_due_unit ?? null,
@@ -213,8 +220,10 @@ async function submit() {
       </RouterLink>
     </div>
 
-    <div v-if="client && !embedded" class="mb-3 text-sm text-neutral-500">
-      {{ t('invoice.client') }}: <span class="font-medium text-neutral-900">{{ client.company_name }}</span>
+    <div v-if="!embedded" class="mb-3 text-sm text-neutral-500">
+      {{ t('invoice.client') }}:
+      <span v-if="client" class="font-medium text-neutral-900">{{ client.company_name }}</span>
+      <span v-else class="italic">{{ t('project.no_client_yet') }}</span>
     </div>
 
     <form @submit.prevent="submit" autocomplete="off" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
@@ -223,6 +232,19 @@ async function submit() {
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('project.name') }} *</label>
           <input autocomplete="off" v-model="form.name" required
             class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+        </div>
+
+        <!-- FORK 0923 (B2): vozidlo případu — nositel VIN (R7/A6) -->
+        <div>
+          <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('project.car') }}</label>
+          <select v-model="form.car_id"
+            class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none">
+            <option :value="null">{{ t('project.no_car') }}</option>
+            <option v-for="c in cars" :key="c.id" :value="c.id">
+              {{ [c.registration, c.brand, c.model, c.vin ? `VIN ${c.vin}` : null].filter(Boolean).join(' · ') }}
+            </option>
+          </select>
+          <p class="text-xs text-neutral-500 mt-1">{{ t('project.car_hint') }}</p>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">

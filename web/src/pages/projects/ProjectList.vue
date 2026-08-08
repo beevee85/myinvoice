@@ -76,13 +76,11 @@ watch([status, clientId, sort], () => load(true))
   <div>
     <div class="flex items-center justify-between mb-4">
       <h1 class="text-2xl font-semibold">{{ t('project.title') }}</h1>
-    </div>
-
-    <div class="mb-4 rounded-md border border-primary-500/30 bg-primary-50 px-4 py-2.5 text-sm text-primary-700 flex items-start gap-2">
-      <svg class="w-5 h-5 flex-shrink-0 mt-0.5 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
-      <i18n-t keypath="project.info_create_in_client" tag="div">
-        <template #default><RouterLink to="/clients" class="underline font-medium hover:text-primary-800">{{ t('nav.clients') }}</RouterLink></template>
-      </i18n-t>
+      <!-- FORK 0923 (B2): zakázka jde založit i bez klienta (obchodní případ) -->
+      <RouterLink to="/projects/new"
+        class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md">
+        {{ t('project.new_button') }}
+      </RouterLink>
     </div>
 
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm">

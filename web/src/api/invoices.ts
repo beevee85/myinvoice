@@ -243,6 +243,18 @@ export interface Invoice {
   bank_iban?: string | null
   bank_bic?: string | null
   project_billing_emails?: Array<{ email: string; label: string | null }>
+  /** FORK 0923 (D5) — obchodní případ zakázky: nákup/prodej/marže. */
+  case_summary?: {
+    purchase_without_vat: number
+    purchase_with_vat: number
+    sale_without_vat: number
+    sale_with_vat: number
+    margin_without_vat: number
+    margin_with_vat: number
+    margin_pct: number | null
+    purchase_count: number
+    sale_count: number
+  }
   items: InvoiceItem[]
   vat_breakdown: VatBreakdownRow[]
   totals: InvoiceTotals
