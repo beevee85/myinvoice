@@ -1649,3 +1649,72 @@ zpětně warning. Cleanup dvoufázově (FK storno_of_id RESTRICT).
 Pokladní kniha; smazání dokladu vrací 409; storno vytvoří záporný protidoklad;
 PPD s vazbou na fakturu odmítne rozpis DPH; kniha sedí (počáteční + příjmy −
 výdaje = konečný); phpunit CashDocumentTest zelený.
+
+## 2026-08-09 — COMPLIANCE SPRINT: trvalé příznaky, hotovostní detekce, /compliance
+
+Migrace **0925** (compliance_flags + aml_cases + supplier přepínače). Dokumenty
+4/5/7 (+ AML konstanty a časová platnost z Dok. 9 už v LegalConstants).
+
+**Filozofie (Dokument 5):** aplikace nepředepisuje obchodní model — rizika
+zviditelňuje, nechá rozhodnout a rozhodnutí trvale zaznamená. Časové pravidlo:
+BLOK jen u BUDOUCÍHO úkonu; záznam minulé skutečnosti projde vždy s volbou.
+
+**Datový model (0925):** compliance_flags — typ (číselník ComplianceFlags,
+závažnost ODVOZENÁ z typu), stav open/acknowledged/explained/resolved/superseded
+(superseded jen systém), subjekt + denormalizované kotvy (project/client/group/VIN),
+context JSON, message s čísly, legal_reference, odbavení (kdo/kdy/volba/zdůvodnění).
+ŽÁDNÁ mazací operace neexistuje (repo nemá delete; hlídá ComplianceFlagGuardTest
+skenem zdrojů, migrací i UI na zakázané fráze „rozdělit platbu" apod. — F3/F6).
+aml_cases dle Dok. 4 §5 (structuring/threshold_cdd/manual, related_payments JSON).
+supplier.accepts_cash_payments + is_aml_obliged_entity (vypnutí kontrol per tenant).
+
+**Detekce (ComplianceService):**
+- VB3a: hotovost s dnešním/budoucím datem nad denní limit s protistranou
+  (Σ přes evidované platby + hlavičky přijatých + samostatné pokladní doklady;
+  limit z LegalConstants K DATU PLATBY — 2013 = 350 000, dnes 270 000) → 409
+  s textem vč. dopadu na příjemce (§ 4/2) a pokut (K3).
+- VB3b: totéž se zpětným datem → 409 `compliance_ack_required` s podklady pro
+  modal; po volbě (acknowledge / accept_risk s důvodem ≥ 10 znaků) se úhrada
+  uloží a příznak HOTOVOST_NAD_LIMIT trvale svítí.
+- VW-AML1: strukturování — okno AML_STRUCTURING_WINDOW_DAYS (3 dny) NEBO součet
+  hotovosti téhož dokladu nad limit, žádná platba nad limit → volby
+  acknowledge / not_suspicious (zdůvodnění ≥ 50 znaků) / escalate; escalate
+  založí OTEVŘENÝ aml_case, not_suspicious assessed_not_suspicious. ZÁKAZ
+  Dokumentu 4 §2 dodržen: nikde se nepočítá „kolik zbývá do limitu".
+Zapojeno do: CreatePaymentAction, MarkPaidAction, TransitionPurchaseInvoice
+(cash), CashDocumentAction::create (jen samostatné doklady — s vazbou by se
+platba počítala dvakrát).
+
+**API:** GET /api/compliance/summary (badge jen z NEODBAVENÝCH), GET flags
+(filtry severity/status/type/klient/rok), POST flags/{id}/acknowledge
+(individuální; HROMADNÉ ODBAVENÍ ZÁMĚRNĚ NEEXISTUJE — Dok. 7 §10).
+
+**FE:** nová sekce menu **Compliance** mezi Daněmi a Systémem s badge
+(červený při HIGH, jen neodbavené); /compliance — dlaždice (klikací filtry,
+„odbaveno" záměrně šedé), filtry, POHLED PODLE ZAKÁZEK VÝCHOZÍ (rozdělenou
+hotovost nejde vidět per doklad) + Podle dokladů; červený levý pruh u HIGH
+open, po odbavení zesvětlá a NIKDY nezmizí; drawer zprava s časovou osou
+odbavení a volbami znak po znaku shodnými s modalem (sdílené i18n
+compliance.choice_*); prázdný stav vypisuje co se kontroluje (negratulace).
+ComplianceAckModal — 4 části dle Dok. 5 §4 (zjištění s čísly, právní odkaz,
+volby bez předvýběru, věta o zápisu), Esc nezavírá, „příště nezobrazovat"
+neexistuje. Zapojeno do částečné úhrady, mark-paid (obě strany) a pokladny
+(409 → modal → opakování s compliance_ack).
+
+**Testy:** ComplianceCashTest (VB3a blok s § 4/2 textem; VB3b volba + trvalý
+příznak + note validace; strukturování 250 000 + 253 100 → příznak + AmlCase;
+historický limit 2013 vs 2015) + ComplianceFlagGuardTest (žádné mazání příznaků
+nikde, žádná mazací metoda repa, žádné fráze dělení plateb v UI — s ochranou
+proti prázdnému skenu).
+
+**ODLOŽENO (další iterace):** export /compliance do PDF/XLSX s auditní stopou
+(Dok. 7 §12), pohled Podle vozidel + Tisk karty vozidla (§ 109), dashboard
+dlaždice (§14), VW-AML2/3 (identifikace a kontrola klienta — vyžaduje pole § 8
+na kartě klienta se šifrováním), detektory LHUTA_*/KH_* (Dokument 8 modul),
+role matice §11 (aplikace nemá roli Fakturant), Settings UI pro přepínače.
+
+**Jak ověřit po merge upstreamu:** menu má sekci Compliance s Přehledem rizik;
+zpětná hotovostní úhrada 503 100 Kč vyvolá modal s volbami a po potvrzení
+trvalý příznak; dopředná je blokována; dvě úhrady 250 000 + 253 100 v po sobě
+jdoucích dnech vyvolají AML_STRUKTUROVANI; phpunit ComplianceCashTest +
+ComplianceFlagGuardTest zelené.
