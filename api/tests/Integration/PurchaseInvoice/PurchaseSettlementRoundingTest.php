@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\PurchaseSettlementService;
+use MyInvoice\Service\Report\VatLedgerService;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -139,6 +140,57 @@ final class PurchaseSettlementRoundingTest extends TestCase
         $header = $this->repo->find($final, $this->supplierId);
         self::assertEqualsWithDelta(0.0, (float) $header['total_with_vat'], 0.005);
         self::assertEqualsWithDelta(0.0, (float) $header['amount_to_pay'], 0.005);
+    }
+
+    /**
+     * R5 (Dokument 3, 8/2026): zaokrouhlovací řádek § 37a nesmí do přiznání/KH
+     * přinést žádnou dodatečnou daň. Invariant: DPH konečné faktury v Knize DPH
+     * + Σ DPH ze všech DDKPZ = daň rozhodná dle § 37a (u nulového hrubého rozdílu
+     * přesně Σ daní přiznaných ze záloh), bez haléřové odchylky. Čistý vliv
+     * konečné faktury na ledger (základ i daň) musí být přesně nula.
+     */
+    public function testLedgerNetVatMatchesAdvanceTaxExactly(): void
+    {
+        [$final, $doc1, $doc2] = $this->scenario('CZ20970003');
+
+        $this->settlement->link($final, $doc1, $this->supplierId, true);
+        $this->settlement->link($final, $doc2, $this->supplierId, true);
+
+        // Ledger bere jen doklady mimo koncept.
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status='received' WHERE id=?")
+            ->execute([$final]);
+
+        $ledger = Bootstrap::buildApp()->getContainer()->get(VatLedgerService::class);
+        $rows = $ledger->rows($this->supplierId, self::YEAR . '-06-01', self::YEAR . '-06-30');
+
+        $sum = static function (array $rows, int $invoiceId): array {
+            $base = 0.0; $vat = 0.0; $found = false;
+            foreach ($rows as $r) {
+                if (($r['source'] ?? '') === 'purchase' && (int) ($r['invoice_id'] ?? 0) === $invoiceId) {
+                    $found = true;
+                    $base += (float) ($r['base_czk'] ?? 0);
+                    $vat  += (float) ($r['vat_czk'] ?? 0);
+                }
+            }
+            self::assertTrue($found, "Doklad #{$invoiceId} musí mít v Knize DPH aspoň jeden řádek.");
+            return [round($base, 2), round($vat, 2)];
+        };
+
+        [$finalBase, $finalVat] = $sum($rows, $final);
+        [, $doc1Vat] = $sum($rows, $doc1);
+        [, $doc2Vat] = $sum($rows, $doc2);
+
+        self::assertEqualsWithDelta(0.0, $finalBase, 0.001,
+            'Čistý vliv konečné faktury (vč. zaokrouhlovacího řádku § 37a) na základ v Knize DPH musí být přesně nula.');
+        self::assertEqualsWithDelta(0.0, $finalVat, 0.001,
+            'Čistý vliv konečné faktury na daň v Knize DPH musí být přesně nula — zaokrouhlovací řádek nesmí generovat daň.');
+
+        self::assertEqualsWithDelta(1735.54, $doc1Vat, 0.001, 'DDKPZ #1 dle dokladu.');
+        self::assertEqualsWithDelta(17528.93, $doc2Vat, 0.001, 'DDKPZ #2 dle dokladu (shora).');
+
+        // Invariant § 37a: celkový uplatněný odpočet případu = přesně Σ daní ze záloh.
+        self::assertEqualsWithDelta(19264.47, round($finalVat + $doc1Vat + $doc2Vat, 2), 0.001,
+            'DPH konečné faktury + Σ DPH DDKPZ musí přesně odpovídat dani přiznané ze záloh (§ 37a), bez haléřové odchylky.');
     }
 
     public function testRepeatedUnlinkAndLinkDoesNotAccumulateRounding(): void

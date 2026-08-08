@@ -41,7 +41,7 @@ final class PreviewVarsymbolAction
         $date     = (string) ($params['issue_date'] ?? date('Y-m-d'));
         $clientId = (int) ($params['client_id'] ?? 0);
 
-        if (!in_array($type, ['invoice', 'proforma', 'credit_note'], true)) {
+        if (!in_array($type, ['invoice', 'proforma', 'credit_note', 'tax_document'], true)) {
             return Json::error($response, 'invalid_type', 'Neplatný typ.', 400);
         }
 

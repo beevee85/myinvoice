@@ -92,9 +92,9 @@ final class CarRepository
                 $this->clearDefault($supplierId);
             }
             $pdo->prepare(
-                'INSERT INTO cars (supplier_id, registration, name, brand, model, vin, fuel_type,
+                'INSERT INTO cars (supplier_id, registration, name, brand, model, vin, acquisition_purpose, fuel_type,
                                    odometer_start, odometer_start_date, is_default, is_archived, note, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             )->execute($this->bind($supplierId, $data, $userId));
             $id = (int) $pdo->lastInsertId();
             $pdo->commit();
@@ -115,14 +115,14 @@ final class CarRepository
             }
             $stmt = $pdo->prepare(
                 'UPDATE cars
-                    SET registration = ?, name = ?, brand = ?, model = ?, vin = ?, fuel_type = ?,
+                    SET registration = ?, name = ?, brand = ?, model = ?, vin = ?, acquisition_purpose = ?, fuel_type = ?,
                         odometer_start = ?, odometer_start_date = ?, is_default = ?, is_archived = ?, note = ?
                   WHERE id = ? AND supplier_id = ?'
             );
             $b = $this->bind($supplierId, $data, null);
             // bind() vrací [supplier_id, registration, …, created_by]; pro UPDATE vyřízneme bez supplier_id a created_by.
             $stmt->execute([
-                $b[1], $b[2], $b[3], $b[4], $b[5], $b[6], $b[7], $b[8], $b[9], $b[10], $b[11],
+                $b[1], $b[2], $b[3], $b[4], $b[5], $b[6], $b[7], $b[8], $b[9], $b[10], $b[11], $b[12],
                 $id, $supplierId,
             ]);
             $ok = $stmt->rowCount() >= 0;
@@ -177,6 +177,10 @@ final class CarRepository
             $this->nullableStr($data['brand'] ?? null),
             $this->nullableStr($data['model'] ?? null),
             $this->nullableStr($data['vin'] ?? null),
+            // FORK 0921 (R7): účel pořízení — rozlišuje zboží k prodeji vs. dlouhodobý
+            // majetek (strop odpočtu § 72/4 platí jen pro majetek). NULL = neurčeno.
+            in_array($data['acquisition_purpose'] ?? '', ['goods_for_resale', 'fixed_asset'], true)
+                ? $data['acquisition_purpose'] : null,
             $fuel,
             isset($data['odometer_start']) && $data['odometer_start'] !== '' && $data['odometer_start'] !== null
                 ? (int) $data['odometer_start'] : null,
@@ -204,6 +208,8 @@ final class CarRepository
             'brand'               => $r['brand'] !== null ? (string) $r['brand'] : null,
             'model'               => $r['model'] !== null ? (string) $r['model'] : null,
             'vin'                 => $r['vin'] !== null ? (string) $r['vin'] : null,
+            'acquisition_purpose' => isset($r['acquisition_purpose']) && $r['acquisition_purpose'] !== null
+                ? (string) $r['acquisition_purpose'] : null,
             'fuel_type'           => $r['fuel_type'] !== null ? (string) $r['fuel_type'] : null,
             'odometer_start'      => $r['odometer_start'] !== null ? (int) $r['odometer_start'] : null,
             'odometer_start_date' => $r['odometer_start_date'] !== null ? (string) $r['odometer_start_date'] : null,

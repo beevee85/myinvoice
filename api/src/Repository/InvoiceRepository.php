@@ -657,6 +657,26 @@ final class InvoiceRepository
                        p.name AS project_name,
                        p.requires_work_report_approval AS project_requires_approval,
                        EXISTS (SELECT 1 FROM work_reports wr WHERE wr.invoice_id = i.id) AS has_work_report,
+                       CASE
+                           WHEN i.invoice_type = 'proforma' THEN
+                               (SELECT ch.varsymbol FROM invoices ch
+                                 WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'
+                                   AND ch.deleted_at IS NULL AND ch.status <> 'cancelled'
+                                 ORDER BY ch.id LIMIT 1)
+                           WHEN i.invoice_type = 'tax_document' AND i.parent_invoice_id IS NOT NULL THEN
+                               (SELECT sib.varsymbol FROM invoices sib
+                                 WHERE sib.parent_invoice_id = i.parent_invoice_id AND sib.invoice_type = 'invoice'
+                                   AND sib.deleted_at IS NULL AND sib.status <> 'cancelled'
+                                 ORDER BY sib.id LIMIT 1)
+                           ELSE NULL
+                       END AS relation_final_varsymbol,
+                       (SELECT pr.varsymbol FROM invoices pr
+                         WHERE pr.id = i.parent_invoice_id AND pr.deleted_at IS NULL) AS relation_parent_varsymbol,
+                       (EXISTS (SELECT 1 FROM invoice_payments ip
+                          WHERE ip.invoice_id = i.id AND ip.tax_document_invoice_id IS NOT NULL)
+                        OR EXISTS (SELECT 1 FROM invoices tdch
+                          WHERE tdch.parent_invoice_id = i.id AND tdch.invoice_type = 'tax_document'
+                            AND tdch.deleted_at IS NULL AND tdch.status <> 'cancelled')) AS relation_has_tax_doc,
                        DATE_FORMAT(COALESCE(i.tax_date, i.issue_date), '%Y-%m') AS month_bucket
                   FROM invoices i
                   JOIN clients c ON c.id = i.client_id
@@ -712,6 +732,9 @@ final class InvoiceRepository
                     'draft_without_vat' => 0.0,
                     'draft_vat'         => 0.0,
                     'draft_with_vat'    => 0.0,
+                    // Zálohové faktury (proforma) do obratu nevstupují — sčítají se zvlášť,
+                    // aby UI mohlo vysvětlit rozdíl („zálohové faktury (X Kč) nezapočítány").
+                    'advance_with_vat'  => 0.0,
                 ];
             }
             // Do obratu počítáme jen vystavené faktury + dobropisy (credit_note má záporné částky → odečte se)
@@ -728,6 +751,9 @@ final class InvoiceRepository
                 $grouped[$month]['totals_per_currency'][$cur]['draft_without_vat'] += $row['total_without_vat'];
                 $grouped[$month]['totals_per_currency'][$cur]['draft_vat']         += $row['total_vat'];
                 $grouped[$month]['totals_per_currency'][$cur]['draft_with_vat']    += $row['total_with_vat'];
+            } elseif ($row['invoice_type'] === 'proforma'
+                && !in_array($row['status'], ['draft', 'cancelled'], true)) {
+                $grouped[$month]['totals_per_currency'][$cur]['advance_with_vat'] += $row['total_with_vat'];
             }
         }
 
@@ -740,6 +766,7 @@ final class InvoiceRepository
                 $t['draft_without_vat'] = round($t['draft_without_vat'], 2);
                 $t['draft_vat']         = round($t['draft_vat'], 2);
                 $t['draft_with_vat']    = round($t['draft_with_vat'], 2);
+                $t['advance_with_vat']  = round($t['advance_with_vat'], 2);
             }
             $m['totals_per_currency'] = array_values($m['totals_per_currency']);
         }
@@ -1344,6 +1371,9 @@ final class InvoiceRepository
         }
         foreach (['total_without_vat', 'total_vat', 'total_with_vat', 'rounding', 'advance_paid_amount', 'amount_to_pay', 'paid_total', 'discount_percent'] as $f) {
             if (array_key_exists($f, $row) && $row[$f] !== null) $row[$f] = (float) $row[$f];
+        }
+        if (array_key_exists('relation_has_tax_doc', $row)) {
+            $row['relation_has_tax_doc'] = (bool) $row['relation_has_tax_doc'];
         }
         // Odvozený platební stav (#89) — unpaid/partially_paid/paid/overpaid; NULL pro draft/cancelled.
         if (array_key_exists('paid_total', $row) && array_key_exists('amount_to_pay', $row) && array_key_exists('status', $row)) {

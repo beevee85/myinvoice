@@ -68,6 +68,8 @@ final class MarkPaidAction
                 $this->payments->recordPayment($id, $remaining, $paidAt, [
                     'source'     => 'mark_paid',
                     'created_by' => (int) ($user['id'] ?? 0),
+                    // FORK 0920 (H1): způsob úhrady; default z hlavičky dokladu.
+                    'payment_method' => $body['payment_method'] ?? ($invoice['payment_method'] ?? null),
                 ]);
             } catch (\RuntimeException $e) {
                 return Json::error($response, 'invalid_payment', $e->getMessage(), 409);

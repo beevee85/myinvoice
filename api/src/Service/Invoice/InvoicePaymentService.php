@@ -131,7 +131,8 @@ final class InvoicePaymentService
      * Zaeviduje platbu (v měně faktury) a přepočítá paid_total + lifecycle status.
      *
      * @param array{variable_symbol?: ?string, bank_reference?: ?string, note?: ?string,
-     *              source?: string, bank_transaction_id?: ?int, created_by?: ?int} $opts
+     *              source?: string, bank_transaction_id?: ?int, created_by?: ?int,
+     *              payment_method?: ?string} $opts
      * @return array{payment_id: int, became_paid: bool, remaining: float}
      * @throws \RuntimeException při validační chybě (zpráva pro UI)
      */
@@ -178,8 +179,9 @@ final class InvoicePaymentService
             $ins = $pdo->prepare(
                 'INSERT INTO invoice_payments
                    (supplier_id, invoice_id, paid_on, amount, currency,
-                    variable_symbol, bank_reference, note, source, bank_transaction_id, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                    variable_symbol, bank_reference, note, source, bank_transaction_id, created_by,
+                    payment_method)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $ins->execute([
                 (int) $invoice['supplier_id'],
@@ -194,6 +196,9 @@ final class InvoicePaymentService
                 isset($opts['bank_transaction_id']) && (int) $opts['bank_transaction_id'] > 0
                     ? (int) $opts['bank_transaction_id'] : null,
                 isset($opts['created_by']) && (int) $opts['created_by'] > 0 ? (int) $opts['created_by'] : null,
+                // FORK 0920 (H1): způsob úhrady per platba; NULL = neurčeno (historické platby).
+                in_array($opts['payment_method'] ?? '', ['bank_transfer', 'card', 'cash', 'other'], true)
+                    ? $opts['payment_method'] : null,
             ]);
             $paymentId = (int) $pdo->lastInsertId();
 

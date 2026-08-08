@@ -863,16 +863,31 @@ final class PurchaseInvoiceRepository
                        pi.total_without_vat, pi.total_vat, pi.total_with_vat,
                        pi.advance_paid_amount, pi.amount_to_pay,
                        pi.payment_ordered_at,
-                       pi.status, pi.booked_at, pi.paid_at, pi.cancelled_at,
+                       pi.status, pi.booked_at, pi.paid_at, pi.cancelled_at, pi.payment_method,
                        pi.extraction_warning, pi.vat_deduction, pi.vat_deduction_percent, pi.tax_deductible,
                        pi.deleted_at, pi.delete_reason, du.name AS deleted_by_name,
                        c.company_name AS vendor_company_name, c.ic AS vendor_ic,
+                       pi.advance_purchase_invoice_id, pi.settled_by_purchase_invoice_id,
+                       lc.id AS relation_consumer_id, lc.document_kind AS relation_consumer_kind,
+                       CASE
+                           WHEN pi.document_kind = 'tax_document' THEN fin.varsymbol
+                           WHEN pi.document_kind = 'advance' AND lc.document_kind = 'tax_document' THEN fin.varsymbol
+                           WHEN pi.document_kind = 'advance' THEN lc.varsymbol
+                           ELSE NULL
+                       END AS relation_final_varsymbol,
                        DATE_FORMAT(pi.issue_date, '%Y-%m') AS month_bucket
                        {$selectTotal}
                   FROM purchase_invoices pi
                   JOIN clients c ON c.id = pi.vendor_id
              LEFT JOIN users du ON du.id = pi.deleted_by
                   JOIN currencies cur ON cur.id = pi.currency_id
+             LEFT JOIN purchase_invoices lc
+                    ON lc.advance_purchase_invoice_id = pi.id
+                   AND lc.supplier_id = pi.supplier_id
+                   AND lc.deleted_at IS NULL AND lc.status <> 'cancelled'
+             LEFT JOIN purchase_invoices fin
+                    ON fin.id = COALESCE(pi.settled_by_purchase_invoice_id, lc.settled_by_purchase_invoice_id)
+                   AND fin.deleted_at IS NULL AND fin.status <> 'cancelled'
                  WHERE $whereSql
                  ORDER BY pi.issue_date DESC, pi.id DESC";
 
@@ -920,19 +935,26 @@ final class PurchaseInvoiceRepository
             // konečná faktura (migrace 0906, shoda s costs_by_month / dashboardem / CRM).
             // Řádek se i tak zobrazí (analogicky proforma u vystavených faktur).
             $excludedAdvance = $row['document_kind'] === 'advance';
-            if (!in_array($row['status'], ['draft', 'cancelled'], true) && !$excludedAdvance) {
+            if (!in_array($row['status'], ['draft', 'cancelled'], true)) {
                 $cur = $row['currency'];
                 if (!isset($grouped[$month]['totals_per_currency'][$cur])) {
                     $grouped[$month]['totals_per_currency'][$cur] = [
-                        'currency'    => $cur,
-                        'without_vat' => 0.0,
-                        'vat'         => 0.0,
-                        'with_vat'    => 0.0,
+                        'currency'         => $cur,
+                        'without_vat'      => 0.0,
+                        'vat'              => 0.0,
+                        'with_vat'         => 0.0,
+                        'advance_with_vat' => 0.0,
                     ];
                 }
-                $grouped[$month]['totals_per_currency'][$cur]['without_vat'] += (float) $row['total_without_vat'];
-                $grouped[$month]['totals_per_currency'][$cur]['vat']         += (float) $row['total_vat'];
-                $grouped[$month]['totals_per_currency'][$cur]['with_vat']    += (float) $row['total_with_vat'];
+                if ($excludedAdvance) {
+                    // Zálohy do součtu nevstupují — sčítají se zvlášť, aby UI mohlo
+                    // vysvětlit rozdíl („zálohové faktury (X Kč) nezapočítány").
+                    $grouped[$month]['totals_per_currency'][$cur]['advance_with_vat'] += (float) $row['total_with_vat'];
+                } else {
+                    $grouped[$month]['totals_per_currency'][$cur]['without_vat'] += (float) $row['total_without_vat'];
+                    $grouped[$month]['totals_per_currency'][$cur]['vat']         += (float) $row['total_vat'];
+                    $grouped[$month]['totals_per_currency'][$cur]['with_vat']    += (float) $row['total_with_vat'];
+                }
             }
         }
         foreach ($grouped as &$g) {
@@ -1545,7 +1567,7 @@ final class PurchaseInvoiceRepository
      * Status transition. Volající ověří povolené přechody (state machine).
      * Side-efekty (timestamp pole) tady — booked_at, paid_at, cancelled_at.
      */
-    public function setStatus(int $id, string $newStatus, int $supplierId, ?string $paidDate = null): void
+    public function setStatus(int $id, string $newStatus, int $supplierId, ?string $paidDate = null, ?string $paymentMethod = null): void
     {
         if (!in_array($newStatus, ['draft', 'received', 'booked', 'paid', 'cancelled'], true)) {
             throw new \InvalidArgumentException("Invalid status: $newStatus");
@@ -1559,6 +1581,12 @@ final class PurchaseInvoiceRepository
         } elseif ($newStatus === 'paid') {
             $sets[] = 'paid_at = ?';
             $params[] = $paidDate ?? date('Y-m-d');
+            // FORK 0920 (H1): způsob úhrady — jen pokud byl při označení zvolen.
+            if ($paymentMethod !== null
+                && in_array($paymentMethod, ['bank_transfer', 'card', 'cash', 'other'], true)) {
+                $sets[] = 'payment_method = ?';
+                $params[] = $paymentMethod;
+            }
         } elseif ($newStatus === 'cancelled') {
             $sets[] = 'cancelled_at = NOW()';
         } elseif ($newStatus === 'received') {
@@ -2558,7 +2586,8 @@ final class PurchaseInvoiceRepository
     {
         foreach (['id', 'supplier_id', 'vendor_id', 'currency_id', 'payment_currency_id',
                   'created_by', 'pdf_size_bytes', 'source_size_bytes', 'expense_category_id',
-                  'advance_purchase_invoice_id', 'advance_link_suggested_id'] as $f) {
+                  'advance_purchase_invoice_id', 'advance_link_suggested_id',
+                  'settled_by_purchase_invoice_id', 'relation_consumer_id'] as $f) {
             if (isset($row[$f]) && $row[$f] !== null) $row[$f] = (int) $row[$f];
         }
         $row['reverse_charge'] = isset($row['reverse_charge']) ? (bool) $row['reverse_charge'] : false;

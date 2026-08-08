@@ -112,12 +112,17 @@ final class TransitionPurchaseInvoiceStatusAction
         }
 
         $paidDate = null;
+        $paymentMethod = null;
         if ($target === 'paid') {
             $paidDate = !empty($body['paid_date']) ? (string) $body['paid_date'] : date('Y-m-d');
             $d = \DateTimeImmutable::createFromFormat('Y-m-d', $paidDate);
             if ($d === false || $d->format('Y-m-d') !== $paidDate) {
                 return Json::error($response, 'validation_failed', 'Neplatné paid_date', 400);
             }
+            // FORK 0920 (H1): způsob úhrady — evidence pro pokladnu (PPD/VPD) a limit
+            // plateb v hotovosti. Neznámá hodnota se tiše zahodí (NULL = neurčeno).
+            $pm = (string) ($body['payment_method'] ?? '');
+            $paymentMethod = in_array($pm, ['bank_transfer', 'card', 'cash', 'other'], true) ? $pm : null;
         }
 
         // Při přechodu draft→received vygenerujeme varsymbol pokud chybí
@@ -136,7 +141,7 @@ final class TransitionPurchaseInvoiceStatusAction
             }
         }
 
-        $this->repo->setStatus($id, $target, $supplierId, $paidDate);
+        $this->repo->setStatus($id, $target, $supplierId, $paidDate, $paymentMethod);
 
         // Při přechodu z draftu (typicky po manuální kontrole AI-importované faktury)
         // automaticky vyčistit extraction_warning — uživatel data ověřil tím, že
