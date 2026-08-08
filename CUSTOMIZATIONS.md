@@ -1544,3 +1544,53 @@ zákaz hromadného odbavení, ComplianceFlag nemazatelný.
 případů (TUkas 500 600, Direct auto 475 992) + samostatné doklady; přepínač
 Chronologicky vrací původní seznam; detail DZ2606002 má stepper s 5 kroky;
 phpunit vč. SettlementGroupServiceTest zelený.
+
+## 2026-08-08 (večer) — B2: zakázky napříč nákupem a prodejem + Dokumenty 8/9
+
+Migrace **0923** (projects_cross_side). Prerekvizita obrazovky /compliance
+(Dokument 7: „řešit jako první") a podklad pro pohled „Podle zakázek".
+
+**Datový model (0923):** projects.supplier_id (vlastní tenant scope, backfill
+z clients — dosud se odvozoval INNER JOINem přes klienta a zakázka bez klienta
+by zmizela ze všech kontrol), client_id → NULLABLE, car_id (vozidlo případu =
+nositel VIN, R7/A6), tabulka project_participants (customer/vendor, backfill
+stávajících klientů), purchase_invoices.project_id, cash_documents.project_id.
+
+**Backend:** ProjectRepository find/listAll na LEFT JOIN + COALESCE(p.supplier_id,
+c.supplier_id); create bez klienta (supplier_id z akce), car_id validace tenanta;
+participantsFor = evidence + živá derivace z přiřazených dokladů (INSERT IGNORE);
+caseSummary (D5): náklad = přijaté mimo koš/draft/cancelled a VŽDY mimo zálohy
+(shoda s 0906), výnos = vydané issued/sent/reminded/paid typů
+invoice/credit_note/tax_document, marže bez DPH i s DPH + procento.
+Tvrdé vazby client↔projekt povolily NULL: InvoiceDefaults, SaveWorkReportAction.
+Tenant scope dotazy převedeny: ActivityLogger, DocumentLinkRepository (2×),
+LinkSearchAction, ProjectStatsAction (3×). GetProjectAction vrací
+purchase_invoices_count + case_summary; Get(Purchase)InvoiceAction přikládá
+case_summary dokladům se zakázkou. Purchase create/update persistují project_id
+(validace tenanta), find() vrací project_name, list filtr filter[project_id].
+DeleteProjectAction blokace rozšířena i na přijaté doklady přes canDelete na FE.
+
+**Frontend:** ProjectForm — klient nepovinný (bez redirectu na /clients), select
+vozidla (logbookApi.listCars); ProjectList — tlačítko „+ Nová zakázka" místo
+info banneru; ProjectDetail — blok Obchodní případ (nákup/prodej/marže s DPH
+i bez, vozidlo s VIN, protistrany jako chipy) + tabulka přijatých dokladů
+zakázky + null-safe klient akce; purchase editor — select Zakázka; oba detaily
+dokladů — D5 box Obchodní případ + proklik na zakázku.
+
+**Dokument 9 (časová platnost) — korekce v LegalConstants:** K1/K2 limit
+hotovosti: 270 000 Kč OD 1. 12. 2014 (novela 261/2014 Sb.; dřívější datum
+1. 7. 2017 byla novela přestupků!), 27. 5. 2011–30. 11. 2014 = 350 000 Kč,
+starší = null (E9, validace se neprovede); K3 pokuty § 5/3 (FO 500 000 /
+PO 5 000 000) jako konstanty pro hlášky; sazby před 2022 = null (E10);
+vatDeductionDeadline: DVĚ GENERACE — od 2025 konec roku+2, 2017–2024 = 3 roky
+od 1. dne měsíce po období vzniku (jiný algoritmus, $quarterlyPayer),
+před 7/2017 null (E8 „posoudit ručně"); resolvePeriod vrací null místo výjimky.
+Dokument 8 (zásoba odpočtů, plánovač období) = zaznamenaný samostatný modul,
+postaví se nad received_at.
+
+**Test:** tests/Integration/Project/ProjectCrossSideTest.php (zakázka bez
+klienta, náklad bez záloh, marže, participants, cizí zakázka odmítnuta).
+
+**Jak ověřit po merge upstreamu:** /projects má tlačítko Nová zakázka a formulář
+bez klienta neredirectuje; detail zakázky s doklady obou stran ukazuje marži;
+přijatý doklad má select Zakázka; phpunit vč. ProjectCrossSideTest zelený.
